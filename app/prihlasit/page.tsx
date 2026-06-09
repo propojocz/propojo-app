@@ -60,7 +60,7 @@ function LoginForm() {
  
         <div className="relative z-10">
           <h2 className="mb-4 text-4xl font-extrabold leading-tight tracking-tight">
-            Vítejte zpět.
+            Vítejte.
           </h2>
           <p className="max-w-sm leading-relaxed text-white/80">
             Přihlaste se a pokračujte ve správě svých rezervací nebo služeb.
