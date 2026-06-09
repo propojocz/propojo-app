@@ -1,12 +1,12 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Eye, EyeOff, Loader2, AlertCircle } from 'lucide-react'
+import { Eye, EyeOff, Loader2, AlertCircle, Check } from 'lucide-react'
 import { login } from '@/lib/actions/auth'
 
 const schema = z.object({
@@ -22,115 +22,174 @@ export default function PrihlasitPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [serverError, setServerError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [stats, setStats] = useState<{ services: number; providers: number } | null>(null)
 
-  useEffect(() => {
-    fetch('/api/stats').then(r => r.json()).then(setStats).catch(() => {})
-  }, [])
-
-  const { register: f, handleSubmit, formState: { errors } } = useForm<LoginValues>({
-    resolver: zodResolver(schema),
-  })
+  const {
+    register: f,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<LoginValues>({ resolver: zodResolver(schema) })
 
   const onSubmit = async (data: LoginValues) => {
-    setIsLoading(true); setServerError('')
+    setIsLoading(true)
+    setServerError('')
     const result = await login(data)
-    if (result.success) { router.push(next); router.refresh() }
-    else { setServerError(result.error); setIsLoading(false) }
+    if (result.success) {
+      router.push(next)
+      router.refresh()
+    } else {
+      setServerError(result.error)
+      setIsLoading(false)
+    }
   }
 
   return (
     <div className="flex min-h-screen">
-      <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden bg-gradient-to-br from-indigo-950 via-indigo-900 to-slate-900">
-        <div className="absolute inset-0">
-          <div className="absolute top-20 left-20 h-64 w-64 rounded-full bg-indigo-500/20 blur-3xl" />
-          <div className="absolute bottom-20 right-20 h-80 w-80 rounded-full bg-violet-500/20 blur-3xl" />
+      {/* LEVÁ STRANA – branding */}
+      <div className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-gradient-to-br from-slate-900 to-[#243044] p-12 text-white lg:flex">
+        <div className="pointer-events-none absolute -right-[15%] -top-[20%] h-96 w-96 rounded-full bg-emerald-500/25 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-[10%] -left-[10%] h-80 w-80 rounded-full bg-blue-500/20 blur-3xl" />
+
+        <Link href="/" className="relative z-10 flex items-center gap-2.5">
+          <span className="flex gap-1.5">
+           <span className="h-3 w-3 rounded-full bg-emerald-500" />
+            <span className="h-3 w-3 rounded-full bg-blue-500" />
+            <span className="h-3 w-3 rounded-full bg-amber-500" />
+          </span>
+          <span className="text-xl font-extrabold">propojo.cz</span>
+        </Link>
+
+        <div className="relative z-10">
+          <h2 className="mb-4 text-4xl font-extrabold leading-tight tracking-tight">
+            Vítejte zpět.
+          </h2>
+          <p className="max-w-sm leading-relaxed text-white/80">
+            Přihlaste se a pokračujte ve správě svých rezervací nebo služeb.
+          </p>
         </div>
-        <div className="relative z-10 flex flex-col justify-between p-12 text-white">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-indigo-700 font-black text-lg">P</div>
-            <span className="text-xl font-black tracking-tight">Propojo</span>
-          </Link>
-          <div>
-            <h2 className="mb-4 text-4xl font-black leading-tight">Vítejte zpět<br /><span className="text-indigo-300">na Propojo</span></h2>
-            <p className="text-indigo-200 leading-relaxed">Tisíce zákazníků hledá právě teď kvalitní živnostníky.</p>
-            <div className="mt-8 grid grid-cols-2 gap-4">
-              {stats ? (
-                <>
-                  <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                    <div className="text-2xl font-black text-indigo-300">{stats.providers}</div>
-                    <div className="text-xs text-indigo-200">Živnostníků</div>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                    <div className="text-2xl font-black text-indigo-300">{stats.services}</div>
-                    <div className="text-xs text-indigo-200">Aktivních nabídek</div>
-                  </div>
-                </>
-              ) : (
-                [0,1].map(i => (
-                  <div key={i} className="rounded-xl border border-white/10 bg-white/5 p-4 animate-pulse">
-                    <div className="h-7 w-12 bg-white/10 rounded mb-1" />
-                    <div className="h-3 w-20 bg-white/10 rounded" />
-                  </div>
-                ))
-              )}
-              <div className="rounded-xl border border-white/10 bg-white/5 p-4 col-span-2">
-                <div className="text-2xl font-black text-indigo-300">100%</div>
-                <div className="text-xs text-indigo-200">Bez skrytých poplatků</div>
-              </div>
-            </div>
-          </div>
-          <p className="text-xs text-indigo-300">© {new Date().getFullYear()} Propojo</p>
-        </div>
+
+        <ul className="relative z-10 space-y-4">
+          {[
+            'Ověření poskytovatelé přes ARES',
+            'Rezervační záloha = jistota',
+            'Bez provizí pro poskytovatele',
+          ].map((t) => (
+            <li key={t} className="flex items-center gap-3 text-[15px]">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500/20">
+                <Check className="h-3.5 w-3.5 text-emerald-400" strokeWidth={3} />
+              </span>
+              {t}
+            </li>
+          ))}
+        </ul>
       </div>
 
-      <div className="flex flex-1 flex-col justify-center px-6 py-12 lg:px-16">
-        <div className="mx-auto w-full max-w-md">
-          <Link href="/" className="mb-8 flex items-center gap-2 lg:hidden">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-600 text-white font-black text-sm">P</div>
-            <span className="text-lg font-black text-slate-900">Propojo</span>
+      {/* PRAVÁ STRANA – formulář */}
+      <div className="flex flex-1 items-center justify-center px-6 py-12 lg:px-12">
+        <div className="w-full max-w-sm">
+          <Link href="/" className="mb-8 flex items-center gap-2.5 lg:hidden">
+            <span className="flex gap-1.5">
+              <span className="h-3 w-3 rounded-full bg-emerald-500" />
+              <span className="h-3 w-3 rounded-full bg-slate-900" />
+              <span className="h-3 w-3 rounded-full bg-blue-500" />
+            </span>
+            <span className="text-xl font-extrabold text-slate-900">propojo.cz</span>
           </Link>
-          <div className="mb-8">
-            <h1 className="text-3xl font-black text-slate-900">Přihlásit se</h1>
-            <p className="mt-1.5 text-slate-500">Nemáte účet?{' '}
-              <Link href="/registrace" className="font-semibold text-indigo-600 hover:underline">Zaregistrujte se</Link>
-            </p>
-          </div>
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-            <div className="space-y-1.5">
-              <label className="form-label">Email</label>
-              <input {...f('email')} type="email" placeholder="vas@email.cz" autoComplete="email" className={`form-input ${errors.email ? 'form-input-error' : ''}`} />
-              {errors.email && <p className="form-error">{errors.email.message}</p>}
+
+          <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Přihlášení</h1>
+          <p className="mb-8 mt-1.5 text-slate-500">Zadejte své údaje pro vstup do účtu.</p>
+
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            <div>
+              <label className="mb-1.5 block text-sm font-bold text-slate-800">E-mail</label>
+              <input
+                {...f('email')}
+                type="email"
+                placeholder="vas@email.cz"
+                autoComplete="email"
+                className={`w-full rounded-xl border-[1.5px] px-4 py-3 text-[15px] outline-none transition focus:border-emerald-500 ${
+                  errors.email ? 'border-red-400' : 'border-slate-200'
+                }`}
+              />
+              {errors.email && <p className="mt-1.5 text-sm text-red-600">{errors.email.message}</p>}
             </div>
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="form-label">Heslo</label>
-                <Link href="/zapomenute-heslo" className="text-xs text-indigo-600 hover:underline">Zapomenuté heslo?</Link>
+
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="text-sm font-bold text-slate-800">Heslo</label>
+                <Link
+                  href="/zapomenute-heslo"
+                  className="text-sm font-bold text-emerald-600 hover:underline"
+                >
+                  Zapomněli jste heslo?
+                </Link>
               </div>
               <div className="relative">
-                <input {...f('password')} type={showPassword ? 'text' : 'password'} placeholder="••••••••" autoComplete="current-password" className={`form-input pr-10 ${errors.password ? 'form-input-error' : ''}`} />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <input
+                  {...f('password')}
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  className={`w-full rounded-xl border-[1.5px] px-4 py-3 pr-10 text-[15px] outline-none transition focus:border-emerald-500 ${
+                    errors.password ? 'border-red-400' : 'border-slate-200'
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
-              {errors.password && <p className="form-error">{errors.password.message}</p>}
+              {errors.password && (
+                <p className="mt-1.5 text-sm text-red-600">{errors.password.message}</p>
+              )}
             </div>
+
             <AnimatePresence>
               {serverError && (
-                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="flex items-center gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  <AlertCircle className="h-4 w-4 shrink-0" />{serverError}
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="flex items-center gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                >
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  {serverError}
                 </motion.div>
               )}
             </AnimatePresence>
-            <button type="submit" disabled={isLoading} className="btn-primary w-full">
-              {isLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Přihlašuji…</> : 'Přihlásit se'}
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3.5 font-extrabold text-white transition hover:bg-emerald-600 disabled:opacity-70"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Přihlašuji…
+                </>
+              ) : (
+                'Přihlásit se'
+              )}
             </button>
           </form>
-          <div className="mt-8 text-center">
-            <p className="text-sm text-slate-500">Jste živnostník?{' '}
-              <Link href="/registrace/zivnostnik" className="font-semibold text-indigo-600 hover:underline">Registrace pro živnostníky →</Link>
-            </p>
-          </div>
+
+          <p className="mt-6 text-center text-sm text-slate-600">
+            Nemáte účet?{' '}
+            <Link href="/registrace" className="font-bold text-emerald-600 hover:underline">
+              Zaregistrujte se
+            </Link>
+          </p>
+          <p className="mt-2 text-center text-sm text-slate-500">
+            Jste živnostník?{' '}
+            <Link
+              href="/registrace/zivnostnik"
+              className="font-bold text-emerald-600 hover:underline"
+            >
+              Registrace pro živnostníky →
+            </Link>
+          </p>
         </div>
       </div>
     </div>

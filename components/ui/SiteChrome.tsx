@@ -13,13 +13,18 @@ export default function SiteChrome({
   children: ReactNode
 }) {
   const pathname = usePathname()
-  const isLanding = pathname === '/'
+
+  // Stránky s vlastním celostránkovým designem – bez appkové hlavičky a patičky.
+  // Až budeme předělávat registraci/onboarding podle mockupů, přidáme je sem.
+  const hideChrome =
+    pathname === '/' ||
+    pathname.startsWith('/prihlasit')
 
   return (
     <>
-      {!isLanding && navbar}
+      {!hideChrome && navbar}
       <div className="flex-1">{children}</div>
-      {!isLanding && footer}
+      {!hideChrome && footer}
     </>
   )
 }
