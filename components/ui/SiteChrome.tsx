@@ -15,10 +15,10 @@ export default function SiteChrome({
   const pathname = usePathname()
 
   // Stránky s vlastním celostránkovým designem – bez appkové hlavičky a patičky.
-  // Až budeme předělávat registraci/onboarding podle mockupů, přidáme je sem.
   const hideChrome =
     pathname === '/' ||
-    pathname.startsWith('/prihlasit')
+    pathname.startsWith('/prihlasit') ||
+    pathname.startsWith('/registrace')
 
   return (
     <>
