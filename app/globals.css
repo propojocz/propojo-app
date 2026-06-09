@@ -1,0 +1,52 @@
+/* app/globals.css */
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;0,9..144,900;1,9..144,400&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'DM Sans', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 {
+    font-family: 'Fraunces', Georgia, serif;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-200 hover:bg-slate-50 focus-visible:outline-none active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-hero-primary {
+    @apply inline-flex items-center justify-center gap-2.5 rounded-2xl bg-white px-7 py-3.5 text-base font-bold text-indigo-900 shadow-xl transition-all duration-200 hover:bg-indigo-50 active:scale-[0.98];
+  }
+  .btn-hero-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl border border-white/30 bg-white/10 px-7 py-3.5 text-base font-semibold text-white backdrop-blur-sm transition-all duration-200 hover:bg-white/20 active:scale-[0.98];
+  }
+  .form-label {
+    @apply block text-sm font-semibold text-slate-700;
+  }
+  .form-input {
+    @apply block w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 transition-all duration-150 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100;
+  }
+  .form-input-error {
+    @apply border-red-300 focus:border-red-400 focus:ring-red-100;
+  }
+  .form-error {
+    @apply mt-1 text-xs text-red-600;
+  }
+  .category-pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold text-slate-600 transition-all duration-150 hover:bg-slate-100;
+  }
+  .category-pill-active {
+    @apply bg-indigo-100 text-indigo-700 hover:bg-indigo-100;
+  }
+}
