@@ -1,30 +1,33 @@
 'use client'
 // components/ui/ServiceCard.tsx
-
+ 
 import { motion } from 'framer-motion'
 import { MapPin, Star, ShieldCheck } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
 import type { ServiceWithProvider } from '@/types/database'
 import { CATEGORY_META } from '@/types/database'
-
+ 
 interface ServiceCardProps {
   service: ServiceWithProvider
   index?: number
 }
-
+ 
+// Bezpečný fallback – nové kategorie z DB nemusí být ve staré CATEGORY_META
+const DEFAULT_META = { label: 'Služba', emoji: '🔧' }
+ 
 export default function ServiceCard({ service, index = 0 }: ServiceCardProps) {
-  const meta = CATEGORY_META[service.category]
+  const meta = (CATEGORY_META as Record<string, { label: string; emoji: string }>)[service.category] ?? DEFAULT_META
   const rating = service.profiles?.rating ?? 0
   const hasRating = rating > 0
   const initial = service.profiles?.full_name?.charAt(0)?.toUpperCase() ?? 'P'
-
+ 
   return (
     <motion.article
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, delay: index * 0.05, ease: [0.22, 1, 0.36, 1] }}
-      className="group relative flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md sm:flex-row"
+      className="group flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md sm:flex-row"
     >
       {/* Avatar */}
       <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-emerald-50 to-blue-50">
@@ -42,14 +45,16 @@ export default function ServiceCard({ service, index = 0 }: ServiceCardProps) {
           </div>
         )}
       </div>
-
+ 
       {/* Tělo */}
       <div className="min-w-0 flex-1">
         <h3 className="text-lg font-extrabold leading-snug text-slate-900 transition-colors group-hover:text-emerald-700">
-          {service.title}
+          <Link href={`/sluzby/${service.id}`} className="focus:outline-none">
+            {service.title}
+          </Link>
         </h3>
         <p className="mt-0.5 text-sm font-medium text-slate-500">{service.profiles?.full_name}</p>
-
+ 
         {/* Hodnocení */}
         {hasRating && (
           <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -67,7 +72,7 @@ export default function ServiceCard({ service, index = 0 }: ServiceCardProps) {
             <span className="text-sm text-slate-400">({service.profiles?.review_count ?? 0})</span>
           </div>
         )}
-
+ 
         {/* Tagy */}
         <div className="mt-2.5 flex flex-wrap gap-2">
           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
@@ -77,41 +82,34 @@ export default function ServiceCard({ service, index = 0 }: ServiceCardProps) {
             {meta.emoji} {meta.label}
           </span>
         </div>
-
+ 
         {/* Město */}
         <div className="mt-2.5 flex items-center gap-1.5 text-sm text-slate-500">
           <MapPin className="h-4 w-4 text-slate-400" />
           {service.city}
         </div>
-
+ 
         {/* Popis */}
         <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-slate-600">
           {service.description}
         </p>
       </div>
-
+ 
       {/* Pravá strana – cena + tlačítko */}
       <div className="flex shrink-0 flex-row items-end justify-between gap-3 sm:w-44 sm:flex-col sm:items-end sm:text-right">
         <div>
           <div className="text-xl font-extrabold text-slate-900">
-            {service.price.toLocaleString('cs-CZ')} Kč
+            {service.price > 0 ? `${service.price.toLocaleString('cs-CZ')} Kč` : 'Cena dohodou'}
           </div>
-          <div className="text-xs text-slate-400">za {service.price_unit}</div>
+          {service.price > 0 && <div className="text-xs text-slate-400">za {service.price_unit}</div>}
         </div>
         <Link
           href={`/sluzby/${service.id}`}
-          className="relative z-10 whitespace-nowrap rounded-xl bg-emerald-500 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-600"
+          className="whitespace-nowrap rounded-xl bg-emerald-500 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-600"
         >
           Zobrazit
         </Link>
       </div>
-
-      {/* Odkaz přes celou kartu */}
-      <Link
-        href={`/sluzby/${service.id}`}
-        className="absolute inset-0 rounded-2xl ring-2 ring-transparent transition-all group-hover:ring-emerald-200 focus-visible:outline-none focus-visible:ring-emerald-500"
-        aria-label={`Zobrazit: ${service.title}`}
-      />
     </motion.article>
   )
 }
