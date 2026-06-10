@@ -2,7 +2,7 @@
 // components/ui/ServiceCard.tsx
 
 import { motion } from 'framer-motion'
-import { MapPin, Star, Clock } from 'lucide-react'
+import { MapPin, Star, ShieldCheck } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
 import type { ServiceWithProvider } from '@/types/database'
@@ -15,98 +15,101 @@ interface ServiceCardProps {
 
 export default function ServiceCard({ service, index = 0 }: ServiceCardProps) {
   const meta = CATEGORY_META[service.category]
-
-  const formattedDate = new Intl.RelativeTimeFormat('cs', { numeric: 'auto' }).format(
-    Math.round(
-      (new Date(service.created_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-    ),
-    'day'
-  )
+  const rating = service.profiles?.rating ?? 0
+  const hasRating = rating > 0
+  const initial = service.profiles?.full_name?.charAt(0)?.toUpperCase() ?? 'P'
 
   return (
     <motion.article
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, delay: index * 0.06, ease: [0.22, 1, 0.36, 1] }}
-      className="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-slate-200"
+      transition={{ duration: 0.35, delay: index * 0.05, ease: [0.22, 1, 0.36, 1] }}
+      className="group relative flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md sm:flex-row"
     >
-      {/* Obrázek */}
-      <div className="relative h-44 w-full overflow-hidden bg-slate-100">
-        {service.image_url ? (
+      {/* Avatar */}
+      <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-emerald-50 to-blue-50">
+        {service.profiles?.avatar_url ? (
           <Image
-            src={service.image_url}
-            alt={service.title}
+            src={service.profiles.avatar_url}
+            alt={service.profiles.full_name}
             fill
-            className="object-cover transition-transform duration-500 group-hover:scale-105"
-            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+            className="object-cover"
+            sizes="80px"
           />
         ) : (
-          <div className="flex h-full items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200">
-            <span className="text-5xl">{meta.emoji}</span>
+          <div className="flex h-full w-full items-center justify-center text-2xl font-extrabold text-emerald-600">
+            {initial}
           </div>
         )}
-        {/* Badge kategorie */}
-        <div className="absolute left-3 top-3">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-2.5 py-1 text-xs font-semibold text-slate-700 backdrop-blur-sm">
-            {meta.label}
-          </span>
-        </div>
       </div>
 
-      {/* Obsah */}
-      <div className="flex flex-1 flex-col p-4">
-        {/* Poskytovatel */}
-        <div className="mb-3 flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">
-            {service.profiles.full_name.charAt(0).toUpperCase()}
-          </div>
-          <div className="min-w-0">
-            <p className="truncate text-xs font-medium text-slate-700">
-              {service.profiles.full_name}
-            </p>
-            {service.profiles.rating !== null && service.profiles.rating > 0 && (
-              <div className="flex items-center gap-0.5">
-                <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
-                <span className="text-xs text-slate-500">
-                  {service.profiles.rating.toFixed(1)}
-                  <span className="ml-0.5 text-slate-400">
-                    ({service.profiles.review_count})
-                  </span>
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Název */}
-        <h3 className="mb-1.5 line-clamp-2 text-sm font-bold leading-snug text-slate-900 group-hover:text-indigo-700 transition-colors">
+      {/* Tělo */}
+      <div className="min-w-0 flex-1">
+        <h3 className="text-lg font-extrabold leading-snug text-slate-900 transition-colors group-hover:text-emerald-700">
           {service.title}
         </h3>
+        <p className="mt-0.5 text-sm font-medium text-slate-500">{service.profiles?.full_name}</p>
+
+        {/* Hodnocení */}
+        {hasRating && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className="text-sm font-bold text-emerald-700">{rating.toFixed(1)}</span>
+            <span className="flex items-center gap-0.5">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <Star
+                  key={i}
+                  className={`h-3.5 w-3.5 ${
+                    i < Math.round(rating) ? 'fill-emerald-500 text-emerald-500' : 'text-slate-200'
+                  }`}
+                />
+              ))}
+            </span>
+            <span className="text-sm text-slate-400">({service.profiles?.review_count ?? 0})</span>
+          </div>
+        )}
+
+        {/* Tagy */}
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+            <ShieldCheck className="h-3.5 w-3.5" /> Ověřeno ARES
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-600">
+            {meta.emoji} {meta.label}
+          </span>
+        </div>
+
+        {/* Město */}
+        <div className="mt-2.5 flex items-center gap-1.5 text-sm text-slate-500">
+          <MapPin className="h-4 w-4 text-slate-400" />
+          {service.city}
+        </div>
 
         {/* Popis */}
-        <p className="mb-4 line-clamp-2 flex-1 text-xs leading-relaxed text-slate-500">
+        <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-slate-600">
           {service.description}
         </p>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-          <div className="flex items-center gap-1 text-xs text-slate-500">
-            <MapPin className="h-3.5 w-3.5 text-slate-400" />
-            {service.city}
-          </div>
-          <div className="text-right">
-            <span className="text-lg font-black text-slate-900">
-              {service.price.toLocaleString('cs-CZ')} Kč
-            </span>
-            <span className="ml-1 text-xs text-slate-500">/{service.price_unit}</span>
-          </div>
-        </div>
       </div>
 
-      {/* Hover overlay CTA */}
+      {/* Pravá strana – cena + tlačítko */}
+      <div className="flex shrink-0 flex-row items-end justify-between gap-3 sm:w-44 sm:flex-col sm:items-end sm:text-right">
+        <div>
+          <div className="text-xl font-extrabold text-slate-900">
+            {service.price.toLocaleString('cs-CZ')} Kč
+          </div>
+          <div className="text-xs text-slate-400">za {service.price_unit}</div>
+        </div>
+        <Link
+          href={`/sluzby/${service.id}`}
+          className="relative z-10 whitespace-nowrap rounded-xl bg-emerald-500 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-600"
+        >
+          Zobrazit
+        </Link>
+      </div>
+
+      {/* Odkaz přes celou kartu */}
       <Link
         href={`/sluzby/${service.id}`}
-        className="absolute inset-0 rounded-2xl ring-2 ring-transparent transition-all group-hover:ring-indigo-300 focus-visible:outline-none focus-visible:ring-indigo-500"
+        className="absolute inset-0 rounded-2xl ring-2 ring-transparent transition-all group-hover:ring-emerald-200 focus-visible:outline-none focus-visible:ring-emerald-500"
         aria-label={`Zobrazit: ${service.title}`}
       />
     </motion.article>
