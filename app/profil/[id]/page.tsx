@@ -63,7 +63,7 @@ export default async function ProfilPage({ params }: Props) {
 
         <div className="mb-6 flex items-center justify-between">
           <Link href="/marketplace" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
-            <ArrowLeft className="h-4 w-4" /> Zpět na tržiště
+            <ArrowLeft className="h-4 w-4" /> Zpět na Marketplace
           </Link>
           {/* Sdílení profilu */}
           {profile.is_provider && (

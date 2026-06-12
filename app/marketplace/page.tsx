@@ -19,13 +19,14 @@ interface Props {
     priceMin?: string
     priceMax?: string
     minRating?: string
+    subcats?: string
   }
 }
  
 export async function generateMetadata({ searchParams }: Props): Promise<Metadata> {
   const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://propojo.cz'
   const { city, q } = searchParams
-  let title = 'Tržiště živnostníků'
+  let title = 'Marketplace živnostníků'
   if (city) title = `Živnostníci v ${city} – Propojo`
   if (q) title = `"${q}" – Propojo`
   return {
@@ -45,14 +46,22 @@ async function getCategories() {
   return data ?? []
 }
  
+// Podkategorie aktivní kategorie – pro levý filtr
+async function getSubcategories(categorySlug?: string) {
+  if (!categorySlug) return []
+  const supabase = createClient()
+  const { data: cat } = await supabase.from('categories').select('id').eq('slug', categorySlug).single()
+  if (!cat) return []
+  const { data } = await supabase
+    .from('subcategories')
+    .select('id, name')
+    .eq('category_id', (cat as any).id)
+    .order('name')
+  return (data as { id: string; name: string }[]) ?? []
+}
+ 
 async function ServiceList({
-  category,
-  city,
-  q,
-  sort,
-  priceMin,
-  priceMax,
-  minRating,
+  category, city, q, sort, priceMin, priceMax, minRating, subcats,
 }: {
   category?: string
   city?: string
@@ -61,20 +70,39 @@ async function ServiceList({
   priceMin?: string
   priceMax?: string
   minRating?: string
+  subcats?: string
 }) {
   const supabase = createClient()
+ 
+  // Vybrané podkategorie z URL
+  const subIds = (subcats ?? '').split(',').filter(Boolean)
+ 
+  // Pokud jsou vybrané podkategorie, zjisti ID služeb, které je mají (přes propojovací tabulku)
+  let serviceIdsBySubcat: string[] | null = null
+  if (subIds.length > 0) {
+    const { data: links } = await supabase
+      .from('service_subcategories')
+      .select('service_id')
+      .in('subcategory_id', subIds)
+    serviceIdsBySubcat = Array.from(new Set((links ?? []).map((l: any) => l.service_id)))
+    // žádná služba nevyhovuje → vrátíme prázdno rovnou
+    if (serviceIdsBySubcat.length === 0) serviceIdsBySubcat = ['00000000-0000-0000-0000-000000000000']
+  }
  
   let query = supabase
     .from('services')
     .select(`*, profiles (id, full_name, avatar_url, rating, review_count, city)`)
     .eq('is_active', true)
  
-  if (category) {
+  // Filtr podle vybraných podkategorií (má přednost před filtrem kategorie)
+  if (serviceIdsBySubcat) {
+    query = query.in('id', serviceIdsBySubcat)
+  } else if (category) {
     const { data: cat } = await supabase.from('categories').select('id').eq('slug', category).single()
     if (cat) {
-      const { data: subs } = await supabase.from('subcategories').select('id').eq('category_id', cat.id)
+      const { data: subs } = await supabase.from('subcategories').select('id').eq('category_id', (cat as any).id)
       if (subs && subs.length > 0) {
-        query = query.in('subcategory_id', subs.map((s) => s.id))
+        query = query.in('subcategory_id', subs.map((s: any) => s.id))
       } else {
         query = query.eq('category', category)
       }
@@ -134,8 +162,9 @@ async function ServiceList({
 }
  
 export default async function MarketplacePage({ searchParams }: Props) {
-  const { category, city, q, sort, priceMin, priceMax, minRating } = searchParams
+  const { category, city, q, sort, priceMin, priceMax, minRating, subcats } = searchParams
   const categories = await getCategories()
+  const subcategories = await getSubcategories(category)
  
   return (
     <main className="min-h-screen bg-slate-50">
@@ -143,7 +172,7 @@ export default async function MarketplacePage({ searchParams }: Props) {
         <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-emerald-600">Živnostenské tržiště</p>
+              <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-emerald-600">Živnostenské Marketplace</p>
               <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">Najdi zkušeného řemeslníka</h1>
               <p className="mt-1.5 text-slate-500">Ověření živnostníci ve tvém okolí. Žádné přirážky, přímý kontakt.</p>
             </div>
@@ -165,17 +194,19 @@ export default async function MarketplacePage({ searchParams }: Props) {
           <aside className="lg:w-64 lg:shrink-0">
             <FilterSidebar
               categories={categories}
+              subcategories={subcategories}
               activeCategory={category}
               currentPriceMin={priceMin}
               currentPriceMax={priceMax}
               currentMinRating={minRating}
+              currentSubcats={subcats}
             />
           </aside>
  
           {/* Výsledky */}
           <div className="min-w-0 flex-1">
             <Suspense
-              key={`${category}-${city}-${q}-${sort}-${priceMin}-${priceMax}-${minRating}`}
+              key={`${category}-${city}-${q}-${sort}-${priceMin}-${priceMax}-${minRating}-${subcats}`}
               fallback={<ServiceListSkeleton />}
             >
               <ServiceList
@@ -186,6 +217,7 @@ export default async function MarketplacePage({ searchParams }: Props) {
                 priceMin={priceMin}
                 priceMax={priceMax}
                 minRating={minRating}
+                subcats={subcats}
               />
             </Suspense>
           </div>

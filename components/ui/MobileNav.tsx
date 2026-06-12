@@ -36,7 +36,7 @@ export default function MobileNav({ user, profileName, isProvider }: MobileNavPr
 
   const NAV_LINKS = [
     { href: '/', label: 'Domů', icon: Home },
-    { href: '/marketplace', label: 'Tržiště', icon: ShoppingBag },
+    { href: '/marketplace', label: 'Marketplace', icon: ShoppingBag },
     { href: '/jak-to-funguje', label: 'Jak to funguje', icon: HelpCircle },
   ]
 

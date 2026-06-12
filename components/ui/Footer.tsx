@@ -13,7 +13,7 @@ export default function Footer() {
 
           <nav className="flex flex-wrap justify-center gap-x-6 gap-y-1">
             {[
-              { href: "/marketplace", label: "Tržiště" },
+              { href: "/marketplace", label: "Marketplace" },
               { href: "/jak-to-funguje", label: "Jak to funguje" },
               { href: '/pridat-sluzbu', label: 'Přidat službu' },
               { href: '/faq', label: 'FAQ' },

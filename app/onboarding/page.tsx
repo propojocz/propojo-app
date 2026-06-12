@@ -75,7 +75,7 @@ const STEPS = [
   },
   {
     title: 'Zveřejnit první nabídku',
-    subtitle: 'Přidat službu do tržiště',
+    subtitle: 'Přidat službu do Marketplace',
     time: '~2 min',
     content: {
       heading: 'Poslední krok:',
@@ -215,7 +215,7 @@ export default function OnboardingPage() {
             <h3 className="mb-2 text-xl font-black">Profil dokončen!</h3>
             <p className="mb-5 text-indigo-200 text-sm">Váš profil je aktivní a zákazníci vás mohou najít.</p>
             <Link href="/marketplace" className="btn-hero-primary inline-flex">
-              Přejít na tržiště
+              Přejít na Marketplace
             </Link>
           </div>
         )}

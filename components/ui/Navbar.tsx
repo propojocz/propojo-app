@@ -17,7 +17,7 @@ export default async function Navbar() {
       .from('profiles')
       .select('full_name, avatar_url, is_provider')
       .eq('id', user.id)
-      .single()
+      .single() as { data: any }
     profile = data
   }
  
@@ -33,7 +33,7 @@ export default async function Navbar() {
         {/* Desktop navigace */}
         <div className="hidden items-center gap-1 sm:flex">
           <Link href="/marketplace" className="rounded-lg px-3 py-2 text-sm font-medium text-[#7ab937] transition-colors hover:bg-[#7ab937]/10 hover:text-[#7ab937]">
-            Tržiště
+            Marketplace
           </Link>
           <Link href="/jak-to-funguje" className="rounded-lg px-3 py-2 text-sm font-medium text-[#7ab937] transition-colors hover:bg-[#7ab937]/10 hover:text-[#7ab937]">
             Jak to funguje
@@ -80,4 +80,3 @@ export default async function Navbar() {
     </header>
   )
 }
-

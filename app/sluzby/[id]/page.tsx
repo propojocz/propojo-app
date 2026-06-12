@@ -83,7 +83,7 @@ export default async function ServiceDetailPage({ params }: Props) {
 
       <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
         <Link href="/marketplace" className="mb-6 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
-          <ArrowLeft className="h-4 w-4" /> Zpět na tržiště
+          <ArrowLeft className="h-4 w-4" /> Zpět na Marketplace
         </Link>
 
         <div className="grid gap-8 lg:grid-cols-3">

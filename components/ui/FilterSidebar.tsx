@@ -1,10 +1,15 @@
 'use client'
 // components/ui/FilterSidebar.tsx
-
+ 
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { useTransition, useState, useEffect } from 'react'
-import { Star, X } from 'lucide-react'
-
+import { Star, X, Check } from 'lucide-react'
+ 
+interface Subcategory {
+  id: string
+  name: string
+}
+ 
 interface Category {
   id: string
   slug: string
@@ -12,39 +17,61 @@ interface Category {
   icon: string
   color: string
 }
-
+ 
 interface Props {
   categories: Category[]
+  subcategories?: Subcategory[]   // podkategorie aktivní kategorie (z page.tsx)
   activeCategory?: string
   currentPriceMin?: string
   currentPriceMax?: string
   currentMinRating?: string
+  currentSubcats?: string         // "id1,id2"
 }
-
+ 
 export default function FilterSidebar({
   categories,
+  subcategories = [],
   activeCategory,
   currentPriceMin,
   currentPriceMax,
   currentMinRating,
+  currentSubcats,
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [isPending, startTransition] = useTransition()
-
+ 
   const [min, setMin] = useState(currentPriceMin ?? '')
   const [max, setMax] = useState(currentPriceMax ?? '')
   useEffect(() => setMin(currentPriceMin ?? ''), [currentPriceMin])
   useEffect(() => setMax(currentPriceMax ?? ''), [currentPriceMax])
-
+ 
+  const selectedSubs = (currentSubcats ?? '').split(',').filter(Boolean)
+ 
   const setParam = (key: string, value?: string) => {
     const params = new URLSearchParams(searchParams.toString())
     if (value) params.set(key, value)
     else params.delete(key)
     startTransition(() => router.push(`${pathname}?${params.toString()}`, { scroll: false }))
   }
-
+ 
+  // Při změně kategorie vyčisti i vybrané podkategorie
+  const selectCategory = (slug?: string) => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (slug) params.set('category', slug)
+    else params.delete('category')
+    params.delete('subcats')
+    startTransition(() => router.push(`${pathname}?${params.toString()}`, { scroll: false }))
+  }
+ 
+  const toggleSub = (id: string) => {
+    const next = selectedSubs.includes(id)
+      ? selectedSubs.filter((x) => x !== id)
+      : [...selectedSubs, id]
+    setParam('subcats', next.length ? next.join(',') : undefined)
+  }
+ 
   const applyPrice = () => {
     const params = new URLSearchParams(searchParams.toString())
     if (min) params.set('priceMin', min)
@@ -53,22 +80,22 @@ export default function FilterSidebar({
     else params.delete('priceMax')
     startTransition(() => router.push(`${pathname}?${params.toString()}`, { scroll: false }))
   }
-
+ 
   const clearFilters = () => {
     const params = new URLSearchParams(searchParams.toString())
-    ;['category', 'priceMin', 'priceMax', 'minRating'].forEach((k) => params.delete(k))
+    ;['category', 'subcats', 'priceMin', 'priceMax', 'minRating'].forEach((k) => params.delete(k))
     startTransition(() => router.push(`${pathname}?${params.toString()}`, { scroll: false }))
   }
-
+ 
   const ratingOpts = [
     { value: '', label: 'Vše' },
     { value: '4', label: '4,0 a více' },
     { value: '4.5', label: '4,5 a více' },
   ]
-
+ 
   const hasFilters =
-    !!activeCategory || !!currentPriceMin || !!currentPriceMax || !!currentMinRating
-
+    !!activeCategory || !!currentSubcats || !!currentPriceMin || !!currentPriceMax || !!currentMinRating
+ 
   return (
     <div
       className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-opacity ${
@@ -86,13 +113,13 @@ export default function FilterSidebar({
           </button>
         )}
       </div>
-
+ 
       {/* Kategorie */}
       <div className="mb-6">
         <h3 className="mb-3 text-sm font-bold text-slate-800">Kategorie</h3>
         <div className="space-y-1">
           <button
-            onClick={() => setParam('category', undefined)}
+            onClick={() => selectCategory(undefined)}
             className={`block w-full rounded-lg px-3 py-2 text-left text-sm transition ${
               !activeCategory
                 ? 'bg-emerald-50 font-bold text-emerald-700'
@@ -104,22 +131,50 @@ export default function FilterSidebar({
           {categories.map((cat) => {
             const active = activeCategory === cat.slug
             return (
-              <button
-                key={cat.slug}
-                onClick={() => setParam('category', cat.slug)}
-                className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${
-                  active
-                    ? 'bg-emerald-50 font-bold text-emerald-700'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                <span>{cat.icon}</span> {cat.name}
-              </button>
+              <div key={cat.slug}>
+                <button
+                  onClick={() => selectCategory(cat.slug)}
+                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${
+                    active
+                      ? 'bg-emerald-50 font-bold text-emerald-700'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>{cat.icon}</span> {cat.name}
+                </button>
+ 
+                {/* Podkategorie – jen pod aktivní kategorií */}
+                {active && subcategories.length > 0 && (
+                  <div className="mt-1 space-y-0.5 border-l-2 border-emerald-100 pl-3">
+                    {subcategories.map((sub) => {
+                      const checked = selectedSubs.includes(sub.id)
+                      return (
+                        <button
+                          key={sub.id}
+                          onClick={() => toggleSub(sub.id)}
+                          className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition ${
+                            checked ? 'font-semibold text-emerald-700' : 'text-slate-500 hover:bg-slate-50'
+                          }`}
+                        >
+                          <span
+                            className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                              checked ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300'
+                            }`}
+                          >
+                            {checked && <Check className="h-3 w-3" />}
+                          </span>
+                          {sub.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
             )
           })}
         </div>
       </div>
-
+ 
       {/* Cena */}
       <div className="mb-6">
         <h3 className="mb-3 text-sm font-bold text-slate-800">Cena (Kč)</h3>
@@ -147,7 +202,7 @@ export default function FilterSidebar({
           />
         </div>
       </div>
-
+ 
       {/* Hodnocení */}
       <div>
         <h3 className="mb-3 text-sm font-bold text-slate-800">Hodnocení</h3>

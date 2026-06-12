@@ -11,7 +11,7 @@ export default function NotFound() {
         Stránka nenalezena
       </h1>
       <p className="mb-8 max-w-sm text-slate-500">
-        Tato stránka neexistuje nebo byla přesunuta. Zkuste prohledat tržiště.
+        Tato stránka neexistuje nebo byla přesunuta. Zkuste prohledat Marketplace.
       </p>
       <div className="flex gap-3">
         <Link
@@ -19,7 +19,7 @@ export default function NotFound() {
           className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
         >
           <Search className="h-4 w-4" />
-          Přejít na tržiště
+          Přejít na Marketplace
         </Link>
         <Link
           href="/"

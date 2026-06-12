@@ -1,6 +1,6 @@
 'use client'
 // components/forms/ServiceForm.tsx – kategorie z DB + Model A/B
- 
+
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -11,7 +11,7 @@ import { CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronRight, Info } f
 import { createService, updateService } from '@/lib/actions/services'
 import type { Service } from '@/types/database'
 import ImageUpload from '@/components/ui/ImageUpload'
- 
+
 const schema = z.object({
   title: z.string().min(5, 'Název musí mít alespoň 5 znaků').max(100),
   description: z.string().min(20, 'Popis musí mít alespoň 20 znaků').max(2000),
@@ -23,7 +23,7 @@ const schema = z.object({
   price_unit: z.enum(['hod','kus','den','projekt']),
   city: z.string().min(2, 'Zadejte město').max(100),
   image_url: z.string().optional(),
- 
+
   // Model A/B
   payment_model: z.enum(['A','B']),
   price_type: z.enum(['fixed','range','on_agreement']),
@@ -36,44 +36,44 @@ const schema = z.object({
   quote_days: z.number().int().min(0).max(365).nullable().optional(),
 })
 type FormValues = z.infer<typeof schema>
- 
+
 interface Category {
   id: string; slug: string; name: string; icon: string; color: string
   subcategories: { id: string; slug: string; name: string; service_types: { id: string; name: string }[] }[]
 }
- 
+
 interface Props {
   mode: 'create' | 'edit'
   initialData?: Service
   onSuccess?: (id: string) => void
 }
- 
+
 const PRICE_UNITS = [
   { value: 'hod', label: 'za hodinu' },
   { value: 'den', label: 'za den' },
   { value: 'kus', label: 'za kus' },
   { value: 'projekt', label: 'za projekt' },
 ] as const
- 
+
 // pomocná: number | null z inputu
 const numOrNull = (v: string) => (v === '' || v == null ? null : Number(v))
- 
+
 export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
   const [categories, setCategories] = useState<Category[]>([])
   const [loadingCats, setLoadingCats] = useState(true)
   const [submitState, setSubmitState] = useState<'idle'|'loading'|'success'|'error'>('idle')
   const [errorMsg, setErrorMsg] = useState('')
   const router = useRouter()
- 
+
   const init = initialData as any
- 
+
   const { register: f, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: initialData ? {
       title: initialData.title,
       description: initialData.description,
       category: initialData.category,
-      price: initialData.price,
+      price: initialData.price ?? 0,
       price_unit: initialData.price_unit as any,
       city: initialData.city,
       image_url: initialData.image_url ?? '',
@@ -97,13 +97,13 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
       quote_fee: null, price_per_km: null, free_km: null, quote_days: null,
     },
   })
- 
+
   const selectedCategory = watch('category')
   const selectedSubcategoryId = watch('subcategory_id')
   const selectedSubIds: string[] = watch('subcategory_ids') ?? []
   const model = watch('payment_model')
   const priceType = watch('price_type')
- 
+
   // Načti kategorie z DB
   useEffect(() => {
     fetch('/api/categories')
@@ -111,7 +111,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
       .then(data => { setCategories(data.categories ?? []); setLoadingCats(false) })
       .catch(() => setLoadingCats(false))
   }, [])
- 
+
   const activeCat = categories.find(c => c.slug === selectedCategory)
   const lastSubId = selectedSubIds[selectedSubIds.length - 1]
   const activeSub = activeCat?.subcategories.find(s => s.id === lastSubId)
@@ -121,7 +121,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
     setValue('subcategory_ids', next)
     setValue('subcategory_id', next[0] ?? '')
   }
- 
+
   const onSubmit = async (data: FormValues) => {
     setSubmitState('loading'); setErrorMsg('')
     const result = mode === 'create'
@@ -137,28 +137,28 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
     }
     else { setSubmitState('error'); setErrorMsg(result.error); setTimeout(() => setSubmitState('idle'), 4000) }
   }
- 
+
   return (
-    <motion.form onSubmit={handleSubmit(onSubmit)} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="space-y-6">
- 
+    <motion.form onSubmit={handleSubmit(onSubmit as any)} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="space-y-6">
+
       {/* Název */}
       <div className="space-y-1.5">
         <label className="form-label">Název služby *</label>
         <input {...f('title')} placeholder="např. Montáž klimatizace" className={`form-input ${errors.title ? 'form-input-error' : ''}`} />
         {errors.title && <p className="form-error">{errors.title.message}</p>}
       </div>
- 
+
       {/* Popis */}
       <div className="space-y-1.5">
         <label className="form-label">Popis služby *</label>
         <textarea {...f('description')} rows={4} placeholder="Popište co přesně nabízíte, zkušenosti, oblast působení..." className={`form-input resize-none ${errors.description ? 'form-input-error' : ''}`} />
         {errors.description && <p className="form-error">{errors.description.message}</p>}
       </div>
- 
+
       {/* Kategorie z DB – 3 úrovně */}
       <div className="space-y-3">
         <label className="form-label">Kategorie *</label>
- 
+
         {loadingCats ? (
           <div className="flex items-center gap-2 text-sm text-slate-400">
             <Loader2 className="h-4 w-4 animate-spin" /> Načítám kategorie…
@@ -192,7 +192,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
                 )
               })}
             </div>
- 
+
             {/* Level 2 – podkategorie */}
             <AnimatePresence>
               {activeCat && (
@@ -225,10 +225,10 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
                 </motion.div>
               )}
             </AnimatePresence>
- 
+
             {/* Level 3 – typ služby */}
             <AnimatePresence>
-              {activeSub && (
+              {activeSub && activeSub.service_types && activeSub.service_types.length > 0 && (
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
                   <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-500">
                     <ChevronRight className="h-3 w-3" /><ChevronRight className="h-3 w-3 -ml-2" /> Typ služby
@@ -264,7 +264,21 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
         )}
         {errors.category && <p className="form-error">{errors.category.message}</p>}
       </div>
- 
+
+      {/* Bod D – nenašli jste obor? */}
+      {selectedCategory && (
+        <p className="-mt-2 text-xs text-slate-400">
+          Nevidíte svůj obor?{' '}
+          <a
+            href="mailto:podpora@propojo.cz?subject=Chybejici%20obor"
+            className="font-semibold text-emerald-600 hover:underline"
+          >
+            Napište nám
+          </a>{' '}
+          a doplníme ho.
+        </p>
+      )}
+
       {/* ============ ZPŮSOB PLATBY (Model A/B) ============ */}
       <div className="space-y-3">
         <label className="form-label">Způsob platby *</label>
@@ -285,7 +299,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
             </div>
             <p className="text-xs leading-relaxed text-slate-500">Rezervační záloha. Pro služby s předvídatelnou cenou (kadeřnictví, úklid, drobné opravy).</p>
           </button>
- 
+
           {/* Model B */}
           <button
             type="button"
@@ -304,7 +318,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
           </button>
         </div>
       </div>
- 
+
       {/* ====== MODEL A SEKCE ====== */}
       <AnimatePresence>
         {model === 'A' && (
@@ -328,7 +342,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
                 </button>
               ))}
             </div>
- 
+
             {/* Pevná cena */}
             {priceType === 'fixed' && (
               <div className="grid grid-cols-2 gap-4">
@@ -346,7 +360,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
                 </div>
               </div>
             )}
- 
+
             {/* Cenové rozmezí */}
             {priceType === 'range' && (
               <div className="grid grid-cols-2 gap-4">
@@ -364,7 +378,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
                 </div>
               </div>
             )}
- 
+
             {/* Po domluvě */}
             {priceType === 'on_agreement' && (
               <div className="flex items-start gap-2 rounded-xl bg-blue-50 px-4 py-3 text-xs leading-relaxed text-slate-600">
@@ -372,7 +386,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
                 <span>Cena bude domluvena se zákazníkem. Na webu se zobrazí „Cena dohodou".</span>
               </div>
             )}
- 
+
             {/* Rezervační záloha */}
             <div className="space-y-1.5">
               <label className="form-label">Rezervační záloha (Kč)</label>
@@ -388,7 +402,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
           </motion.div>
         )}
       </AnimatePresence>
- 
+
       {/* ====== MODEL B SEKCE ====== */}
       <AnimatePresence>
         {model === 'B' && (
@@ -430,7 +444,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
           </motion.div>
         )}
       </AnimatePresence>
- 
+
       {/* Jednotka ceny (platí pro Model A s cenou) */}
       {model === 'A' && priceType !== 'on_agreement' && (
         <div className="space-y-1.5">
@@ -443,20 +457,20 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
           </div>
         </div>
       )}
- 
+
       {/* Město */}
       <div className="space-y-1.5">
         <label className="form-label">Město působiště *</label>
         <input {...f('city')} placeholder="Praha, Brno, Ostrava…" className={`form-input ${errors.city ? 'form-input-error' : ''}`} />
         {errors.city && <p className="form-error">{errors.city.message}</p>}
       </div>
- 
+
       {/* Foto */}
       <div className="space-y-1.5">
         <label className="form-label">Fotografie <span className="font-normal text-slate-400">(volitelné)</span></label>
         <ImageUpload value={watch('image_url')} onChange={url => setValue('image_url', url)} folder="services" />
       </div>
- 
+
       {/* Feedback */}
       <AnimatePresence>
         {submitState === 'error' && (
@@ -471,7 +485,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
           </motion.div>
         )}
       </AnimatePresence>
- 
+
       <button type="submit" disabled={submitState === 'loading' || submitState === 'success'} className="btn-primary w-full">
         {submitState === 'loading' ? <><Loader2 className="h-4 w-4 animate-spin" /> Ukládám…</>
          : submitState === 'success' ? <><CheckCircle2 className="h-4 w-4" /> Uloženo</>
