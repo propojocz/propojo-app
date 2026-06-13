@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { Package, ShoppingBag, TrendingUp, Star, ArrowRight, PlusCircle, Search } from 'lucide-react'
 import { CATEGORY_META } from '@/types/database'
+import type { Profile } from '@/types/database'
 
 export const metadata = { title: 'Dashboard | Propojo' }
 
@@ -16,7 +17,7 @@ export default async function DashboardPage() {
     .from('profiles')
     .select('*')
     .eq('id', user.id)
-    .single()
+    .single() as { data: Profile | null }
 
   const isProvider = profile?.is_provider === true
 
@@ -35,7 +36,7 @@ export default async function DashboardPage() {
       supabase.from('orders').select('id', { count: 'exact', head: true }).eq('provider_id', user.id).eq('status', 'cekajici'),
       supabase.from('orders').select('id', { count: 'exact', head: true }).eq('provider_id', user.id),
       supabase.from('services').select('id, title, category, price, price_unit, is_active').eq('provider_id', user.id).order('created_at', { ascending: false }).limit(5),
-      supabase.from('orders').select('id, status, created_at, services(title), profiles!orders_client_id_fkey(full_name)').eq('provider_id', user.id).order('created_at', { ascending: false }).limit(5),
+      supabase.from('orders').select('id, status, created_at, services(title), profiles!orders_customer_id_fkey(full_name)').eq('provider_id', user.id).order('created_at', { ascending: false }).limit(5),
     ])
 
     const statusColors: Record<string, string> = {
@@ -94,7 +95,7 @@ export default async function DashboardPage() {
                     <span className="text-xl">{CATEGORY_META[s.category as keyof typeof CATEGORY_META]?.emoji ?? '📦'}</span>
                     <div className="flex-1 min-w-0">
                       <p className="truncate text-sm font-semibold text-slate-800">{s.title}</p>
-                      <p className="text-xs text-slate-400">{s.price.toLocaleString('cs-CZ')} Kč/{s.price_unit}</p>
+                      <p className="text-xs text-slate-400">{(s.price ?? 0).toLocaleString('cs-CZ')} Kč/{s.price_unit}</p>
                     </div>
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${s.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
                       {s.is_active ? 'Aktivní' : 'Skrytá'}
@@ -170,9 +171,9 @@ export default async function DashboardPage() {
     { count: activeOrders },
     { data: myOrders },
   ] = await Promise.all([
-    supabase.from('orders').select('id', { count: 'exact', head: true }).eq('client_id', user.id),
-    supabase.from('orders').select('id', { count: 'exact', head: true }).eq('client_id', user.id).in('status', ['cekajici', 'prijato', 'v_procesu']),
-    supabase.from('orders').select('id, status, created_at, services(title, price, price_unit), profiles!orders_provider_id_fkey(full_name)').eq('client_id', user.id).order('created_at', { ascending: false }).limit(10),
+    supabase.from('orders').select('id', { count: 'exact', head: true }).eq('customer_id', user.id),
+    supabase.from('orders').select('id', { count: 'exact', head: true }).eq('customer_id', user.id).in('status', ['cekajici', 'prijato', 'v_procesu']),
+    supabase.from('orders').select('id, status, created_at, services(title, price, price_unit), profiles!orders_provider_id_fkey(full_name)').eq('customer_id', user.id).order('created_at', { ascending: false }).limit(10),
   ])
 
   const statusColors: Record<string, string> = {
@@ -230,7 +231,7 @@ export default async function DashboardPage() {
                   <p className="font-semibold text-slate-900">{o.services?.title ?? 'Neznámá služba'}</p>
                   <p className="text-sm text-slate-500">
                     {o.profiles?.full_name ?? 'Živnostník'} ·{' '}
-                    {o.services?.price ? `${o.services.price.toLocaleString('cs-CZ')} Kč/${o.services.price_unit}` : ''} ·{' '}
+                    {o.services?.price ? `${(o.services.price ?? 0).toLocaleString('cs-CZ')} Kč/${o.services.price_unit}` : ''} ·{' '}
                     {new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(o.created_at))}
                   </p>
                 </div>
