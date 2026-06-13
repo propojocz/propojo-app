@@ -9,7 +9,7 @@ import FilterSidebar from '@/components/ui/FilterSidebar'
 import Link from 'next/link'
 import { PlusCircle } from 'lucide-react'
 import type { Metadata } from 'next'
- 
+
 interface Props {
   searchParams: {
     category?: string
@@ -22,7 +22,7 @@ interface Props {
     subcats?: string
   }
 }
- 
+
 export async function generateMetadata({ searchParams }: Props): Promise<Metadata> {
   const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://propojo.cz'
   const { city, q } = searchParams
@@ -36,7 +36,7 @@ export async function generateMetadata({ searchParams }: Props): Promise<Metadat
     alternates: { canonical: `${APP_URL}/marketplace` },
   }
 }
- 
+
 async function getCategories() {
   const supabase = createClient()
   const { data } = await supabase
@@ -45,7 +45,7 @@ async function getCategories() {
     .order('sort_order')
   return data ?? []
 }
- 
+
 // Podkategorie aktivní kategorie – pro levý filtr
 async function getSubcategories(categorySlug?: string) {
   if (!categorySlug) return []
@@ -59,7 +59,23 @@ async function getSubcategories(categorySlug?: string) {
     .order('name')
   return (data as { id: string; name: string }[]) ?? []
 }
- 
+
+// ID služeb, jejichž podkategorie odpovídá hledanému textu
+async function serviceIdsBySubcatText(q: string): Promise<string[]> {
+  const supabase = createClient()
+  const { data: subs } = await supabase
+    .from('subcategories')
+    .select('id')
+    .ilike('name', `%${q}%`)
+  const subIds = (subs ?? []).map((s: any) => s.id)
+  if (subIds.length === 0) return []
+  const { data: links } = await supabase
+    .from('service_subcategories')
+    .select('service_id')
+    .in('subcategory_id', subIds)
+  return Array.from(new Set((links ?? []).map((l: any) => l.service_id)))
+}
+
 async function ServiceList({
   category, city, q, sort, priceMin, priceMax, minRating, subcats,
 }: {
@@ -73,11 +89,9 @@ async function ServiceList({
   subcats?: string
 }) {
   const supabase = createClient()
- 
-  // Vybrané podkategorie z URL
+
   const subIds = (subcats ?? '').split(',').filter(Boolean)
- 
-  // Pokud jsou vybrané podkategorie, zjisti ID služeb, které je mají (přes propojovací tabulku)
+
   let serviceIdsBySubcat: string[] | null = null
   if (subIds.length > 0) {
     const { data: links } = await supabase
@@ -85,16 +99,14 @@ async function ServiceList({
       .select('service_id')
       .in('subcategory_id', subIds)
     serviceIdsBySubcat = Array.from(new Set((links ?? []).map((l: any) => l.service_id)))
-    // žádná služba nevyhovuje → vrátíme prázdno rovnou
     if (serviceIdsBySubcat.length === 0) serviceIdsBySubcat = ['00000000-0000-0000-0000-000000000000']
   }
- 
+
   let query = supabase
     .from('services')
     .select(`*, profiles (id, full_name, avatar_url, rating, review_count, city)`)
     .eq('is_active', true)
- 
-  // Filtr podle vybraných podkategorií (má přednost před filtrem kategorie)
+
   if (serviceIdsBySubcat) {
     query = query.in('id', serviceIdsBySubcat)
   } else if (category) {
@@ -108,32 +120,43 @@ async function ServiceList({
       }
     }
   }
- 
+
   if (city) query = query.ilike('city', `%${city}%`)
-  if (q) query = query.or(`title.ilike.%${q}%,description.ilike.%${q}%`)
+
+  // Hledání: text v názvu/popisu NEBO v názvu podkategorie
+  if (q) {
+    const subcatServiceIds = await serviceIdsBySubcatText(q)
+    if (subcatServiceIds.length > 0) {
+      const idList = subcatServiceIds.map((id) => `"${id}"`).join(',')
+      query = query.or(`title.ilike.%${q}%,description.ilike.%${q}%,id.in.(${idList})`)
+    } else {
+      query = query.or(`title.ilike.%${q}%,description.ilike.%${q}%`)
+    }
+  }
+
   if (priceMin) query = query.gte('price', Number(priceMin))
   if (priceMax) query = query.lte('price', Number(priceMax))
- 
+
   switch (sort) {
     case 'nejlevnejsi': query = query.order('price', { ascending: true }); break
     case 'nejdrazsi': query = query.order('price', { ascending: false }); break
     default: query = query.order('created_at', { ascending: false })
   }
- 
+
   const { data: services } = await query.limit(48)
   let sorted = (services as ServiceWithProvider[]) ?? []
- 
+
   if (minRating) {
     const min = Number(minRating)
     sorted = sorted.filter((s) => Number(s.profiles?.rating ?? 0) >= min)
   }
- 
+
   if (sort === 'hodnoceni') {
     sorted = [...sorted].sort(
       (a, b) => Number(b.profiles?.rating ?? 0) - Number(a.profiles?.rating ?? 0)
     )
   }
- 
+
   if (sorted.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white py-20 text-center">
@@ -146,7 +169,7 @@ async function ServiceList({
       </div>
     )
   }
- 
+
   return (
     <div>
       <p className="mb-6 text-sm text-slate-500">
@@ -160,19 +183,19 @@ async function ServiceList({
     </div>
   )
 }
- 
+
 export default async function MarketplacePage({ searchParams }: Props) {
   const { category, city, q, sort, priceMin, priceMax, minRating, subcats } = searchParams
   const categories = await getCategories()
   const subcategories = await getSubcategories(category)
- 
+
   return (
     <main className="min-h-screen bg-slate-50">
       <div className="border-b border-slate-200 bg-white">
         <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-emerald-600">Živnostenské Marketplace</p>
+              <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-emerald-600">Živnostenský marketplace</p>
               <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">Najdi zkušeného řemeslníka</h1>
               <p className="mt-1.5 text-slate-500">Ověření živnostníci ve tvém okolí. Žádné přirážky, přímý kontakt.</p>
             </div>
@@ -185,9 +208,9 @@ export default async function MarketplacePage({ searchParams }: Props) {
           </div>
         </div>
       </div>
- 
+
       <FilterBar currentCity={city} currentSort={sort} currentQ={q} />
- 
+
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <div className="flex flex-col gap-8 lg:flex-row">
           {/* Levý filtr panel */}
@@ -202,7 +225,7 @@ export default async function MarketplacePage({ searchParams }: Props) {
               currentSubcats={subcats}
             />
           </aside>
- 
+
           {/* Výsledky */}
           <div className="min-w-0 flex-1">
             <Suspense

@@ -67,6 +67,23 @@ export default async function ServiceDetailPage({ params }: Props) {
     .neq('id', s.id)
     .limit(4)
 
+  // Název kategorie (z DB podle slugu) – pro štítek na detailu
+  const { data: catRow } = await supabase
+    .from('categories')
+    .select('name')
+    .eq('slug', s.category)
+    .single() as { data: { name: string } | null }
+  const categoryName = catRow?.name ?? meta.label
+
+  // Podkategorie této služby (přes propojovací tabulku)
+  const { data: subcatLinks } = await supabase
+    .from('service_subcategories')
+    .select('subcategories(name)')
+    .eq('service_id', s.id)
+  const subcatNames = (subcatLinks ?? [])
+    .map((r: any) => r.subcategories?.name)
+    .filter(Boolean) as string[]
+
   // ── Cenové údaje ──────────────────────────────────────────
   const isModelB = s.payment_model === 'B'
   const price = Number(s.price ?? 0)
@@ -156,6 +173,18 @@ export default async function ServiceDetailPage({ params }: Props) {
                 <div className="flex items-center gap-1.5 text-sm text-slate-500">
                   <MapPin className="h-4 w-4 text-slate-400" />{s.city}
                 </div>
+              </div>
+
+              {/* Kategorie + podkategorie */}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-600">
+                  {meta.emoji} {categoryName}
+                </span>
+                {subcatNames.map((name) => (
+                  <span key={name} className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+                    {name}
+                  </span>
+                ))}
               </div>
             </div>
 

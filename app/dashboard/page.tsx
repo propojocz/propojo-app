@@ -91,16 +91,16 @@ export default async function DashboardPage() {
             {recentServices && recentServices.length > 0 ? (
               <div className="divide-y divide-slate-100">
                 {recentServices.map((s: any) => (
-                  <div key={s.id} className="flex items-center gap-3 px-5 py-3">
+                  <Link key={s.id} href={`/sluzby/${s.id}`} className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-slate-50">
                     <span className="text-xl">{CATEGORY_META[s.category as keyof typeof CATEGORY_META]?.emoji ?? '📦'}</span>
                     <div className="flex-1 min-w-0">
                       <p className="truncate text-sm font-semibold text-slate-800">{s.title}</p>
-                      <p className="text-xs text-slate-400">{(s.price ?? 0).toLocaleString('cs-CZ')} Kč/{s.price_unit}</p>
+                      <p className="text-xs text-slate-400">{(s.price ?? 0) > 0 ? `${Number(s.price).toLocaleString('cs-CZ')} Kč/${s.price_unit}` : 'Nacenění / dohodou'}</p>
                     </div>
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${s.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
                       {s.is_active ? 'Aktivní' : 'Skrytá'}
                     </span>
-                  </div>
+                  </Link>
                 ))}
               </div>
             ) : (
