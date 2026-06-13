@@ -1,23 +1,34 @@
 // app/sluzby/[id]/page.tsx
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import type { ServiceWithProvider } from '@/types/database'
 import { CATEGORY_META } from '@/types/database'
 import Image from 'next/image'
 import Link from 'next/link'
-import { MapPin, Star, ArrowLeft } from 'lucide-react'
+import { MapPin, Star, ArrowLeft, Clock, Wallet, FileSearch, Truck, CalendarClock, ShieldCheck } from 'lucide-react'
 import OrderButton from '@/components/ui/OrderButton'
 import type { Metadata } from 'next'
 
 interface Props { params: { id: string } }
 
+const DEFAULT_META = { label: 'Služba', emoji: '🔧' }
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const supabase = createClient()
-  const { data } = await supabase.from('services').select('title, description, city, price, price_unit, category').eq('id', params.id).single()
+  const { data } = await supabase
+    .from('services')
+    .select('title, description, city, price, price_unit, category, payment_model')
+    .eq('id', params.id)
+    .single() as { data: any }
   if (!data) return { title: 'Služba nenalezena' }
 
   const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://propojo.cz'
-  const desc = `${data.description.slice(0, 155)}… ${data.price.toLocaleString('cs-CZ')} Kč/${data.price_unit} · ${data.city}`
+  const priceText =
+    data.payment_model === 'B'
+      ? 'Nacenění na místě'
+      : (data.price ?? 0) > 0
+        ? `${Number(data.price).toLocaleString('cs-CZ')} Kč/${data.price_unit}`
+        : 'Cena dohodou'
+  const desc = `${(data.description ?? '').slice(0, 140)}… ${priceText} · ${data.city}`
 
   return {
     title: `${data.title}`,
@@ -40,34 +51,64 @@ export default async function ServiceDetailPage({ params }: Props) {
     .from('services')
     .select(`*, profiles (id, full_name, avatar_url, rating, review_count, city, bio, phone)`)
     .eq('id', params.id)
-    .single()
+    .single() as { data: any; error: any }
 
   if (error || !service) notFound()
 
-  const s = service as any
-  const meta = CATEGORY_META[s.category]
+  const s = service
+  const meta = (CATEGORY_META as Record<string, { label: string; emoji: string }>)[s.category] ?? DEFAULT_META
   const { data: { user } } = await supabase.auth.getUser()
 
   const { data: moreServices } = await supabase
     .from('services')
-    .select('id, title, price, price_unit, category')
+    .select('id, title, price, price_unit, category, payment_model, quote_fee')
     .eq('provider_id', s.provider_id)
     .eq('is_active', true)
     .neq('id', s.id)
     .limit(4)
 
-  // JSON-LD Service structured data
+  // ── Cenové údaje ──────────────────────────────────────────
+  const isModelB = s.payment_model === 'B'
+  const price = Number(s.price ?? 0)
+  const priceMax = Number(s.price_max ?? 0)
+  const deposit = Number(s.deposit_amount ?? 0)
+  const quoteFee = Number(s.quote_fee ?? 0)
+  const pricePerKm = Number(s.price_per_km ?? 0)
+  const freeKm = Number(s.free_km ?? 0)
+  const quoteDays = Number(s.quote_days ?? 0)
+  const duration = Number(s.duration_minutes ?? 0)
+
+  // Hlavní cenový text (Model A)
+  let mainPrice = 'Cena dohodou'
+  if (!isModelB) {
+    if (s.price_type === 'range' && price > 0 && priceMax > 0) {
+      mainPrice = `${price.toLocaleString('cs-CZ')}–${priceMax.toLocaleString('cs-CZ')} Kč`
+    } else if (price > 0) {
+      mainPrice = `${price.toLocaleString('cs-CZ')} Kč`
+    }
+  }
+
+  const formatDuration = (min: number) => {
+    if (min <= 0) return null
+    if (min < 60) return `${min} min`
+    const h = Math.floor(min / 60)
+    const m = min % 60
+    return m ? `${h} h ${m} min` : `${h} h`
+  }
+
+  // JSON-LD
   const jsonLd = {
     '@context': 'https://schema.org',
     '@type': 'Service',
     name: s.title,
     description: s.description,
-    offers: {
-      '@type': 'Offer',
-      price: s.price,
-      priceCurrency: 'CZK',
-      priceSpecification: { '@type': 'UnitPriceSpecification', price: s.price, priceCurrency: 'CZK', unitText: s.price_unit },
-    },
+    ...(price > 0 ? {
+      offers: {
+        '@type': 'Offer',
+        price: price,
+        priceCurrency: 'CZK',
+      },
+    } : {}),
     areaServed: { '@type': 'City', name: s.city },
     provider: {
       '@type': 'Person',
@@ -92,10 +133,10 @@ export default async function ServiceDetailPage({ params }: Props) {
               {s.image_url ? (
                 <Image src={s.image_url} alt={s.title} fill className="object-cover" sizes="(max-width: 1024px) 100vw, 66vw" priority />
               ) : (
-                <div className="flex h-full items-center justify-center"><span className="text-8xl">{meta.emoji}</span></div>
+                <div className="flex h-full items-center justify-center bg-gradient-to-br from-emerald-50 to-blue-50"><span className="text-8xl">{meta.emoji}</span></div>
               )}
               <div className="absolute left-4 top-4">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-sm font-semibold text-slate-700 backdrop-blur-sm">{meta.label}</span>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-sm font-semibold text-slate-700 backdrop-blur-sm">{meta.emoji} {meta.label}</span>
               </div>
             </div>
 
@@ -103,8 +144,14 @@ export default async function ServiceDetailPage({ params }: Props) {
               <h1 className="mb-3 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">{s.title}</h1>
               <div className="flex flex-wrap items-center gap-4">
                 <div className="flex items-baseline gap-1">
-                  <span className="text-3xl font-black text-indigo-600">{s.price.toLocaleString('cs-CZ')} Kč</span>
-                  <span className="text-slate-500">/{s.price_unit}</span>
+                  {isModelB ? (
+                    <span className="text-2xl font-black text-emerald-600">Nacenění na místě</span>
+                  ) : (
+                    <>
+                      <span className="text-3xl font-black text-emerald-600">{mainPrice}</span>
+                      {price > 0 && <span className="text-slate-500">/{s.price_unit}</span>}
+                    </>
+                  )}
                 </div>
                 <div className="flex items-center gap-1.5 text-sm text-slate-500">
                   <MapPin className="h-4 w-4 text-slate-400" />{s.city}
@@ -121,24 +168,33 @@ export default async function ServiceDetailPage({ params }: Props) {
               <div>
                 <h2 className="mb-4 text-lg font-bold text-slate-900">Další služby od tohoto živnostníka</h2>
                 <div className="grid grid-cols-2 gap-3">
-                  {moreServices.map((ms: any) => (
-                    <Link key={ms.id} href={`/sluzby/${ms.id}`} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 transition-all hover:border-indigo-200 hover:bg-indigo-50">
-                      <span className="text-xl">{CATEGORY_META[ms.category as keyof typeof CATEGORY_META]?.emoji}</span>
-                      <div className="min-w-0">
-                        <p className="truncate text-xs font-semibold text-slate-800">{ms.title}</p>
-                        <p className="text-xs text-slate-500">{ms.price.toLocaleString('cs-CZ')} Kč/{ms.price_unit}</p>
-                      </div>
-                    </Link>
-                  ))}
+                  {moreServices.map((ms: any) => {
+                    const msMeta = (CATEGORY_META as Record<string, { label: string; emoji: string }>)[ms.category] ?? DEFAULT_META
+                    const msPrice = ms.payment_model === 'B'
+                      ? 'Nacenění na místě'
+                      : (ms.price ?? 0) > 0
+                        ? `${Number(ms.price).toLocaleString('cs-CZ')} Kč/${ms.price_unit}`
+                        : 'Cena dohodou'
+                    return (
+                      <Link key={ms.id} href={`/sluzby/${ms.id}`} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 transition-all hover:border-emerald-200 hover:bg-emerald-50">
+                        <span className="text-xl">{msMeta.emoji}</span>
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-semibold text-slate-800">{ms.title}</p>
+                          <p className="text-xs text-slate-500">{msPrice}</p>
+                        </div>
+                      </Link>
+                    )
+                  })}
                 </div>
               </div>
             )}
           </div>
 
           <div className="space-y-4">
+            {/* Poskytovatel */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <Link href={`/profil/${s.provider_id}`} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-100 text-lg font-black text-indigo-700">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-lg font-black text-emerald-700">
                   {s.profiles.full_name.charAt(0).toUpperCase()}
                 </div>
                 <div>
@@ -157,9 +213,67 @@ export default async function ServiceDetailPage({ params }: Props) {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-5">
-              <p className="mb-3 text-sm font-semibold text-indigo-800">Máte zájem o tuto službu?</p>
-              <OrderButton serviceId={s.id} providerId={s.provider_id} isLoggedIn={!!user} priceAgreed={s.price} />
+            {/* Jak to probíhá – Model A / B */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">Jak to probíhá</h3>
+
+              {isModelB ? (
+                <ul className="space-y-3 text-sm text-slate-700">
+                  <li className="flex gap-2.5">
+                    <FileSearch className="h-4 w-4 shrink-0 text-emerald-600" />
+                    <span>
+                      <strong>Nacenění na místě</strong>
+                      {quoteFee > 0
+                        ? <> za <strong>{quoteFee.toLocaleString('cs-CZ')} Kč</strong>. Pokud nabídku přijmeš, poplatek se započítá do celkové ceny.</>
+                        : <> zdarma. Řemeslník přijede, prohlédne práci a navrhne cenu.</>}
+                    </span>
+                  </li>
+                  {(freeKm > 0 || pricePerKm > 0) && (
+                    <li className="flex gap-2.5">
+                      <Truck className="h-4 w-4 shrink-0 text-emerald-600" />
+                      <span>
+                        {freeKm > 0 ? <>Doprava zdarma do <strong>{freeKm} km</strong>.</> : null}
+                        {pricePerKm > 0 ? <> Nad rámec <strong>{pricePerKm.toLocaleString('cs-CZ')} Kč/km</strong>.</> : null}
+                      </span>
+                    </li>
+                  )}
+                  {quoteDays > 0 && (
+                    <li className="flex gap-2.5">
+                      <CalendarClock className="h-4 w-4 shrink-0 text-emerald-600" />
+                      <span>Nabídku dodá do <strong>{quoteDays} dnů</strong>.</span>
+                    </li>
+                  )}
+                </ul>
+              ) : (
+                <ul className="space-y-3 text-sm text-slate-700">
+                  {deposit > 0 && (
+                    <li className="flex gap-2.5">
+                      <Wallet className="h-4 w-4 shrink-0 text-emerald-600" />
+                      <span>
+                        Rezervační záloha <strong>{deposit.toLocaleString('cs-CZ')} Kč</strong> — <strong>započítá se</strong> do konečné ceny.
+                      </span>
+                    </li>
+                  )}
+                  {formatDuration(duration) && (
+                    <li className="flex gap-2.5">
+                      <Clock className="h-4 w-4 shrink-0 text-emerald-600" />
+                      <span>Délka služby přibližně <strong>{formatDuration(duration)}</strong>.</span>
+                    </li>
+                  )}
+                  <li className="flex gap-2.5">
+                    <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600" />
+                    <span>Záloha přes Propojo = jistota termínu. Když řemeslník nedorazí, vrátíme ti ji.</span>
+                  </li>
+                </ul>
+              )}
+            </div>
+
+            {/* CTA */}
+            <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-5">
+              <p className="mb-3 text-sm font-semibold text-emerald-800">
+                {isModelB ? 'Chceš nacenit tuto práci?' : 'Máš zájem o tuto službu?'}
+              </p>
+              <OrderButton serviceId={s.id} providerId={s.provider_id} isLoggedIn={!!user} priceAgreed={price} />
             </div>
 
             <p className="text-center text-xs text-slate-400">

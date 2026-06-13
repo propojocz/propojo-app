@@ -7,6 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import ImageUpload from '@/components/ui/ImageUpload'
+import type { Profile } from '@/types/database'
 
 const schema = z.object({
   full_name: z.string().min(2, 'Zadejte celé jméno'),
@@ -32,7 +33,7 @@ export default function ProfilPage() {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single() as { data: Profile | null }
       if (data) reset({
         full_name: data.full_name,
         phone: data.phone ?? '',
@@ -50,7 +51,7 @@ export default function ProfilPage() {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setError('Nejste přihlášeni.'); setSaving(false); return }
-    const { error: err } = await supabase.from('profiles').update(values).eq('id', user.id)
+    const { error: err } = await (supabase.from('profiles') as any).update(values).eq('id', user.id)
     if (err) { setError('Nepodařilo se uložit profil.') }
     else { setSuccess(true); setTimeout(() => setSuccess(false), 3000) }
     setSaving(false)
@@ -58,7 +59,7 @@ export default function ProfilPage() {
 
   const avatarUrl = watch('avatar_url')
 
-  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-indigo-400" /></div>
+  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-emerald-400" /></div>
 
   return (
     <div className="space-y-6">
@@ -75,11 +76,11 @@ export default function ProfilPage() {
             <label className="form-label">Profilová fotka</label>
             <div className="flex items-center gap-4">
               {/* Náhled avataru */}
-              <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-indigo-100">
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-100">
                 {avatarUrl ? (
                   <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
                 ) : (
-                  <span className="text-2xl font-black text-indigo-700">
+                  <span className="text-2xl font-black text-emerald-700">
                     {watch('full_name')?.charAt(0)?.toUpperCase() ?? '?'}
                   </span>
                 )}
