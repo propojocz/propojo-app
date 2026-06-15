@@ -22,20 +22,21 @@ export default async function ObjednavkyPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/prihlasit')
 
-  const { data: profile } = await supabase.from('profiles').select('is_provider').eq('id', user.id).single()
+  const { data: profile } = await supabase.from('profiles').select('is_provider').eq('id', user.id).single() as { data: { is_provider: boolean } | null }
   const isProvider = profile?.is_provider === true
 
   const { data: orders } = await supabase
     .from('orders')
     .select('*, services(title, price, price_unit)')
-    .eq(isProvider ? 'provider_id' : 'client_id', user.id)
-    .order('created_at', { ascending: false })
+    .eq(isProvider ? 'provider_id' : 'customer_id', user.id)
+    .order('created_at', { ascending: false }) as { data: any[] | null }
 
-  const otherIds = [...new Set(orders?.map(o => isProvider ? o.client_id : o.provider_id) ?? [])]
+  // Druhá strana objednávky (u poskytovatele = zákazník, u zákazníka = poskytovatel)
+  const otherIds = [...new Set(orders?.map(o => isProvider ? o.customer_id : o.provider_id) ?? [])]
   const { data: otherProfiles } = otherIds.length > 0
     ? await supabase.from('profiles').select('id, full_name').in('id', otherIds)
     : { data: [] }
-  const profileMap = Object.fromEntries((otherProfiles ?? []).map(p => [p.id, p]))
+  const profileMap = Object.fromEntries((otherProfiles ?? []).map((p: any) => [p.id, p]))
 
   return (
     <div className="space-y-6">
@@ -48,18 +49,18 @@ export default async function ObjednavkyPage() {
         <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-white p-12 text-center">
           <div className="mb-4 text-5xl">{isProvider ? '📬' : '🛒'}</div>
           <h3 className="mb-2 text-lg font-bold text-slate-800">Zatím žádné {isProvider ? 'poptávky' : 'objednávky'}</h3>
-          <p className="text-sm text-slate-500">{isProvider ? 'Poptávky se zobrazí jakmile zákazníci projeví zájem.' : 'Najděte živnostníka a objednejte první službu.'}</p>
+          <p className="text-sm text-slate-500">{isProvider ? 'Poptávky se zobrazí, jakmile zákazníci projeví zájem.' : 'Najděte živnostníka a objednejte první službu.'}</p>
         </div>
       ) : (
         <div className="space-y-3">
           {orders.map((o: any) => {
-            const otherId = isProvider ? o.client_id : o.provider_id
+            const otherId = isProvider ? o.customer_id : o.provider_id
             const otherProfile = profileMap[otherId]
             return (
               <Link
                 key={o.id}
                 href={`/dashboard/objednavky/${o.id}`}
-                className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md hover:border-indigo-200"
+                className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md hover:border-emerald-200"
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -71,7 +72,7 @@ export default async function ObjednavkyPage() {
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
                     <span>{isProvider ? '👤' : '🔧'} {otherProfile?.full_name ?? (isProvider ? 'Zákazník' : 'Živnostník')}</span>
                     <span>📅 {new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(o.created_at))}</span>
-                    {o.services?.price && <span>💰 {o.services.price.toLocaleString('cs-CZ')} Kč/{o.services.price_unit}</span>}
+                    {(o.services?.price ?? 0) > 0 && <span>💰 {Number(o.services.price).toLocaleString('cs-CZ')} Kč/{o.services.price_unit}</span>}
                   </div>
                 </div>
                 <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" />

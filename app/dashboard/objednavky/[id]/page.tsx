@@ -7,38 +7,83 @@ import OrderDetailClient from './OrderDetailClient'
 
 interface Props { params: { id: string } }
 
+type ServiceLite = {
+  id: string
+  title: string
+  price: number | null
+  price_unit: string | null
+  category: string | null
+  city: string | null
+  description: string | null
+  payment_model: string | null
+  deposit_amount: number | null
+  quote_fee: number | null
+}
+
+type OrderRow = {
+  id: string
+  customer_id: string
+  provider_id: string
+  service_id: string
+  status: string
+  description: string | null
+  total_price: number | null
+  created_at: string
+  services: ServiceLite | null
+}
+
+type ProfileLite = {
+  id: string
+  full_name: string | null
+  avatar_url: string | null
+  phone: string | null
+  city: string | null
+}
+
+type MessageRow = {
+  id: string
+  order_id: string
+  sender_id: string
+  content: string
+  created_at: string
+  read_at: string | null
+  image_url: string | null
+}
+
 export default async function OrderDetailPage({ params }: Props) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/prihlasit')
 
-  // Načti objednávku
+  // Načti objednávku + službu (sloupce ověřené proti reálné DB)
   const { data: order, error } = await supabase
     .from('orders')
-    .select('*, services(id, title, price, price_unit, category, city, description)')
+    .select('*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee)')
     .eq('id', params.id)
-    .single()
+    .single() as { data: OrderRow | null; error: any }
 
   if (error || !order) notFound()
 
-  // Ověř že uživatel je účastník
-  if (order.client_id !== user.id && order.provider_id !== user.id) notFound()
+  // Ověř, že přihlášený uživatel je účastníkem objednávky
+  if (order.customer_id !== user.id && order.provider_id !== user.id) notFound()
 
   const isProvider = order.provider_id === user.id
+  const otherId = isProvider ? order.customer_id : order.provider_id
 
-  // Načti profily obou stran
-  const otherId = isProvider ? order.client_id : order.provider_id
-  const [{ data: myProfile }, { data: otherProfile }] = await Promise.all([
-    supabase.from('profiles').select('id, full_name, avatar_url').eq('id', user.id).single(),
+  // Profily obou stran (přetypování proti type-never)
+  const [myProfileRes, otherProfileRes] = await Promise.all([
+    supabase.from('profiles').select('id, full_name, avatar_url, phone, city').eq('id', user.id).single(),
     supabase.from('profiles').select('id, full_name, avatar_url, phone, city').eq('id', otherId).single(),
   ])
+  const myProfile = myProfileRes.data as ProfileLite | null
+  const otherProfile = otherProfileRes.data as ProfileLite | null
 
-  // Načti historii zpráv
+  // Historie zpráv
   const { data: messages } = await supabase
     .from('messages')
     .select('*')
     .eq('order_id', params.id)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: true }) as { data: MessageRow[] | null }
 
   return (
     <div className="space-y-4">

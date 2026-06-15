@@ -1,7 +1,9 @@
 // lib/actions/types.ts
 // Sdílené typy pro Server Actions - BEZ 'use server'
 
-export type ServiceCategory = 'remesla'|'instalaterstvi'|'elektrika'|'malirstvi'|'tesarstvi'|'zahradnictvi'|'uklid'|'it_sluzby'|'doprava'|'jine'
+// Kategorie je v databázi volný text (slug), proto string.
+// (Dřív tu byl pevný výčet, který neodpovídal reálným kategoriím v DB.)
+export type ServiceCategory = string
 export type PriceUnit = 'hod'|'kus'|'den'|'projekt'
 export type OrderStatus = 'cekajici'|'prijato'|'v_procesu'|'dokonceno'|'zruseno'
 
@@ -16,7 +18,7 @@ export type ServiceFormValues = {
   price_unit: PriceUnit
   city: string
   image_url?: string
-// Více podkategorií (zaškrtávací)
+  // Více podkategorií (zaškrtávací)
   subcategory_ids?: string[]
   // Model A/B
   payment_model: PaymentModel

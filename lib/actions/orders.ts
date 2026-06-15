@@ -5,10 +5,11 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { Resend } from 'resend'
 import { newOrderEmail, orderStatusEmail } from '@/lib/email/templates'
 import type { ActionResult, OrderStatus } from './types'
+import { createNotification } from '@/lib/actions/notifications'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://propojo.cz'
 
-// Admin klient pro čtení emailů z auth.users
+// Admin klient pro čtení e-mailů z auth.users
 function getAdminClient() {
   return createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -28,6 +29,9 @@ async function getUserEmail(userId: string): Promise<string | null> {
 }
 
 async function sendNotification(to: string, subject: string, html: string) {
+  // Vypínač: bez RESEND_API_KEY e-maily tiše přeskočíme (nikdy neshodí akci).
+  // Až klíč doplníš do .env.local / Vercelu, e-maily se samy zapnou.
+  if (!process.env.RESEND_API_KEY) return
   try {
     const resend = new Resend(process.env.RESEND_API_KEY)
     const { error } = await resend.emails.send({
@@ -38,7 +42,7 @@ async function sendNotification(to: string, subject: string, html: string) {
     })
     if (error) console.error('[email]', error)
   } catch (err) {
-    console.error('[email] unexpected:', err)
+    console.error('[email] neočekávaná chyba:', err)
   }
 }
 
@@ -53,15 +57,45 @@ export async function createOrder(values: {
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return { success: false, error: 'Pro objednávku musíte být přihlášeni.' }
 
+  // Pozn.: tabulka orders má customer_id (NE client_id) a české statusy.
   const { data, error } = await supabase
     .from('orders')
-    .insert({ ...values, client_id: user.id })
+    .insert({
+      service_id: values.service_id,
+      provider_id: values.provider_id,
+      customer_id: user.id,
+      description: values.message ?? null,
+      total_price: values.price_agreed ?? null,
+      status: 'cekajici',
+    } as any)
     .select('id')
-    .single()
+    .single() as { data: { id: string } | null; error: any }
 
-  if (error) return { success: false, error: 'Objednávku se nepodařilo vytvořit.' }
+  if (error || !data) {
+    console.error('[createOrder]', error)
+    return { success: false, error: 'Objednávku se nepodařilo vytvořit.' }
+  }
 
-  // Email živnostníkovi
+  // Oznámení poskytovateli o nové poptávce
+  try {
+    const { data: senderProfile } = await supabase
+      .from('profiles').select('full_name').eq('id', user.id).single() as { data: { full_name: string | null } | null }
+    const { data: svc } = await supabase
+      .from('services').select('title').eq('id', values.service_id).single() as { data: { title: string | null } | null }
+
+    await createNotification({
+      userId: values.provider_id,
+      type: 'status_change',
+      orderId: data.id,
+      actorId: user.id,
+      title: `Nová poptávka od ${senderProfile?.full_name ?? 'zákazníka'}`,
+      preview: svc?.title ?? null,
+    })
+  } catch (err) {
+    console.error('[createOrder] notifikace:', err)
+  }
+
+  // E-mail poskytovateli (tiše přeskočí, pokud není RESEND_API_KEY)
   try {
     const [
       { data: service },
@@ -76,20 +110,21 @@ export async function createOrder(values: {
     ])
 
     if (service && clientProfile && providerEmail) {
+      const sv = service as any
       const { subject, html } = newOrderEmail({
-        providerName: providerProfile?.full_name ?? 'Živnostník',
-        clientName: clientProfile.full_name,
-        serviceTitle: service.title,
+        providerName: (providerProfile as any)?.full_name ?? 'Živnostník',
+        clientName: (clientProfile as any).full_name,
+        serviceTitle: sv.title,
         message: values.message,
-        price: service.price,
-        priceUnit: service.price_unit,
-        city: service.city,
+        price: sv.price,
+        priceUnit: sv.price_unit,
+        city: sv.city,
         orderUrl: `${APP_URL}/dashboard/objednavky`,
       })
       await sendNotification(providerEmail, subject, html)
     }
   } catch (err) {
-    console.error('[createOrder] email:', err)
+    console.error('[createOrder] e-mail:', err)
   }
 
   revalidatePath('/dashboard/objednavky')
@@ -101,33 +136,63 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return { success: false, error: 'Nejste přihlášeni.' }
 
-  const { error } = await supabase
-    .from('orders')
+  const { error } = await (supabase.from('orders') as any)
     .update({ status })
     .eq('id', orderId)
     .eq('provider_id', user.id)
 
-  if (error) return { success: false, error: 'Nepodařilo se změnit stav.' }
+  if (error) {
+    console.error('[updateOrderStatus]', error)
+    return { success: false, error: 'Nepodařilo se změnit stav.' }
+  }
 
-  // Email zákazníkovi
+  // Oznámení zákazníkovi o změně stavu (běží vždy, nezávisle na e-mailu)
+  try {
+    const STATUS_TEXT: Record<string, string> = {
+      prijato: 'Vaše poptávka byla přijata',
+      v_procesu: 'Práce na vaší objednávce byla zahájena',
+      dokonceno: 'Vaše objednávka byla dokončena',
+      zruseno: 'Vaše objednávka byla zrušena',
+    }
+    const { data: ord } = await supabase
+      .from('orders')
+      .select('customer_id, services(title)')
+      .eq('id', orderId)
+      .single() as { data: any }
+
+    if (ord && ord.customer_id !== user.id) {
+      await createNotification({
+        userId: ord.customer_id,
+        type: 'status_change',
+        orderId,
+        actorId: user.id,
+        title: STATUS_TEXT[status] ?? 'Změna stavu objednávky',
+        preview: ord.services?.title ?? null,
+      })
+    }
+  } catch (err) {
+    console.error('[updateOrderStatus] notifikace:', err)
+  }
+
+  // E-mail zákazníkovi (tiše přeskočí, pokud není RESEND_API_KEY)
   try {
     const { data: order } = await supabase
       .from('orders')
-      .select('client_id, services(title), profiles!orders_provider_id_fkey(full_name)')
+      .select('customer_id, services(title), profiles!orders_provider_id_fkey(full_name)')
       .eq('id', orderId)
-      .single()
+      .single() as { data: any }
 
     if (order) {
       const [clientEmail, { data: clientProfile }] = await Promise.all([
-        getUserEmail(order.client_id),
-        supabase.from('profiles').select('full_name').eq('id', order.client_id).single(),
+        getUserEmail(order.customer_id),
+        supabase.from('profiles').select('full_name').eq('id', order.customer_id).single(),
       ])
 
       if (clientEmail) {
         const { subject, html } = orderStatusEmail({
-          clientName: clientProfile?.full_name ?? 'Zákazník',
-          serviceTitle: (order.services as any)?.title ?? 'Služba',
-          providerName: (order.profiles as any)?.full_name ?? 'Živnostník',
+          clientName: (clientProfile as any)?.full_name ?? 'Zákazník',
+          serviceTitle: order.services?.title ?? 'Služba',
+          providerName: order.profiles?.full_name ?? 'Živnostník',
           status,
           orderUrl: `${APP_URL}/dashboard/objednavky`,
         })
@@ -135,9 +200,66 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
       }
     }
   } catch (err) {
-    console.error('[updateOrderStatus] email:', err)
+    console.error('[updateOrderStatus] e-mail:', err)
   }
 
   revalidatePath('/dashboard/objednavky')
   return { success: true, id: orderId }
+}
+
+// Odeslání zprávy v rámci objednávky (chat).
+// RLS na tabulce messages musí povolit insert/select účastníkům objednávky.
+export async function sendOrderMessage(
+  orderId: string,
+  content: string
+): Promise<ActionResult & { message?: any }> {
+  const supabase = createClient()
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError || !user) return { success: false, error: 'Nejste přihlášeni.' }
+
+  const trimmed = content.trim()
+  if (!trimmed) return { success: false, error: 'Zpráva je prázdná.' }
+
+  const { data, error } = await (supabase.from('messages') as any)
+    .insert({
+      order_id: orderId,
+      sender_id: user.id,
+      content: trimmed,
+    })
+    .select('*')
+    .single() as { data: any; error: any }
+
+  if (error || !data) {
+    console.error('[sendOrderMessage]', error)
+    return { success: false, error: 'Zprávu se nepodařilo odeslat.' }
+  }
+
+  // Oznámení druhé straně o nové zprávě
+  try {
+    const { data: order } = await supabase
+      .from('orders')
+      .select('customer_id, provider_id, services(title)')
+      .eq('id', orderId)
+      .single() as { data: any }
+
+    if (order) {
+      const recipientId = order.customer_id === user.id ? order.provider_id : order.customer_id
+      const { data: senderProfile } = await supabase
+        .from('profiles').select('full_name').eq('id', user.id).single() as { data: { full_name: string | null } | null }
+
+      await createNotification({
+        userId: recipientId,
+        type: 'new_message',
+        orderId,
+        actorId: user.id,
+        title: `Nová zpráva od ${senderProfile?.full_name ?? 'uživatele'}`,
+        preview: trimmed.length > 80 ? trimmed.slice(0, 80) + '…' : trimmed,
+      })
+    }
+  } catch (err) {
+    console.error('[sendOrderMessage] notifikace:', err)
+  }
+
+  revalidatePath(`/dashboard/objednavky/${orderId}`)
+  return { success: true, id: data.id, message: data }
 }
