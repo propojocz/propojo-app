@@ -75,12 +75,7 @@ export default function RegistracePage() {
         <div className="pointer-events-none absolute -bottom-[10%] -left-[10%] h-80 w-80 rounded-full bg-blue-500/20 blur-3xl" />
  
         <Link href="/" className="relative z-10 flex items-center gap-2.5">
-          <span className="flex gap-1.5">
-            <span className="h-3 w-3 rounded-full bg-emerald-500" />
-            <span className="h-3 w-3 rounded-full bg-blue-500" />
-            <span className="h-3 w-3 rounded-full bg-amber-500" />
-          </span>
-          <span className="text-xl font-extrabold">propojo.cz</span>
+          <img src="/propojo-logo.png" alt="Propojo" className="h-9 w-auto object-contain brightness-0 invert" />
         </Link>
  
         <div className="relative z-10">
@@ -113,12 +108,7 @@ export default function RegistracePage() {
       <div className="flex flex-1 items-center justify-center px-6 py-12 lg:px-12">
         <div className="w-full max-w-sm">
           <Link href="/" className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <span className="flex gap-1.5">
-              <span className="h-3 w-3 rounded-full bg-emerald-500" />
-              <span className="h-3 w-3 rounded-full bg-blue-500" />
-              <span className="h-3 w-3 rounded-full bg-amber-500" />
-            </span>
-            <span className="text-xl font-extrabold text-slate-900">propojo.cz</span>
+            <img src="/propojo-logo.png" alt="Propojo" className="h-9 w-auto object-contain" />
           </Link>
  
           <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Vytvořit účet</h1>

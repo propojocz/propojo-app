@@ -8,13 +8,13 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Eye, EyeOff, Loader2, AlertCircle, Check } from 'lucide-react'
 import { login } from '@/lib/actions/auth'
- 
+
 const schema = z.object({
   email: z.string().email('Neplatný email'),
   password: z.string().min(6, 'Heslo musí mít alespoň 6 znaků'),
 })
 type LoginValues = z.infer<typeof schema>
- 
+
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -22,13 +22,13 @@ function LoginForm() {
   const [showPassword, setShowPassword] = useState(false)
   const [serverError, setServerError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
- 
+
   const {
     register: f,
     handleSubmit,
     formState: { errors },
   } = useForm<LoginValues>({ resolver: zodResolver(schema) })
- 
+
   const onSubmit = async (data: LoginValues) => {
     setIsLoading(true)
     setServerError('')
@@ -41,37 +41,28 @@ function LoginForm() {
       setIsLoading(false)
     }
   }
- 
+
   return (
     <div className="flex min-h-screen">
       {/* LEVÁ STRANA – branding */}
       <div className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-gradient-to-br from-slate-900 to-[#243044] p-12 text-white lg:flex">
         <div className="pointer-events-none absolute -right-[15%] -top-[20%] h-96 w-96 rounded-full bg-emerald-500/25 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-[10%] -left-[10%] h-80 w-80 rounded-full bg-blue-500/20 blur-3xl" />
- 
-        <Link href="/" className="relative z-10 flex items-center gap-2.5">
-          <span className="flex gap-1.5">
-            <span className="h-3 w-3 rounded-full bg-emerald-500" />
-            <span className="h-3 w-3 rounded-full bg-blue-500" />
-            <span className="h-3 w-3 rounded-full bg-amber-500" />
-          </span>
-          <span className="text-xl font-extrabold">propojo.cz</span>
-        </Link>
- 
+
         <div className="relative z-10">
           <h2 className="mb-4 text-4xl font-extrabold leading-tight tracking-tight">
-            Vítejte.
+            Vítá Vás Propojo.cz.
           </h2>
           <p className="max-w-sm leading-relaxed text-white/80">
             Přihlaste se a pokračujte ve správě svých rezervací nebo služeb.
           </p>
         </div>
- 
+
         <ul className="relative z-10 space-y-4">
           {[
             'Ověření poskytovatelé přes ARES',
             'Rezervační záloha = jistota',
-            'Bez provizí pro poskytovatele',
+            'Bez skrytých poplatků',
           ].map((t) => (
             <li key={t} className="flex items-center gap-3 text-[15px]">
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500/20">
@@ -82,22 +73,18 @@ function LoginForm() {
           ))}
         </ul>
       </div>
- 
+
       {/* PRAVÁ STRANA – formulář */}
-      <div className="flex flex-1 items-center justify-center px-6 py-12 lg:px-12">
+      <div className="relative flex flex-1 items-center justify-center px-6 py-12 lg:px-12">
+        <Link href="/" className="absolute right-6 top-6 flex items-center gap-2.5 lg:right-12">
+          <img src="/propojo-logo.png" alt="Propojo" className="h-9 w-auto object-contain" />
+        </Link>
         <div className="w-full max-w-sm">
-          <Link href="/" className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <span className="flex gap-1.5">
-              <span className="h-3 w-3 rounded-full bg-emerald-500" />
-              <span className="h-3 w-3 rounded-full bg-blue-500" />
-              <span className="h-3 w-3 rounded-full bg-amber-500" />
-            </span>
-            <span className="text-xl font-extrabold text-slate-900">propojo.cz</span>
-          </Link>
- 
+          
+
           <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Přihlášení</h1>
           <p className="mb-8 mt-1.5 text-slate-500">Zadejte své údaje pro vstup do účtu.</p>
- 
+
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div>
               <label className="mb-1.5 block text-sm font-bold text-slate-800">E-mail</label>
@@ -112,7 +99,7 @@ function LoginForm() {
               />
               {errors.email && <p className="mt-1.5 text-sm text-red-600">{errors.email.message}</p>}
             </div>
- 
+
             <div>
               <div className="mb-1.5 flex items-center justify-between">
                 <label className="text-sm font-bold text-slate-800">Heslo</label>
@@ -145,7 +132,7 @@ function LoginForm() {
                 <p className="mt-1.5 text-sm text-red-600">{errors.password.message}</p>
               )}
             </div>
- 
+
             <AnimatePresence>
               {serverError && (
                 <motion.div
@@ -159,7 +146,7 @@ function LoginForm() {
                 </motion.div>
               )}
             </AnimatePresence>
- 
+
             <button
               type="submit"
               disabled={isLoading}
@@ -174,7 +161,7 @@ function LoginForm() {
               )}
             </button>
           </form>
- 
+
           <p className="mt-6 text-center text-sm text-slate-600">
             Nemáte účet?{' '}
             <Link href="/registrace" className="font-bold text-emerald-600 hover:underline">
@@ -195,7 +182,7 @@ function LoginForm() {
     </div>
   )
 }
- 
+
 export default function PrihlasitPage() {
   return (
     <Suspense fallback={null}>

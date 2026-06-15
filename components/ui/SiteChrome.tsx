@@ -16,7 +16,6 @@ export default function SiteChrome({
 
   // Stránky s vlastním celostránkovým designem – bez appkové hlavičky a patičky.
   const hideChrome =
-    pathname === '/' ||
     pathname.startsWith('/prihlasit') ||
     pathname.startsWith('/registrace')
 
