@@ -12,18 +12,23 @@ interface OrderButtonProps {
   providerId: string
   isLoggedIn: boolean
   priceAgreed?: number
+  paymentModel?: string | null
 }
 
-export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAgreed }: OrderButtonProps) {
+export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAgreed, paymentModel }: OrderButtonProps) {
   const [state, setState] = useState<'idle' | 'form' | 'loading' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
+
+  const isModelB = paymentModel === 'B'
+  // Jasný text podle modelu (místo vágního "Mám zájem")
+  const ctaLabel = isModelB ? 'Poptat a domluvit cenu' : 'Mám zájem o termín'
 
   if (!isLoggedIn) {
     return (
       <Link href={`/prihlasit?next=/sluzby/${serviceId}`} className="btn-primary w-full">
         <LogIn className="h-4 w-4" />
-        Přihlásit se pro objednávku
+        Přihlásit a objednat
       </Link>
     )
   }
@@ -71,7 +76,7 @@ export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAg
             <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder="Zpráva pro živnostníka (volitelné)…"
+              placeholder={isModelB ? 'Popište práci, kterou potřebujete nacenit…' : 'Zpráva pro živnostníka (volitelné)…'}
               rows={3}
               className="form-input resize-none text-sm"
               maxLength={500}
@@ -90,7 +95,7 @@ export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAg
           className="btn-primary w-full"
         >
           <MessageSquare className="h-4 w-4" />
-          Mám zájem
+          {ctaLabel}
         </button>
       )}
 
