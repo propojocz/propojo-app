@@ -1,6 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
-import { Loader2, Send, MapPin, Phone, Tag, Wallet } from 'lucide-react'
+import Link from 'next/link'
+import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink } from 'lucide-react'
 import OrderStatusButton from '../OrderStatusButton'
 import { sendOrderMessage } from '@/lib/actions/orders'
 
@@ -90,6 +91,11 @@ export default function OrderDetailClient({
   const service = order.services
   const otherLabel = isProvider ? 'Zákazník' : 'Živnostník'
 
+  // Karta je klikací jen když druhá strana je poskytovatel (má veřejný profil).
+  // Tj. když se dívá zákazník (isProvider === false) → druhá strana = poskytovatel.
+  const otherIsProvider = !isProvider
+  const profileHref = otherIsProvider && otherProfile?.id ? `/profil/${otherProfile.id}` : null
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages.length])
@@ -105,6 +111,24 @@ export default function OrderDetailClient({
     }
     setSending(false)
   }
+
+  // Vnitřek karty (avatar + jméno + město) — používá se klikací i neklikací varianta
+  const cardInner = (
+    <div className="flex items-center gap-3">
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-100 text-base font-bold text-emerald-700">
+        {otherProfile?.avatar_url ? (
+          <img src={otherProfile.avatar_url} alt="" className="h-12 w-12 rounded-full object-cover" />
+        ) : (
+          initials(otherProfile?.full_name ?? null)
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-bold text-slate-900">{otherProfile?.full_name ?? otherLabel}</p>
+        {otherProfile?.city && <p className="text-sm text-slate-500">{otherProfile.city}</p>}
+      </div>
+      {profileHref && <ExternalLink className="h-4 w-4 shrink-0 text-slate-300" />}
+    </div>
+  )
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
@@ -214,19 +238,14 @@ export default function OrderDetailClient({
       <div className="space-y-4">
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="mb-4 text-xs font-semibold uppercase tracking-wide text-slate-400">{otherLabel}</h3>
-          <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-100 text-base font-bold text-emerald-700">
-              {otherProfile?.avatar_url ? (
-                <img src={otherProfile.avatar_url} alt="" className="h-12 w-12 rounded-full object-cover" />
-              ) : (
-                initials(otherProfile?.full_name ?? null)
-              )}
-            </div>
-            <div className="min-w-0">
-              <p className="truncate font-bold text-slate-900">{otherProfile?.full_name ?? otherLabel}</p>
-              {otherProfile?.city && <p className="text-sm text-slate-500">{otherProfile.city}</p>}
-            </div>
-          </div>
+
+          {profileHref ? (
+            <Link href={profileHref} className="-m-2 block rounded-xl p-2 transition-colors hover:bg-slate-50">
+              {cardInner}
+            </Link>
+          ) : (
+            cardInner
+          )}
 
           {/* Kontakt odhalíme až po přijetí objednávky */}
           {order.status !== 'cekajici' && order.status !== 'zruseno' && otherProfile?.phone && (
