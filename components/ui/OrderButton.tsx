@@ -22,7 +22,7 @@ export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAg
 
   const isModelB = paymentModel === 'B'
   // Jasný text podle modelu (místo vágního "Mám zájem")
-  const ctaLabel = isModelB ? 'Poptat a domluvit cenu' : 'Mám zájem o termín'
+  const ctaLabel = 'domluvit cenu'
 
   if (!isLoggedIn) {
     return (

@@ -2,7 +2,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { Package, ShoppingBag, TrendingUp, Star, ArrowRight, PlusCircle, Search } from 'lucide-react'
+import { Package, ShoppingBag, TrendingUp, Star, ArrowRight, PlusCircle, Search, ChevronRight, Heart } from 'lucide-react'
 import { CATEGORY_META } from '@/types/database'
 import type { Profile } from '@/types/database'
 
@@ -120,13 +120,14 @@ export default async function DashboardPage() {
             {recentOrders && recentOrders.length > 0 ? (
               <div className="divide-y divide-slate-100">
                 {recentOrders.map((o: any) => (
-                  <div key={o.id} className="flex items-center gap-3 px-5 py-3">
+                  <Link key={o.id} href={`/dashboard/objednavky/${o.id}`} className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-slate-50">
                     <div className="flex-1 min-w-0">
                       <p className="truncate text-sm font-semibold text-slate-800">{o.services?.title ?? 'Neznámá služba'}</p>
                       <p className="text-xs text-slate-400">{o.profiles?.full_name ?? 'Zákazník'} · {new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'short' }).format(new Date(o.created_at))}</p>
                     </div>
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[o.status] ?? 'bg-slate-100 text-slate-500'}`}>{statusLabels[o.status] ?? o.status}</span>
-                  </div>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+                  </Link>
                 ))}
               </div>
             ) : (
@@ -170,10 +171,12 @@ export default async function DashboardPage() {
     { count: totalOrders },
     { count: activeOrders },
     { data: myOrders },
+    { data: favorites },
   ] = await Promise.all([
     supabase.from('orders').select('id', { count: 'exact', head: true }).eq('customer_id', user.id),
     supabase.from('orders').select('id', { count: 'exact', head: true }).eq('customer_id', user.id).in('status', ['cekajici', 'prijato', 'v_procesu']),
     supabase.from('orders').select('id, status, created_at, services(title, price, price_unit), profiles!orders_provider_id_fkey(full_name)').eq('customer_id', user.id).order('created_at', { ascending: false }).limit(10),
+    supabase.from('favorites').select('provider_id, profiles!favorites_provider_id_fkey(id, full_name, avatar_url, city, rating, review_count)').eq('user_id', user.id).order('created_at', { ascending: false }).limit(8),
   ])
 
   const statusColors: Record<string, string> = {
@@ -226,7 +229,7 @@ export default async function DashboardPage() {
         {myOrders && myOrders.length > 0 ? (
           <div className="divide-y divide-slate-100">
             {myOrders.map((o: any) => (
-              <div key={o.id} className="flex items-center gap-4 px-5 py-4">
+              <Link key={o.id} href={`/dashboard/objednavky/${o.id}`} className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-slate-50">
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-slate-900">{o.services?.title ?? 'Neznámá služba'}</p>
                   <p className="text-sm text-slate-500">
@@ -238,7 +241,8 @@ export default async function DashboardPage() {
                 <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${statusColors[o.status] ?? 'bg-slate-100 text-slate-500'}`}>
                   {statusLabels[o.status] ?? o.status}
                 </span>
-              </div>
+                <ChevronRight className="h-5 w-5 shrink-0 text-slate-300" />
+              </Link>
             ))}
           </div>
         ) : (
@@ -252,6 +256,35 @@ export default async function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* Oblíbení živnostníci */}
+      {favorites && favorites.length > 0 && (
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">
+            <Heart className="h-4 w-4 text-rose-500" fill="currentColor" />
+            <h2 className="font-bold text-slate-900">Oblíbení živnostníci</h2>
+          </div>
+          <div className="grid gap-3 p-5 sm:grid-cols-2">
+            {favorites.map((f: any) => {
+              const p = f.profiles
+              if (!p) return null
+              return (
+                <Link key={f.provider_id} href={`/profil/${p.id}`} className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 transition-all hover:border-emerald-200 hover:bg-emerald-50">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-100 text-base font-bold text-emerald-700">
+                    {p.avatar_url ? <img src={p.avatar_url} alt="" className="h-11 w-11 rounded-full object-cover" /> : (p.full_name?.charAt(0)?.toUpperCase() ?? '?')}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-semibold text-slate-900">{p.full_name ?? 'Živnostník'}</p>
+                    <p className="text-xs text-slate-500">
+                      {p.city ?? ''}{p.rating ? ` · ${Number(p.rating).toFixed(1)} ★ (${p.review_count ?? 0})` : ''}
+                    </p>
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Stát se živnostníkem */}
       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6">

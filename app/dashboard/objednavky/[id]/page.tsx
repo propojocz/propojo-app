@@ -38,6 +38,7 @@ type ProfileLite = {
   avatar_url: string | null
   phone: string | null
   city: string | null
+  created_at: string | null
 }
 
 type MessageRow = {
@@ -55,7 +56,6 @@ export default async function OrderDetailPage({ params }: Props) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/prihlasit')
 
-  // Načti objednávku + službu (sloupce ověřené proti reálné DB)
   const { data: order, error } = await supabase
     .from('orders')
     .select('*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee)')
@@ -64,19 +64,27 @@ export default async function OrderDetailPage({ params }: Props) {
 
   if (error || !order) notFound()
 
-  // Ověř, že přihlášený uživatel je účastníkem objednávky
   if (order.customer_id !== user.id && order.provider_id !== user.id) notFound()
 
   const isProvider = order.provider_id === user.id
   const otherId = isProvider ? order.customer_id : order.provider_id
 
-  // Profily obou stran (přetypování proti type-never)
+  // Profily obou stran (u druhé strany i created_at kvůli "na Propojo od…")
   const [myProfileRes, otherProfileRes] = await Promise.all([
-    supabase.from('profiles').select('id, full_name, avatar_url, phone, city').eq('id', user.id).single(),
-    supabase.from('profiles').select('id, full_name, avatar_url, phone, city').eq('id', otherId).single(),
+    supabase.from('profiles').select('id, full_name, avatar_url, phone, city, created_at').eq('id', user.id).single(),
+    supabase.from('profiles').select('id, full_name, avatar_url, phone, city, created_at').eq('id', otherId).single(),
   ])
   const myProfile = myProfileRes.data as ProfileLite | null
   const otherProfile = otherProfileRes.data as ProfileLite | null
+
+  // Počet DOKONČENÝCH objednávek druhé strany (signál důvěry).
+  // U zákazníka počítáme jeho objednávky (customer_id), u poskytovatele jeho zakázky (provider_id).
+  const otherCompletedField = isProvider ? 'customer_id' : 'provider_id'
+  const { count: otherCompletedCount } = await supabase
+    .from('orders')
+    .select('id', { count: 'exact', head: true })
+    .eq(otherCompletedField, otherId)
+    .eq('status', 'dokonceno')
 
   // Historie zpráv
   const { data: messages } = await supabase
@@ -95,6 +103,7 @@ export default async function OrderDetailPage({ params }: Props) {
         order={order}
         myProfile={myProfile}
         otherProfile={otherProfile}
+        otherCompletedCount={otherCompletedCount ?? 0}
         initialMessages={messages ?? []}
         isProvider={isProvider}
         userId={user.id}

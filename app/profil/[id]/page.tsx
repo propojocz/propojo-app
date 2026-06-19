@@ -2,7 +2,10 @@
 import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { MapPin, BadgeCheck, Star, Wallet, Tag } from 'lucide-react'
+import { MapPin, BadgeCheck, Star, Wallet, Tag, Eye } from 'lucide-react'
+import FavoriteButton from '@/components/ui/FavoriteButton'
+import { isFavorited } from '@/lib/actions/favorites'
+import ProfileViewTracker from '@/components/ui/ProfileViewTracker'
 
 interface Props { params: { id: string } }
 
@@ -17,6 +20,7 @@ type ProviderProfile = {
   ico_verified: boolean | null
   rating: number | null
   review_count: number | null
+  view_count: number | null
 }
 
 type ServiceRow = {
@@ -73,12 +77,15 @@ export default async function ProfilPage({ params }: Props) {
   // Profil poskytovatele (veřejně čitelný díky profiles_select_all)
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id, full_name, company_name, avatar_url, city, bio, is_provider, ico_verified, rating, review_count')
+    .select('id, full_name, company_name, avatar_url, city, bio, is_provider, ico_verified, rating, review_count, view_count')
     .eq('id', params.id)
     .single() as { data: ProviderProfile | null }
 
   // Profil neexistuje, nebo není poskytovatel → 404
   if (!profile || profile.is_provider !== true) notFound()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  const favorited = user ? await isFavorited(params.id) : false
 
   const displayName = profile.company_name || profile.full_name || 'Poskytovatel'
 
@@ -100,9 +107,13 @@ export default async function ProfilPage({ params }: Props) {
 
   const rating = profile.rating ?? 0
   const reviewCount = profile.review_count ?? 0
+  const viewCount = profile.view_count ?? 0
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
+      {/* Neviditelný tracker – zaznamená zhlédnutí (nepočítá vlastníka) */}
+      <ProfileViewTracker providerId={profile.id} />
+
       {/* HLAVIČKA */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-start">
@@ -135,6 +146,15 @@ export default async function ProfilPage({ params }: Props) {
                   <span>({reviewCount} {reviewCount === 1 ? 'recenze' : reviewCount < 5 ? 'recenze' : 'recenzí'})</span>
                 </span>
               )}
+              {viewCount > 0 && (
+                <span className="inline-flex items-center gap-1.5 text-slate-400">
+                  <Eye className="h-4 w-4" /> {viewCount} {viewCount === 1 ? 'zobrazení' : 'zobrazení'}
+                </span>
+              )}
+            </div>
+
+            <div className="mt-4">
+              <FavoriteButton providerId={profile.id} initialFavorited={favorited} isLoggedIn={!!user} variant="full" />
             </div>
 
             {profile.bio && (
