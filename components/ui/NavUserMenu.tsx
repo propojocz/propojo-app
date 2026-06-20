@@ -39,8 +39,12 @@ export default function NavUserMenu({ name, avatarUrl, userId }: NavUserMenuProp
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-medium text-slate-700 transition-all hover:border-slate-300 hover:bg-slate-50"
       >
-        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">
-          {name.charAt(0).toUpperCase()}
+        <div className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">
+          {avatarUrl ? (
+            <img src={avatarUrl} alt="" className="h-6 w-6 rounded-full object-cover" />
+          ) : (
+            name.charAt(0).toUpperCase()
+          )}
         </div>
         <span className="hidden max-w-[100px] truncate sm:block">{name.split(' ')[0]}</span>
         <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -56,9 +60,18 @@ export default function NavUserMenu({ name, avatarUrl, userId }: NavUserMenuProp
             className="absolute right-0 top-full mt-1.5 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg"
           >
             {/* Profil info */}
-            <div className="border-b border-slate-100 px-4 py-3">
-              <p className="text-xs text-slate-400">Přihlášen jako</p>
-              <p className="truncate text-sm font-bold text-slate-800">{name}</p>
+            <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="" className="h-9 w-9 rounded-full object-cover" />
+                ) : (
+                  name.charAt(0).toUpperCase()
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-slate-400">Přihlášen jako</p>
+                <p className="truncate text-sm font-bold text-slate-800">{name}</p>
+              </div>
             </div>
 
             {/* Menu položky */}

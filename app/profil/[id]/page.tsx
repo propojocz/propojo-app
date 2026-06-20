@@ -6,6 +6,7 @@ import { MapPin, BadgeCheck, Star, Wallet, Tag, Eye } from 'lucide-react'
 import FavoriteButton from '@/components/ui/FavoriteButton'
 import { isFavorited } from '@/lib/actions/favorites'
 import ProfileViewTracker from '@/components/ui/ProfileViewTracker'
+import Avatar from '@/components/ui/Avatar'
 
 interface Props { params: { id: string } }
 
@@ -41,11 +42,6 @@ type ReviewRow = {
   comment: string | null
   created_at: string
   profiles: { full_name: string | null; avatar_url: string | null } | null
-}
-
-function initials(name: string | null): string {
-  if (!name) return '?'
-  return name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase()
 }
 
 // Hvězdičkové hodnocení (vizuální)
@@ -117,13 +113,7 @@ export default async function ProfilPage({ params }: Props) {
       {/* HLAVIČKA */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-start">
-          <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-100 text-3xl font-black text-emerald-700">
-            {profile.avatar_url ? (
-              <img src={profile.avatar_url} alt={displayName} className="h-24 w-24 rounded-full object-cover" />
-            ) : (
-              initials(displayName)
-            )}
-          </div>
+          <Avatar name={displayName} url={profile.avatar_url} size={96} className="text-3xl" />
 
           <div className="flex-1 text-center sm:text-left">
             <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
@@ -218,13 +208,7 @@ export default async function ProfilPage({ params }: Props) {
             {reviews.map((r) => (
               <div key={r.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-100 text-sm font-bold text-slate-600">
-                    {r.profiles?.avatar_url ? (
-                      <img src={r.profiles.avatar_url} alt="" className="h-10 w-10 rounded-full object-cover" />
-                    ) : (
-                      initials(r.profiles?.full_name ?? null)
-                    )}
-                  </div>
+                  <Avatar name={r.profiles?.full_name} url={r.profiles?.avatar_url} size={40} className="bg-slate-100 text-slate-600 text-sm" />
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold text-slate-900">{r.profiles?.full_name ?? 'Zákazník'}</p>
                     <div className="flex items-center gap-2">

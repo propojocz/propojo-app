@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Package, ShoppingBag, TrendingUp, Star, ArrowRight, PlusCircle, Search, ChevronRight, Heart } from 'lucide-react'
 import { CATEGORY_META } from '@/types/database'
 import type { Profile } from '@/types/database'
+import Avatar from '@/components/ui/Avatar'
 
 export const metadata = { title: 'Dashboard | Propojo' }
 
@@ -270,9 +271,7 @@ export default async function DashboardPage() {
               if (!p) return null
               return (
                 <Link key={f.provider_id} href={`/profil/${p.id}`} className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 transition-all hover:border-emerald-200 hover:bg-emerald-50">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-100 text-base font-bold text-emerald-700">
-                    {p.avatar_url ? <img src={p.avatar_url} alt="" className="h-11 w-11 rounded-full object-cover" /> : (p.full_name?.charAt(0)?.toUpperCase() ?? '?')}
-                  </div>
+                  <Avatar name={p.full_name} url={p.avatar_url} size={44} />
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-semibold text-slate-900">{p.full_name ?? 'Živnostník'}</p>
                     <p className="text-xs text-slate-500">

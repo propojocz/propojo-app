@@ -1,9 +1,10 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
-import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink } from 'lucide-react'
+import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2 } from 'lucide-react'
 import OrderStatusButton from '../OrderStatusButton'
 import { sendOrderMessage } from '@/lib/actions/orders'
+import Avatar from '@/components/ui/Avatar'
 
 type ServiceLite = {
   id: string
@@ -36,6 +37,7 @@ type ProfileLite = {
   avatar_url: string | null
   phone: string | null
   city: string | null
+  created_at: string | null
 }
 
 type MessageRow = {
@@ -63,15 +65,11 @@ const STATUS_COLORS: Record<string, string> = {
   zruseno: 'bg-red-100 text-red-700 border-red-200',
 }
 
-function initials(name: string | null): string {
-  if (!name) return '?'
-  return name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase()
-}
-
 export default function OrderDetailClient({
   order,
   myProfile,
   otherProfile,
+  otherCompletedCount,
   initialMessages,
   isProvider,
   userId,
@@ -79,6 +77,7 @@ export default function OrderDetailClient({
   order: OrderRow
   myProfile: ProfileLite | null
   otherProfile: ProfileLite | null
+  otherCompletedCount: number
   initialMessages: MessageRow[]
   isProvider: boolean
   userId: string
@@ -91,10 +90,14 @@ export default function OrderDetailClient({
   const service = order.services
   const otherLabel = isProvider ? 'Zákazník' : 'Živnostník'
 
-  // Karta je klikací jen když druhá strana je poskytovatel (má veřejný profil).
-  // Tj. když se dívá zákazník (isProvider === false) → druhá strana = poskytovatel.
+  // Karta klikací jen směrem na poskytovatele (má veřejný profil).
   const otherIsProvider = !isProvider
   const profileHref = otherIsProvider && otherProfile?.id ? `/profil/${otherProfile.id}` : null
+
+  // "Na Propojo od …"
+  const memberSince = otherProfile?.created_at
+    ? new Intl.DateTimeFormat('cs-CZ', { month: 'long', year: 'numeric' }).format(new Date(otherProfile.created_at))
+    : null
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -112,16 +115,9 @@ export default function OrderDetailClient({
     setSending(false)
   }
 
-  // Vnitřek karty (avatar + jméno + město) — používá se klikací i neklikací varianta
   const cardInner = (
     <div className="flex items-center gap-3">
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-100 text-base font-bold text-emerald-700">
-        {otherProfile?.avatar_url ? (
-          <img src={otherProfile.avatar_url} alt="" className="h-12 w-12 rounded-full object-cover" />
-        ) : (
-          initials(otherProfile?.full_name ?? null)
-        )}
-      </div>
+      <Avatar name={otherProfile?.full_name} url={otherProfile?.avatar_url} size={48} />
       <div className="min-w-0 flex-1">
         <p className="truncate font-bold text-slate-900">{otherProfile?.full_name ?? otherLabel}</p>
         {otherProfile?.city && <p className="text-sm text-slate-500">{otherProfile.city}</p>}
@@ -148,7 +144,6 @@ export default function OrderDetailClient({
             </span>
           </div>
 
-          {/* Detaily služby */}
           <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-600">
             {service?.category && (
               <span className="inline-flex items-center gap-1.5"><Tag className="h-4 w-4 text-slate-400" /> {service.category}</span>
@@ -161,7 +156,6 @@ export default function OrderDetailClient({
             )}
           </div>
 
-          {/* Platební model */}
           {service?.payment_model === 'A' && (service?.deposit_amount ?? 0) > 0 && (
             <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
               <strong>Model A — rezervační záloha:</strong> {Number(service?.deposit_amount).toLocaleString('cs-CZ')} Kč (započítává se do ceny)
@@ -173,7 +167,6 @@ export default function OrderDetailClient({
             </div>
           )}
 
-          {/* Poznámka od zákazníka */}
           {order.description && (
             <div className="mt-4">
               <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Poznámka od zákazníka</h3>
@@ -181,7 +174,6 @@ export default function OrderDetailClient({
             </div>
           )}
 
-          {/* Tlačítka akcí — jen poskytovatel */}
           {isProvider && (
             <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-5">
               <OrderStatusButton orderId={order.id} currentStatus={order.status} />
@@ -246,6 +238,20 @@ export default function OrderDetailClient({
           ) : (
             cardInner
           )}
+
+          {/* Důvěryhodnostní info o druhé straně */}
+          <div className="mt-4 space-y-2 border-t border-slate-100 pt-4 text-sm text-slate-600">
+            {memberSince && (
+              <div className="flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-slate-400" />
+                <span>Na Propojo od {memberSince}</span>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-slate-400" />
+              <span>{otherCompletedCount} {otherCompletedCount === 1 ? 'dokončená objednávka' : otherCompletedCount >= 2 && otherCompletedCount <= 4 ? 'dokončené objednávky' : 'dokončených objednávek'}</span>
+            </div>
+          </div>
 
           {/* Kontakt odhalíme až po přijetí objednávky */}
           {order.status !== 'cekajici' && order.status !== 'zruseno' && otherProfile?.phone && (
