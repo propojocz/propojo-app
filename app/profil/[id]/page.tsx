@@ -7,6 +7,7 @@ import FavoriteButton from '@/components/ui/FavoriteButton'
 import { isFavorited } from '@/lib/actions/favorites'
 import ProfileViewTracker from '@/components/ui/ProfileViewTracker'
 import Avatar from '@/components/ui/Avatar'
+import ProfileGallery from '@/components/ui/ProfileGallery'
 
 interface Props { params: { id: string } }
 
@@ -22,6 +23,7 @@ type ProviderProfile = {
   rating: number | null
   review_count: number | null
   view_count: number | null
+  gallery: string[] | null
 }
 
 type ServiceRow = {
@@ -73,7 +75,7 @@ export default async function ProfilPage({ params }: Props) {
   // Profil poskytovatele (veřejně čitelný díky profiles_select_all)
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id, full_name, company_name, avatar_url, city, bio, is_provider, ico_verified, rating, review_count, view_count')
+    .select('id, full_name, company_name, avatar_url, city, bio, is_provider, ico_verified, rating, review_count, view_count, gallery')
     .eq('id', params.id)
     .single() as { data: ProviderProfile | null }
 
@@ -104,6 +106,7 @@ export default async function ProfilPage({ params }: Props) {
   const rating = profile.rating ?? 0
   const reviewCount = profile.review_count ?? 0
   const viewCount = profile.view_count ?? 0
+  const gallery = profile.gallery ?? []
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
@@ -153,6 +156,14 @@ export default async function ProfilPage({ params }: Props) {
           </div>
         </div>
       </div>
+
+      {/* UKÁZKY PRÁCE (galerie) */}
+      {gallery.length > 0 && (
+        <section className="mt-8">
+          <h2 className="mb-4 text-lg font-black text-slate-900">Ukázky práce</h2>
+          <ProfileGallery photos={gallery} />
+        </section>
+      )}
 
       {/* SLUŽBY */}
       <section className="mt-8">

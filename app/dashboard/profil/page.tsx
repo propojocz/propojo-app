@@ -4,16 +4,18 @@ import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Loader2, CheckCircle2, AlertCircle, BadgeCheck } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import ImageUpload from '@/components/ui/ImageUpload'
+import GalleryUpload from '@/components/ui/GalleryUpload'
 import type { Profile } from '@/types/database'
 
 const schema = z.object({
   full_name: z.string().min(2, 'Zadejte celé jméno'),
+  company_name: z.string().optional(),
   phone: z.string().optional(),
   city: z.string().optional(),
-  bio: z.string().max(500, 'Bio je příliš dlouhé').optional(),
+  bio: z.string().max(600, 'Bio je příliš dlouhé').optional(),
   avatar_url: z.string().optional(),
 })
 type FormValues = z.infer<typeof schema>
@@ -23,6 +25,10 @@ export default function ProfilPage() {
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState('')
+  const [ico, setIco] = useState<string | null>(null)
+  const [icoVerified, setIcoVerified] = useState(false)
+  const [isProvider, setIsProvider] = useState(false)
+  const [gallery, setGallery] = useState<string[]>([])
 
   const { register: f, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -34,13 +40,20 @@ export default function ProfilPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
       const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single() as { data: Profile | null }
-      if (data) reset({
-        full_name: data.full_name,
-        phone: data.phone ?? '',
-        city: data.city ?? '',
-        bio: data.bio ?? '',
-        avatar_url: data.avatar_url ?? '',
-      })
+      if (data) {
+        reset({
+          full_name: data.full_name,
+          company_name: (data as any).company_name ?? '',
+          phone: data.phone ?? '',
+          city: data.city ?? '',
+          bio: data.bio ?? '',
+          avatar_url: data.avatar_url ?? '',
+        })
+        setIco((data as any).ico ?? null)
+        setIcoVerified((data as any).ico_verified === true)
+        setIsProvider(data.is_provider === true)
+        setGallery((data as any).gallery ?? [])
+      }
       setLoading(false)
     }
     load()
@@ -51,7 +64,8 @@ export default function ProfilPage() {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setError('Nejste přihlášeni.'); setSaving(false); return }
-    const { error: err } = await (supabase.from('profiles') as any).update(values).eq('id', user.id)
+    // Uložíme i galerii spolu s ostatními poli
+    const { error: err } = await (supabase.from('profiles') as any).update({ ...values, gallery }).eq('id', user.id)
     if (err) { setError('Nepodařilo se uložit profil.') }
     else { setSuccess(true); setTimeout(() => setSuccess(false), 3000) }
     setSaving(false)
@@ -75,7 +89,6 @@ export default function ProfilPage() {
           <div className="space-y-1.5">
             <label className="form-label">Profilová fotka</label>
             <div className="flex items-center gap-4">
-              {/* Náhled avataru */}
               <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-100">
                 {avatarUrl ? (
                   <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
@@ -101,6 +114,27 @@ export default function ProfilPage() {
             {errors.full_name && <p className="form-error">{errors.full_name.message}</p>}
           </div>
 
+          {/* Název firmy + IČO – jen pro poskytovatele */}
+          {isProvider && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="form-label">Název firmy <span className="font-normal text-slate-400">(volitelné)</span></label>
+                <input {...f('company_name')} placeholder="Např. Úklidové služby Jana" className="form-input" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="form-label flex items-center gap-2">
+                  IČO
+                  {icoVerified && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">
+                      <BadgeCheck className="h-3 w-3" /> Ověřeno ARES
+                    </span>
+                  )}
+                </label>
+                <input value={ico ?? '—'} disabled className="form-input bg-slate-100 text-slate-500" />
+              </div>
+            </div>
+          )}
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <label className="form-label">Telefon</label>
@@ -124,6 +158,19 @@ export default function ProfilPage() {
             />
             {errors.bio && <p className="form-error">{errors.bio.message}</p>}
           </div>
+
+          {/* Fotogalerie – jen pro poskytovatele */}
+          {isProvider && (
+            <div className="space-y-1.5">
+              <label className="form-label">
+                Fotogalerie <span className="font-normal text-slate-400">(ukázky vaší práce)</span>
+              </label>
+              <p className="text-xs text-slate-400">Profily s fotkami získávají víc poptávek. Zobrazí se na vašem veřejném profilu.</p>
+              <div className="pt-2">
+                <GalleryUpload value={gallery} onChange={setGallery} />
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
