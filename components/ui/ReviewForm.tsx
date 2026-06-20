@@ -1,107 +1,94 @@
 'use client'
-// components/ui/ReviewForm.tsx
-
 import { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Star, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Star, Loader2, CheckCircle2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { createReview } from '@/lib/actions/reviews'
 
-interface ReviewFormProps {
-  orderId: string
-  providerId: string
-  providerName: string
-  serviceTitle: string
-  onSuccess?: () => void
-}
-
-export default function ReviewForm({ orderId, providerId, providerName, serviceTitle, onSuccess }: ReviewFormProps) {
+export default function ReviewForm({ orderId }: { orderId: string }) {
+  const router = useRouter()
   const [rating, setRating] = useState(0)
-  const [hovered, setHovered] = useState(0)
+  const [hover, setHover] = useState(0)
   const [comment, setComment] = useState('')
-  const [state, setState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
-  const [error, setError] = useState('')
+  const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  const [errorMsg, setErrorMsg] = useState('')
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (rating === 0) { setError('Vyberte hodnocení.'); return }
-    setState('loading'); setError('')
-
-    const result = await createReview({ order_id: orderId, provider_id: providerId, rating, comment })
-    if (result.success) { setState('success'); onSuccess?.() }
-    else { setError(result.error); setState('error') }
+  const handleSubmit = async () => {
+    if (rating < 1) {
+      setErrorMsg('Vyberte počet hvězd.')
+      return
+    }
+    setState('loading')
+    setErrorMsg('')
+    const result = await createReview({ orderId, rating, comment })
+    if (result.success) {
+      setState('done')
+      router.refresh()
+    } else {
+      setState('error')
+      setErrorMsg(result.error ?? 'Něco se nepovedlo.')
+    }
   }
 
-  if (state === 'success') {
+  if (state === 'done') {
     return (
-      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-center">
-        <CheckCircle2 className="h-10 w-10 text-emerald-500" />
+      <div className="flex flex-col items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-center">
+        <CheckCircle2 className="h-8 w-8 text-emerald-500" />
         <p className="font-bold text-emerald-800">Děkujeme za hodnocení!</p>
-        <p className="text-sm text-emerald-600">Vaše recenze pomůže ostatním zákazníkům.</p>
-      </motion.div>
+        <p className="text-sm text-emerald-700">Vaše recenze pomůže ostatním zákazníkům.</p>
+      </div>
     )
   }
 
-  const starLabels = ['', 'Špatné', 'Podprůměrné', 'Dobré', 'Velmi dobré', 'Výborné']
+  const shown = hover || rating
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      <div>
-        <p className="mb-1 text-sm font-semibold text-slate-700">Jak hodnotíte {providerName}?</p>
-        <p className="text-xs text-slate-400 mb-4">Služba: {serviceTitle}</p>
+    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h3 className="font-bold text-slate-900">Ohodnoťte tuto službu</h3>
+      <p className="mt-1 text-sm text-slate-500">Jak jste byli spokojeni? Vaše hodnocení uvidí ostatní.</p>
 
-        {/* Hvězdičky */}
-        <div className="flex items-center gap-1.5">
-          {[1,2,3,4,5].map((star) => (
-            <button
-              key={star}
-              type="button"
-              onClick={() => setRating(star)}
-              onMouseEnter={() => setHovered(star)}
-              onMouseLeave={() => setHovered(0)}
-              className="transition-transform hover:scale-110 focus:outline-none"
-            >
-              <Star
-                className={`h-9 w-9 transition-colors ${
-                  star <= (hovered || rating)
-                    ? 'fill-amber-400 text-amber-400'
-                    : 'fill-slate-200 text-slate-200'
-                }`}
-              />
-            </button>
-          ))}
-          <span className="ml-2 text-sm font-semibold text-slate-600">
-            {starLabels[hovered || rating]}
-          </span>
-        </div>
+      {/* Hvězdy */}
+      <div className="mt-4 flex gap-1">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => setRating(i)}
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover(0)}
+            className="transition-transform hover:scale-110"
+          >
+            <Star
+              className={`h-8 w-8 ${i <= shown ? 'text-amber-400' : 'text-slate-200'}`}
+              fill={i <= shown ? 'currentColor' : 'none'}
+              strokeWidth={1.5}
+            />
+          </button>
+        ))}
       </div>
 
       {/* Komentář */}
-      <div className="space-y-1.5">
-        <label className="form-label">
-          Komentář <span className="font-normal text-slate-400">(volitelné)</span>
-        </label>
-        <textarea
-          value={comment}
-          onChange={e => setComment(e.target.value)}
-          rows={3}
-          maxLength={1000}
-          placeholder="Popište svoji zkušenost s touto službou..."
-          className="form-input resize-none"
-        />
-        <p className="text-right text-xs text-slate-400">{comment.length}/1000</p>
-      </div>
+      <textarea
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        placeholder="Napište pár slov o vaší zkušenosti (nepovinné)…"
+        rows={3}
+        maxLength={600}
+        className="mt-4 w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+      />
 
-      <AnimatePresence>
-        {error && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            <AlertCircle className="h-4 w-4 shrink-0" />{error}
-          </motion.div>
+      {state === 'error' && <p className="mt-2 text-sm text-red-600">{errorMsg}</p>}
+
+      <button
+        onClick={handleSubmit}
+        disabled={state === 'loading'}
+        className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3 font-bold text-white transition hover:bg-emerald-600 disabled:opacity-70"
+      >
+        {state === 'loading' ? (
+          <><Loader2 className="h-4 w-4 animate-spin" /> Odesílám…</>
+        ) : (
+          'Odeslat hodnocení'
         )}
-      </AnimatePresence>
-
-      <button type="submit" disabled={state === 'loading' || rating === 0} className="btn-primary w-full">
-        {state === 'loading' ? <><Loader2 className="h-4 w-4 animate-spin" /> Ukládám…</> : 'Odeslat hodnocení'}
       </button>
-    </form>
+    </div>
   )
 }

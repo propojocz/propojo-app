@@ -4,6 +4,7 @@ import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import OrderDetailClient from './OrderDetailClient'
+import ReviewForm from '@/components/ui/ReviewForm'
 
 interface Props { params: { id: string } }
 
@@ -78,7 +79,6 @@ export default async function OrderDetailPage({ params }: Props) {
   const otherProfile = otherProfileRes.data as ProfileLite | null
 
   // Počet DOKONČENÝCH objednávek druhé strany (signál důvěry).
-  // U zákazníka počítáme jeho objednávky (customer_id), u poskytovatele jeho zakázky (provider_id).
   const otherCompletedField = isProvider ? 'customer_id' : 'provider_id'
   const { count: otherCompletedCount } = await supabase
     .from('orders')
@@ -93,11 +93,26 @@ export default async function OrderDetailPage({ params }: Props) {
     .eq('order_id', params.id)
     .order('created_at', { ascending: true }) as { data: MessageRow[] | null }
 
+  // Recenze: ukázat formulář jen zákazníkovi, u dokončené objednávky, když ještě nehodnotil
+  const isCustomer = order.customer_id === user.id
+  let canReview = false
+  if (isCustomer && order.status === 'dokonceno') {
+    const { data: existingReview } = await supabase
+      .from('reviews')
+      .select('id')
+      .eq('order_id', params.id)
+      .maybeSingle() as { data: { id: string } | null }
+    canReview = !existingReview
+  }
+
   return (
     <div className="space-y-4">
       <Link href="/dashboard/objednavky" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
         <ArrowLeft className="h-4 w-4" /> Zpět na objednávky
       </Link>
+
+      {/* Formulář recenze – jen zákazník, dokončená objednávka, zatím bez recenze */}
+      {canReview && <ReviewForm orderId={order.id} />}
 
       <OrderDetailClient
         order={order}

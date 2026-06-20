@@ -1,53 +1,67 @@
 'use server'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import type { ActionResult } from './types'
 
-export async function createReview(values: {
-  order_id: string
+type OrderForReview = {
+  id: string
+  customer_id: string
   provider_id: string
+  status: string
+}
+
+type ExistingReview = { id: string }
+
+// Vytvoří recenzi k dokončené objednávce. Hodnotit smí jen zákazník dané objednávky.
+export async function createReview(params: {
+  orderId: string
   rating: number
   comment?: string
-}): Promise<ActionResult> {
-  const supabase = createClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) return { success: false, error: 'Nejste přihlášeni.' }
+}): Promise<{ success: boolean; error?: string }> {
+  const { orderId, rating, comment } = params
 
-  // Ověř že objednávka patří tomuto zákazníkovi a je dokončená
+  if (rating < 1 || rating > 5) {
+    return { success: false, error: 'Hodnocení musí být 1 až 5 hvězd.' }
+  }
+
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+
+  // Načti objednávku a ověř pravidla
   const { data: order } = await supabase
     .from('orders')
-    .select('id, status, client_id')
-    .eq('id', values.order_id)
-    .eq('client_id', user.id)
-    .eq('status', 'dokonceno')
-    .single()
+    .select('id, customer_id, provider_id, status')
+    .eq('id', orderId)
+    .single() as { data: OrderForReview | null }
 
-  if (!order) return { success: false, error: 'Recenzi lze přidat pouze k dokončené objednávce.' }
+  if (!order) return { success: false, error: 'Objednávka nenalezena.' }
+  if (order.customer_id !== user.id) return { success: false, error: 'Hodnotit může jen zákazník této objednávky.' }
+  if (order.status !== 'dokonceno') return { success: false, error: 'Hodnotit lze až po dokončení objednávky.' }
 
-  // Zkontroluj jestli recenze již neexistuje
+  // Už existuje recenze pro tuto objednávku? (DB to hlídá unikátností, tohle je hezčí hláška)
   const { data: existing } = await supabase
     .from('reviews')
     .select('id')
-    .eq('order_id', values.order_id)
-    .single()
+    .eq('order_id', orderId)
+    .maybeSingle() as { data: ExistingReview | null }
 
-  if (existing) return { success: false, error: 'Tuto objednávku jste již ohodnotili.' }
+  if (existing) return { success: false, error: 'Tuto objednávku jste už ohodnotili.' }
 
-  const { data, error } = await supabase
-    .from('reviews')
-    .insert({
-      order_id: values.order_id,
-      reviewer_id: user.id,
-      provider_id: values.provider_id,
-      rating: values.rating,
-      comment: values.comment || null,
-    })
-    .select('id')
-    .single()
+  // Vlož recenzi (triggery v DB přepočítají rating a review_count na profilu)
+  const { error } = await (supabase.from('reviews') as any).insert({
+    order_id: orderId,
+    reviewer_id: user.id,
+    provider_id: order.provider_id,
+    rating,
+    comment: comment?.trim() || null,
+  })
 
-  if (error) return { success: false, error: 'Nepodařilo se uložit recenzi.' }
+  if (error) {
+    console.error('[createReview]', error)
+    return { success: false, error: 'Recenzi se nepodařilo uložit.' }
+  }
 
-  revalidatePath(`/profil/${values.provider_id}`)
-  revalidatePath('/dashboard/objednavky')
-  return { success: true, id: data.id }
+  revalidatePath(`/dashboard/objednavky/${orderId}`)
+  revalidatePath(`/profil/${order.provider_id}`)
+  return { success: true }
 }
