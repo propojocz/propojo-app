@@ -7,7 +7,7 @@ import ServiceListSkeleton from '@/components/ui/ServiceListSkeleton'
 import FilterBar from '@/components/ui/FilterBar'
 import FilterSidebar from '@/components/ui/FilterSidebar'
 import Link from 'next/link'
-import { PlusCircle } from 'lucide-react'
+import { PlusCircle, Send } from 'lucide-react'
 import type { Metadata } from 'next'
 
 interface Props {
@@ -158,13 +158,30 @@ async function ServiceList({
   }
 
   if (sorted.length === 0) {
+    // Předvyplníme poptávku tím, co uživatel hledal (kategorie/text + město)
+    const params = new URLSearchParams()
+    const hledane = q || category
+    if (hledane) params.set('category', hledane)
+    if (city) params.set('city', city)
+    const poptavkaHref = `/poptavka${params.toString() ? `?${params.toString()}` : ''}`
+
     return (
-      <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white py-20 text-center">
+      <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white py-16 text-center">
         <div className="mb-4 text-6xl">🔍</div>
-        <h3 className="mb-2 text-xl font-bold text-slate-800">Žádné výsledky</h3>
-        <p className="max-w-sm text-sm text-slate-500">
-          Pro zadaná kritéria jsme nenašli žádné služby.{' '}
-          <Link href="/pridat-sluzbu" className="text-emerald-600 hover:underline">Přidejte svoji nabídku</Link>.
+        <h3 className="mb-2 text-xl font-bold text-slate-800">Zatím tu nikoho nemáme</h3>
+        <p className="mb-6 max-w-sm text-sm text-slate-500">
+          Pro zadaná kritéria jsme nenašli žádné služby. Nevadí – zanechte nám poptávku a my se postaráme.
+          Jakmile najdeme vhodného poskytovatele ve vašem okolí, ozveme se vám.
+        </p>
+        <Link
+          href={poptavkaHref}
+          className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-6 py-3 font-bold text-white transition hover:bg-emerald-600"
+        >
+          <Send className="h-4 w-4" /> Zanechat poptávku
+        </Link>
+        <p className="mt-6 text-xs text-slate-400">
+          Jste živnostník?{' '}
+          <Link href="/pridat-sluzbu" className="font-semibold text-emerald-600 hover:underline">Přidejte svoji nabídku</Link>
         </p>
       </div>
     )
