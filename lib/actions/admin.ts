@@ -98,7 +98,8 @@ export async function getUsers(search?: string): Promise<AdminUserRow[]> {
   return data ?? []
 }
 
-// Pozastaví / obnoví uživatele. Při pozastavení lze uvést důvod (uvidí ho uživatel).
+// Pozastaví / obnoví uživatele. Při pozastavení lze uvést důvod (uvidí ho uživatel)
+// a vytvoří se notifikace do zvonečku.
 export async function setUserSuspended(
   userId: string,
   suspended: boolean,
@@ -117,6 +118,34 @@ export async function setUserSuspended(
     })
     .eq('id', userId)
   if (error) { console.error('[setUserSuspended]', error); return { success: false } }
+
+  // Notifikace uživateli (jen při pozastavení). Selže tiše, ať neshodí akci.
+  if (suspended) {
+    try {
+      await (admin.from('notifications') as any).insert({
+        user_id: userId,
+        type: 'account_suspended',
+        title: 'Váš účet byl pozastaven',
+        preview: reason?.trim() || 'Klikněte pro detail.',
+      })
+    } catch (err) {
+      console.error('[setUserSuspended] notifikace:', err)
+    }
+  }
+
+  revalidatePath('/admin/uzivatele')
+  return { success: true }
+}
+
+// Udělá z uživatele admina / odebere admina.
+export async function setUserAdmin(userId: string, makeAdmin: boolean): Promise<{ success: boolean }> {
+  const adminId = await requireAdmin()
+  if (!adminId) return { success: false }
+  if (userId === adminId) return { success: false } // sám sobě admina neměň
+
+  const admin = getAdminClient()
+  const { error } = await (admin.from('profiles') as any).update({ is_admin: makeAdmin }).eq('id', userId)
+  if (error) { console.error('[setUserAdmin]', error); return { success: false } }
 
   revalidatePath('/admin/uzivatele')
   return { success: true }

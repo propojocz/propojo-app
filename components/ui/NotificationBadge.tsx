@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
-import { Bell, MessageSquare, RefreshCw } from 'lucide-react'
+import { Bell, MessageSquare, RefreshCw, AlertTriangle } from 'lucide-react'
 import { markAllNotificationsRead } from '@/lib/actions/notifications'
 
 type NotifItem = {
@@ -69,6 +69,13 @@ export default function NotificationBadge() {
     }
   }
 
+  // Cílový odkaz notifikace: objednávka → detail, pozastavení → dashboard
+  const notifHref = (n: NotifItem): string | null => {
+    if (n.order_id) return `/dashboard/objednavky/${n.order_id}`
+    if (n.type === 'account_suspended') return '/dashboard'
+    return null
+  }
+
   return (
     <div ref={wrapRef} className="relative ml-1">
       <button
@@ -99,10 +106,17 @@ export default function NotificationBadge() {
               <p className="px-4 py-8 text-center text-sm text-slate-400">Žádná oznámení.</p>
             ) : (
               items.map((n) => {
+                const suspended = n.type === 'account_suspended'
+                const iconWrap = suspended
+                  ? 'bg-red-100 text-red-600'
+                  : n.type === 'new_message'
+                    ? 'bg-blue-100 text-blue-600'
+                    : 'bg-emerald-100 text-emerald-600'
+
                 const inner = (
                   <div className={`flex gap-3 px-4 py-3 transition-colors hover:bg-slate-50 ${n.read_at === null ? 'bg-emerald-50/50' : ''}`}>
-                    <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${n.type === 'new_message' ? 'bg-blue-100 text-blue-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                      {n.type === 'new_message' ? <MessageSquare className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
+                    <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${iconWrap}`}>
+                      {suspended ? <AlertTriangle className="h-4 w-4" /> : n.type === 'new_message' ? <MessageSquare className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-slate-900">{n.title}</p>
@@ -111,8 +125,10 @@ export default function NotificationBadge() {
                     </div>
                   </div>
                 )
-                return n.order_id ? (
-                  <Link key={n.id} href={`/dashboard/objednavky/${n.order_id}`} onClick={() => setOpen(false)} className="block border-b border-slate-50 last:border-0">
+
+                const href = notifHref(n)
+                return href ? (
+                  <Link key={n.id} href={href} onClick={() => setOpen(false)} className="block border-b border-slate-50 last:border-0">
                     {inner}
                   </Link>
                 ) : (
