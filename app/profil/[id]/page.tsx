@@ -24,6 +24,7 @@ type ProviderProfile = {
   review_count: number | null
   view_count: number | null
   gallery: string[] | null
+  is_suspended: boolean | null
 }
 
 type ServiceRow = {
@@ -75,12 +76,12 @@ export default async function ProfilPage({ params }: Props) {
   // Profil poskytovatele (veřejně čitelný díky profiles_select_all)
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id, full_name, company_name, avatar_url, city, bio, is_provider, ico_verified, rating, review_count, view_count, gallery')
+    .select('id, full_name, company_name, avatar_url, city, bio, is_provider, ico_verified, rating, review_count, view_count, gallery, is_suspended')
     .eq('id', params.id)
     .single() as { data: ProviderProfile | null }
 
-  // Profil neexistuje, nebo není poskytovatel → 404
-  if (!profile || profile.is_provider !== true) notFound()
+  // Profil neexistuje, není poskytovatel, nebo je pozastavený → 404
+  if (!profile || profile.is_provider !== true || profile.is_suspended === true) notFound()
 
   const { data: { user } } = await supabase.auth.getUser()
   const favorited = user ? await isFavorited(params.id) : false

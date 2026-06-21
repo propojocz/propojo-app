@@ -6,6 +6,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { MapPin, Star, ArrowLeft, Clock, Wallet, FileSearch, Truck, CalendarClock, ShieldCheck } from 'lucide-react'
 import OrderButton from '@/components/ui/OrderButton'
+import Avatar from '@/components/ui/Avatar'
 import type { Metadata } from 'next'
 
 interface Props { params: { id: string } }
@@ -49,11 +50,14 @@ export default async function ServiceDetailPage({ params }: Props) {
 
   const { data: service, error } = await supabase
     .from('services')
-    .select(`*, profiles (id, full_name, avatar_url, rating, review_count, city, bio, phone)`)
+    .select(`*, profiles (id, full_name, avatar_url, rating, review_count, city, bio, phone, is_suspended)`)
     .eq('id', params.id)
     .single() as { data: any; error: any }
 
   if (error || !service) notFound()
+
+  // Pozastavený poskytovatel → služba není dostupná
+  if (service.profiles?.is_suspended === true) notFound()
 
   const s = service
   const meta = (CATEGORY_META as Record<string, { label: string; emoji: string }>)[s.category] ?? DEFAULT_META
@@ -223,9 +227,7 @@ export default async function ServiceDetailPage({ params }: Props) {
             {/* Poskytovatel */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <Link href={`/profil/${s.provider_id}`} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-lg font-black text-emerald-700">
-                  {s.profiles.full_name.charAt(0).toUpperCase()}
-                </div>
+                <Avatar name={s.profiles.full_name} url={s.profiles.avatar_url} size={48} />
                 <div>
                   <p className="font-bold text-slate-900">{s.profiles.full_name}</p>
                   {s.profiles.rating && Number(s.profiles.rating) > 0 && (
@@ -302,7 +304,7 @@ export default async function ServiceDetailPage({ params }: Props) {
               <p className="mb-3 text-sm font-semibold text-emerald-800">
                 {isModelB ? 'Chceš nacenit tuto práci?' : 'Máš zájem o tuto službu?'}
               </p>
-              <OrderButton serviceId={s.id} providerId={s.provider_id} isLoggedIn={!!user} priceAgreed={price} />
+              <OrderButton serviceId={s.id} providerId={s.provider_id} isLoggedIn={!!user} priceAgreed={price} paymentModel={s.payment_model} />
             </div>
 
             <p className="text-center text-xs text-slate-400">

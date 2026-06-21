@@ -104,7 +104,7 @@ async function ServiceList({
 
   let query = supabase
     .from('services')
-    .select(`*, profiles (id, full_name, avatar_url, rating, review_count, city)`)
+    .select(`*, profiles (id, full_name, avatar_url, rating, review_count, city, is_suspended)`)
     .eq('is_active', true)
 
   if (serviceIdsBySubcat) {
@@ -145,6 +145,9 @@ async function ServiceList({
 
   const { data: services } = await query.limit(48)
   let sorted = (services as ServiceWithProvider[]) ?? []
+
+  // Skryjeme služby pozastavených poskytovatelů
+  sorted = sorted.filter((s) => (s.profiles as any)?.is_suspended !== true)
 
   if (minRating) {
     const min = Number(minRating)

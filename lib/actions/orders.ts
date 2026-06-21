@@ -57,6 +57,17 @@ export async function createOrder(values: {
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return { success: false, error: 'Pro objednávku musíte být přihlášeni.' }
 
+  // Pojistka: u pozastaveného poskytovatele nelze objednat.
+  const { data: providerProfile } = await supabase
+    .from('profiles')
+    .select('is_suspended')
+    .eq('id', values.provider_id)
+    .single() as { data: { is_suspended: boolean | null } | null }
+
+  if (providerProfile?.is_suspended === true) {
+    return { success: false, error: 'Tento poskytovatel není momentálně dostupný.' }
+  }
+
   // Pozn.: tabulka orders má customer_id (NE client_id) a české statusy.
   const { data, error } = await supabase
     .from('orders')

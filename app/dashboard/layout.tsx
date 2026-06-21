@@ -2,10 +2,11 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
-import { LayoutDashboard, Package, ShoppingBag, User, LogOut, ChevronRight } from 'lucide-react'
+import { LayoutDashboard, Package, ShoppingBag, User, LogOut, ChevronRight, ShieldCheck } from 'lucide-react'
 import { logout } from '@/lib/actions/auth'
 import MobileDashboardNav from './MobileDashboardNav'
 import Avatar from '@/components/ui/Avatar'
+import SuspendedBanner from '@/components/ui/SuspendedBanner'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = createClient()
@@ -14,11 +15,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('full_name, avatar_url, is_provider')
+    .select('full_name, avatar_url, is_provider, is_admin')
     .eq('id', user.id)
-    .single() as { data: { full_name: string; avatar_url: string | null; is_provider: boolean } | null }
+    .single() as { data: { full_name: string; avatar_url: string | null; is_provider: boolean; is_admin: boolean } | null }
 
   const isProvider = profile?.is_provider === true
+  const isAdmin = profile?.is_admin === true
 
   const NAV = [
     { href: '/dashboard', label: 'Přehled', icon: 'LayoutDashboard' },
@@ -68,9 +70,25 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 </button>
               </form>
             </nav>
+
+            {/* Admin odkaz – jen pro adminy */}
+            {isAdmin && (
+              <Link
+                href="/admin"
+                className="mt-4 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-slate-800"
+              >
+                <ShieldCheck className="h-4 w-4 shrink-0" />
+                Admin panel
+                <ChevronRight className="ml-auto h-3.5 w-3.5 text-slate-400" />
+              </Link>
+            )}
           </aside>
 
-          <main className="flex-1 min-w-0">{children}</main>
+          <main className="flex-1 min-w-0 space-y-4">
+            {/* Banner pro pozastaveného uživatele */}
+            <SuspendedBanner />
+            {children}
+          </main>
         </div>
       </div>
     </div>
