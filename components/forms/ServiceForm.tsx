@@ -1,5 +1,5 @@
 'use client'
-// components/forms/ServiceForm.tsx – kategorie z DB + Model A/B
+// components/forms/ServiceForm.tsx – kategorie z DB + Model A/B + storno politika
 
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -11,6 +11,8 @@ import { CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronRight, Info } f
 import { createService, updateService } from '@/lib/actions/services'
 import type { Service } from '@/types/database'
 import ImageUpload from '@/components/ui/ImageUpload'
+import CancellationSlider from '@/components/ui/CancellationSlider'
+import type { CancellationKey } from '@/lib/cancellation'
 
 const schema = z.object({
   title: z.string().min(5, 'Název musí mít alespoň 5 znaků').max(100),
@@ -34,6 +36,9 @@ const schema = z.object({
   price_per_km: z.number().min(0).max(99999).nullable().optional(),
   free_km: z.number().int().min(0).max(100000).nullable().optional(),
   quote_days: z.number().int().min(0).max(365).nullable().optional(),
+
+  // Storno politika
+  cancellation_policy: z.enum(['zadna','mirna','standardni','prisna']),
 })
 type FormValues = z.infer<typeof schema>
 
@@ -87,6 +92,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
       price_per_km: init.price_per_km ?? null,
       free_km: init.free_km ?? null,
       quote_days: init.quote_days ?? null,
+      cancellation_policy: (init.cancellation_policy as CancellationKey) ?? 'zadna',
     } : {
       price_unit: 'hod',
       subcategory_ids: [],
@@ -95,6 +101,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
       deposit_amount: 200,
       price_max: null, duration_minutes: null,
       quote_fee: null, price_per_km: null, free_km: null, quote_days: null,
+      cancellation_policy: 'zadna',
     },
   })
 
@@ -103,6 +110,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
   const selectedSubIds: string[] = watch('subcategory_ids') ?? []
   const model = watch('payment_model')
   const priceType = watch('price_type')
+  const cancellationPolicy = watch('cancellation_policy')
 
   // Načti kategorie z DB
   useEffect(() => {
@@ -397,6 +405,18 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
               <div className="flex items-start gap-2 rounded-xl bg-blue-50 px-4 py-3 text-xs leading-relaxed text-slate-600">
                 <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
                 <span>Minimální záloha je 200 Kč. Záloha se započítá do konečné ceny.</span>
+              </div>
+            </div>
+
+            {/* Storno politika */}
+            <div className="space-y-1.5">
+              <label className="form-label">Storno podmínky</label>
+              <p className="text-xs text-slate-400">Nastavte, za jakých podmínek se zákazníkovi vrací záloha při zrušení. Zákazník je uvidí u služby.</p>
+              <div className="pt-2">
+                <CancellationSlider
+                  value={cancellationPolicy}
+                  onChange={(key) => setValue('cancellation_policy', key)}
+                />
               </div>
             </div>
           </motion.div>

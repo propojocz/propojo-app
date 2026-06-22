@@ -4,9 +4,10 @@ import { createClient } from '@/lib/supabase/server'
 import { CATEGORY_META } from '@/types/database'
 import Image from 'next/image'
 import Link from 'next/link'
-import { MapPin, Star, ArrowLeft, Clock, Wallet, FileSearch, Truck, CalendarClock, ShieldCheck } from 'lucide-react'
+import { MapPin, Star, ArrowLeft, Clock, Wallet, FileSearch, Truck, CalendarClock, ShieldCheck, CalendarX } from 'lucide-react'
 import OrderButton from '@/components/ui/OrderButton'
 import Avatar from '@/components/ui/Avatar'
+import { getCancellation } from '@/lib/cancellation'
 import type { Metadata } from 'next'
 
 interface Props { params: { id: string } }
@@ -98,6 +99,10 @@ export default async function ServiceDetailPage({ params }: Props) {
   const freeKm = Number(s.free_km ?? 0)
   const quoteDays = Number(s.quote_days ?? 0)
   const duration = Number(s.duration_minutes ?? 0)
+
+  // Storno politika (jen Model A, jen když není 'zadna')
+  const cancellation = getCancellation(s.cancellation_policy)
+  const showCancellation = !isModelB && cancellation.key !== 'zadna'
 
   // Hlavní cenový text (Model A)
   let mainPrice = 'Cena dohodou'
@@ -298,6 +303,17 @@ export default async function ServiceDetailPage({ params }: Props) {
                 </ul>
               )}
             </div>
+
+            {/* Storno podmínky (Model A se zvolenou politikou) */}
+            {showCancellation && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h3 className="mb-2 flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-slate-500">
+                  <CalendarX className="h-4 w-4 text-slate-400" /> Storno podmínky
+                </h3>
+                <p className="text-sm font-bold text-slate-800">{cancellation.label} — {cancellation.short}</p>
+                <p className="mt-1 text-sm leading-relaxed text-slate-600">{cancellation.detail}</p>
+              </div>
+            )}
 
             {/* CTA */}
             <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-5">

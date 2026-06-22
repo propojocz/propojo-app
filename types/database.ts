@@ -372,6 +372,7 @@ export type Database = {
       }
       services: {
         Row: {
+          cancellation_policy: string
           category: string
           city: string
           created_at: string
@@ -398,6 +399,7 @@ export type Database = {
           view_count: number | null
         }
         Insert: {
+          cancellation_policy?: string
           category: string
           city: string
           created_at?: string
@@ -424,6 +426,7 @@ export type Database = {
           view_count?: number | null
         }
         Update: {
+          cancellation_policy?: string
           category?: string
           city?: string
           created_at?: string
