@@ -7,22 +7,33 @@
 //
 // JAK ZRUŠIT ÚDRŽBU (spuštění naživo):
 //   Změň MAINTENANCE na false (níže) a pushni. Hotovo.
- 
+
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
- 
+
 // ── PŘEPÍNAČ ÚDRŽBY ────────────────────────────────────────
 const MAINTENANCE = true              // true = web schovaný, false = web naživo
 const SECRET = 'pusti-me-dovnitr'     // tajné heslo v odkazu ?klic=...
 const COOKIE = 'propojo_pass'         // jméno cookie, co tě pustí
 // ───────────────────────────────────────────────────────────
- 
+
+// Cesty, které musí projít VŽDY (i během údržby) – volají je stroje, ne lidé.
+// Stripe webhook sem MUSÍ, jinak Stripe dostane stránku údržby místo odpovědi.
+const ALWAYS_ALLOW = [
+  '/api/stripe/webhook',
+]
+
 export function middleware(req: NextRequest) {
+  const { searchParams, pathname } = req.nextUrl
+
+  // 0) Webhooky a strojové endpointy – pustit vždy, bez ohledu na údržbu
+  if (ALWAYS_ALLOW.some((p) => pathname.startsWith(p))) {
+    return NextResponse.next()
+  }
+
   // Údržba vypnutá → web jede normálně
   if (!MAINTENANCE) return NextResponse.next()
- 
-  const { searchParams, pathname } = req.nextUrl
- 
+
   // 1) Přišel jsi s tajným klíčem v URL? → ulož cookie a pusť dál
   if (searchParams.get('klic') === SECRET) {
     const res = NextResponse.redirect(new URL(pathname, req.url))
@@ -32,12 +43,12 @@ export function middleware(req: NextRequest) {
     })
     return res
   }
- 
+
   // 2) Máš už uloženou cookie? → pusť dál
   if (req.cookies.get(COOKIE)?.value === SECRET) {
     return NextResponse.next()
   }
- 
+
   // 3) Jinak → ukaž stránku údržby
   const html = `<!doctype html>
 <html lang="cs"><head><meta charset="utf-8">
@@ -58,13 +69,13 @@ export function middleware(req: NextRequest) {
   <h1>🚧 Připravujeme něco dobrého</h1>
   <p>Spojíme tě s ověřenými řemeslníky ve tvém okolí. Web spustíme už brzy.</p>
 </div></body></html>`
- 
+
   return new NextResponse(html, {
     status: 503,
     headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
   })
 }
- 
+
 // Na co se middleware vztahuje: na všechno KROMĚ statických souborů a obrázků
 export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico)).*)'],

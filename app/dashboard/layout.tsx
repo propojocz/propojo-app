@@ -2,7 +2,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
-import { LayoutDashboard, Package, ShoppingBag, User, LogOut, ChevronRight, ShieldCheck } from 'lucide-react'
+import { LayoutDashboard, Package, ShoppingBag, User, LogOut, ChevronRight, ShieldCheck, CreditCard } from 'lucide-react'
 import { logout } from '@/lib/actions/auth'
 import MobileDashboardNav from './MobileDashboardNav'
 import Avatar from '@/components/ui/Avatar'
@@ -26,6 +26,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     { href: '/dashboard', label: 'Přehled', icon: 'LayoutDashboard' },
     ...(isProvider ? [{ href: '/dashboard/nabidky', label: 'Moje nabídky', icon: 'Package' }] : []),
     { href: '/dashboard/objednavky', label: isProvider ? 'Poptávky' : 'Objednávky', icon: 'ShoppingBag' },
+    ...(isProvider ? [{ href: '/dashboard/predplatne', label: 'Předplatné', icon: 'CreditCard' }] : []),
     { href: '/dashboard/profil', label: 'Profil', icon: 'User' },
   ]
 
@@ -59,6 +60,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                   {item.icon === 'LayoutDashboard' && <LayoutDashboard className="h-4 w-4 shrink-0" />}
                   {item.icon === 'Package' && <Package className="h-4 w-4 shrink-0" />}
                   {item.icon === 'ShoppingBag' && <ShoppingBag className="h-4 w-4 shrink-0" />}
+                  {item.icon === 'CreditCard' && <CreditCard className="h-4 w-4 shrink-0" />}
                   {item.icon === 'User' && <User className="h-4 w-4 shrink-0" />}
                   {item.label}
                   <ChevronRight className="ml-auto h-3.5 w-3.5 text-slate-300" />
