@@ -1,6 +1,6 @@
 'use server'
 // lib/actions/subscription.ts
-// Vytvoření Stripe Checkout session pro předplatné poskytovatele.
+// Stripe: vytvoření Checkout session (aktivace) a Customer Portal session (správa/zrušení).
 import { createClient } from '@/lib/supabase/server'
 import { stripe } from '@/lib/stripe'
 
@@ -72,5 +72,39 @@ export async function createCheckoutSession(): Promise<CheckoutResult> {
   } catch (err) {
     console.error('[checkout] Stripe error:', err)
     return { success: false, error: 'Platbu se nepodařilo spustit. Zkuste to prosím znovu.' }
+  }
+}
+
+// Vytvoří odkaz do Stripe Customer Portal (správa/zrušení předplatného, změna karty, faktury).
+export async function createPortalSession(): Promise<CheckoutResult> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+
+  // Najdeme Stripe customer ID uživatele
+  const { data: sub } = await supabase
+    .from('subscriptions')
+    .select('stripe_customer_id')
+    .eq('user_id', user.id)
+    .not('stripe_customer_id', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle() as { data: { stripe_customer_id: string | null } | null }
+
+  const customerId = sub?.stripe_customer_id
+  if (!customerId) {
+    return { success: false, error: 'Nemáte aktivní předplatné ke správě.' }
+  }
+
+  try {
+    const session = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: `${APP_URL}/dashboard/predplatne`,
+      locale: 'cs',
+    })
+    return { success: true, url: session.url }
+  } catch (err) {
+    console.error('[portal] Stripe error:', err)
+    return { success: false, error: 'Správu předplatného se nepodařilo otevřít. Zkuste to znovu.' }
   }
 }

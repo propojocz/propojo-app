@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { CheckCircle2, XCircle, Sparkles, ShieldCheck, Wallet, BadgeCheck, ArrowLeft } from 'lucide-react'
 import SubscribeButton from '@/components/ui/SubscribeButton'
+import ManageSubscriptionButton from '@/components/ui/ManageSubscriptionButton'
 
 export const metadata = { title: 'Předplatné | Propojo' }
 
@@ -80,15 +81,20 @@ export default async function PredplatnePage({ searchParams }: Props) {
               </p>
             </div>
           </div>
-          <div className="space-y-2 rounded-xl bg-slate-50 p-4 text-sm">
+          <div className="mb-5 space-y-2 rounded-xl bg-slate-50 p-4 text-sm">
             {sub?.status === 'trialing' && sub?.trial_end && (
               <div className="flex justify-between"><span className="text-slate-500">Zkušební období do</span><span className="font-semibold text-slate-800">{fmtDate(sub.trial_end)}</span></div>
             )}
-            <div className="flex justify-between"><span className="text-slate-500">Další platba</span><span className="font-semibold text-slate-800">{fmtDate(sub?.current_period_end ?? null)}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">{sub?.cancel_at_period_end ? 'Platnost do' : 'Další platba'}</span><span className="font-semibold text-slate-800">{fmtDate(sub?.current_period_end ?? null)}</span></div>
             {sub?.cancel_at_period_end && (
               <div className="flex justify-between"><span className="text-slate-500">Stav</span><span className="font-semibold text-amber-600">Bude ukončeno na konci období</span></div>
             )}
           </div>
+
+          <ManageSubscriptionButton />
+          <p className="mt-3 text-center text-xs text-slate-400">
+            Ve správě můžete předplatné zrušit, změnit kartu nebo zobrazit faktury.
+          </p>
         </div>
       ) : (
         // ── NEMÁ PŘEDPLATNÉ ───────────────────────────────────
