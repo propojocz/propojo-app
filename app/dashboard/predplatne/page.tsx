@@ -34,11 +34,11 @@ export default async function PredplatnePage({ searchParams }: Props) {
   // Aktuální předplatné (poslední záznam uživatele)
   const { data: sub } = await supabase
     .from('subscriptions')
-    .select('status, current_period_end, trial_end, cancel_at_period_end')
+    .select('status, billing_period, current_period_end, trial_end, cancel_at_period_end')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
     .limit(1)
-    .maybeSingle() as { data: { status: string; current_period_end: string | null; trial_end: string | null; cancel_at_period_end: boolean } | null }
+    .maybeSingle() as { data: { status: string; billing_period: string | null; current_period_end: string | null; trial_end: string | null; cancel_at_period_end: boolean } | null }
 
   const isActive = sub?.status === 'active' || sub?.status === 'trialing'
   const stav = searchParams.stav
@@ -77,7 +77,11 @@ export default async function PredplatnePage({ searchParams }: Props) {
             <div>
               <p className="text-lg font-black text-slate-900">Předplatné je aktivní</p>
               <p className="text-sm text-slate-500">
-                {sub?.status === 'trialing' ? 'Zkušební období (první měsíc zdarma)' : 'Propojo Standard – 299 Kč/měsíc'}
+                {sub?.status === 'trialing'
+                  ? 'Zkušební období zdarma'
+                  : sub?.billing_period === 'yearly'
+                    ? 'Propojo Standard – 2 990 Kč/rok'
+                    : 'Propojo Standard – 299 Kč/měsíc'}
               </p>
             </div>
           </div>
@@ -99,14 +103,11 @@ export default async function PredplatnePage({ searchParams }: Props) {
       ) : (
         // ── NEMÁ PŘEDPLATNÉ ───────────────────────────────────
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="mb-1 flex items-center gap-2">
+          <div className="mb-3 flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-emerald-600" />
             <h2 className="text-lg font-black text-slate-900">Propojo Standard</h2>
           </div>
-          <div className="mb-4 flex items-baseline gap-1">
-            <span className="text-3xl font-black text-slate-900">299 Kč</span>
-            <span className="text-slate-500">/ měsíc</span>
-          </div>
+
           <div className="mb-5 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700">
             <BadgeCheck className="h-4 w-4" /> První měsíc zdarma
           </div>

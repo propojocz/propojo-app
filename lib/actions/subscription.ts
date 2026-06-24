@@ -1,21 +1,24 @@
 'use server'
 // lib/actions/subscription.ts
-// Stripe: vytvoření Checkout session (aktivace) a Customer Portal session (správa/zrušení).
+// Stripe: vytvoření Checkout session (aktivace, měsíčně/ročně) a Customer Portal (správa/zrušení).
 import { createClient } from '@/lib/supabase/server'
 import { stripe } from '@/lib/stripe'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
 const PRICE_MONTHLY = process.env.STRIPE_PRICE_STANDARD_MONTHLY
+const PRICE_YEARLY = process.env.STRIPE_PRICE_STANDARD_YEARLY
 
 type CheckoutResult = { success: true; url: string } | { success: false; error: string }
+type Billing = 'monthly' | 'yearly'
 
-export async function createCheckoutSession(): Promise<CheckoutResult> {
+export async function createCheckoutSession(billing: Billing = 'monthly'): Promise<CheckoutResult> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Nejste přihlášeni.' }
 
-  if (!PRICE_MONTHLY) {
-    console.error('[checkout] Chybí STRIPE_PRICE_STANDARD_MONTHLY v .env.local')
+  const priceId = billing === 'yearly' ? PRICE_YEARLY : PRICE_MONTHLY
+  if (!priceId) {
+    console.error('[checkout] Chybí price ID pro', billing, 'v .env.local')
     return { success: false, error: 'Předplatné není správně nastaveno.' }
   }
 
@@ -51,12 +54,12 @@ export async function createCheckoutSession(): Promise<CheckoutResult> {
     customerId = customer.id
   }
 
-  // Vytvoříme Checkout session – režim subscription, trial 30 dní (1. měsíc zdarma)
+  // Vytvoříme Checkout session – režim subscription, trial 30 dní (1. měsíc/rok zdarma)
   try {
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       customer: customerId,
-      line_items: [{ price: PRICE_MONTHLY, quantity: 1 }],
+      line_items: [{ price: priceId, quantity: 1 }],
       subscription_data: {
         trial_period_days: 30,
         metadata: { supabase_user_id: user.id },
