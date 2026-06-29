@@ -9,7 +9,6 @@ import { createNotification } from '@/lib/actions/notifications'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://propojo.cz'
 
-// Admin klient pro čtení e-mailů z auth.users
 function getAdminClient() {
   return createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -29,8 +28,6 @@ async function getUserEmail(userId: string): Promise<string | null> {
 }
 
 async function sendNotification(to: string, subject: string, html: string) {
-  // Vypínač: bez RESEND_API_KEY e-maily tiše přeskočíme (nikdy neshodí akci).
-  // Až klíč doplníš do .env.local / Vercelu, e-maily se samy zapnou.
   if (!process.env.RESEND_API_KEY) return
   try {
     const resend = new Resend(process.env.RESEND_API_KEY)
@@ -57,6 +54,11 @@ export async function createOrder(values: {
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return { success: false, error: 'Pro objednávku musíte být přihlášeni.' }
 
+  // Pojistka: nelze objednat sám u sebe (zneužití – falešné objednávky, recenze, točení peněz).
+  if (values.provider_id === user.id) {
+    return { success: false, error: 'Nemůžete si objednat vlastní službu.' }
+  }
+
   // Pojistka: u pozastaveného poskytovatele nelze objednat.
   const { data: providerProfile } = await supabase
     .from('profiles')
@@ -68,7 +70,6 @@ export async function createOrder(values: {
     return { success: false, error: 'Tento poskytovatel není momentálně dostupný.' }
   }
 
-  // Pozn.: tabulka orders má customer_id (NE client_id) a české statusy.
   const { data, error } = await supabase
     .from('orders')
     .insert({
@@ -87,7 +88,6 @@ export async function createOrder(values: {
     return { success: false, error: 'Objednávku se nepodařilo vytvořit.' }
   }
 
-  // Oznámení poskytovateli o nové poptávce
   try {
     const { data: senderProfile } = await supabase
       .from('profiles').select('full_name').eq('id', user.id).single() as { data: { full_name: string | null } | null }
@@ -106,7 +106,6 @@ export async function createOrder(values: {
     console.error('[createOrder] notifikace:', err)
   }
 
-  // E-mail poskytovateli (tiše přeskočí, pokud není RESEND_API_KEY)
   try {
     const [
       { data: service },
@@ -147,8 +146,41 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return { success: false, error: 'Nejste přihlášeni.' }
 
+  // Při PŘIJETÍ objednávky zjistíme, jestli je co platit (záloha A / výjezd B).
+  // Pokud ano, nastavíme deposit_status='pending' (čeká se na platbu zákazníka).
+  let extraUpdate: Record<string, any> = {}
+  if (status === 'prijato') {
+    const { data: ord } = await supabase
+      .from('orders')
+      .select('services(payment_model, deposit_amount, quote_fee)')
+      .eq('id', orderId)
+      .single() as { data: any }
+
+    const svc = ord?.services
+    const amount = svc?.payment_model === 'B'
+      ? Number(svc?.quote_fee ?? 0)
+      : Number(svc?.deposit_amount ?? 0)
+
+    if (amount > 0) {
+      extraUpdate = { deposit_status: 'pending' }
+    }
+  }
+
+  // Pojistka: do 'v_procesu' jen když je záloha zaplacená (nebo žádná není potřeba).
+  if (status === 'v_procesu') {
+    const { data: ord } = await supabase
+      .from('orders')
+      .select('deposit_status')
+      .eq('id', orderId)
+      .single() as { data: { deposit_status: string | null } | null }
+
+    if (ord?.deposit_status === 'pending') {
+      return { success: false, error: 'Práci lze zahájit až po úhradě zálohy zákazníkem.' }
+    }
+  }
+
   const { error } = await (supabase.from('orders') as any)
-    .update({ status })
+    .update({ status, ...extraUpdate })
     .eq('id', orderId)
     .eq('provider_id', user.id)
 
@@ -157,7 +189,6 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
     return { success: false, error: 'Nepodařilo se změnit stav.' }
   }
 
-  // Oznámení zákazníkovi o změně stavu (běží vždy, nezávisle na e-mailu)
   try {
     const STATUS_TEXT: Record<string, string> = {
       prijato: 'Vaše poptávka byla přijata',
@@ -185,7 +216,6 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
     console.error('[updateOrderStatus] notifikace:', err)
   }
 
-  // E-mail zákazníkovi (tiše přeskočí, pokud není RESEND_API_KEY)
   try {
     const { data: order } = await supabase
       .from('orders')
@@ -215,11 +245,10 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   }
 
   revalidatePath('/dashboard/objednavky')
+  revalidatePath(`/dashboard/objednavky/${orderId}`)
   return { success: true, id: orderId }
 }
 
-// Odeslání zprávy v rámci objednávky (chat).
-// RLS na tabulce messages musí povolit insert/select účastníkům objednávky.
 export async function sendOrderMessage(
   orderId: string,
   content: string
@@ -245,7 +274,6 @@ export async function sendOrderMessage(
     return { success: false, error: 'Zprávu se nepodařilo odeslat.' }
   }
 
-  // Oznámení druhé straně o nové zprávě
   try {
     const { data: order } = await supabase
       .from('orders')

@@ -1,9 +1,10 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
-import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2 } from 'lucide-react'
+import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2, CreditCard, ShieldCheck, Clock } from 'lucide-react'
 import OrderStatusButton from '../OrderStatusButton'
 import { sendOrderMessage } from '@/lib/actions/orders'
+import { createDepositCheckout } from '@/lib/actions/deposit'
 import Avatar from '@/components/ui/Avatar'
 
 type ServiceLite = {
@@ -28,6 +29,8 @@ type OrderRow = {
   description: string | null
   total_price: number | null
   created_at: string
+  deposit_status: string | null
+  deposit_amount: number | null
   services: ServiceLite | null
 }
 
@@ -73,6 +76,7 @@ export default function OrderDetailClient({
   initialMessages,
   isProvider,
   userId,
+  platbaStav,
 }: {
   order: OrderRow
   myProfile: ProfileLite | null
@@ -81,23 +85,33 @@ export default function OrderDetailClient({
   initialMessages: MessageRow[]
   isProvider: boolean
   userId: string
+  platbaStav?: string | null
 }) {
   const [messages, setMessages] = useState<MessageRow[]>(initialMessages)
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
+  const [payBusy, setPayBusy] = useState(false)
+  const [payError, setPayError] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const service = order.services
   const otherLabel = isProvider ? 'Zákazník' : 'Živnostník'
 
-  // Karta klikací jen směrem na poskytovatele (má veřejný profil).
   const otherIsProvider = !isProvider
   const profileHref = otherIsProvider && otherProfile?.id ? `/profil/${otherProfile.id}` : null
 
-  // "Na Propojo od …"
   const memberSince = otherProfile?.created_at
     ? new Intl.DateTimeFormat('cs-CZ', { month: 'long', year: 'numeric' }).format(new Date(otherProfile.created_at))
     : null
+
+  const isModelB = service?.payment_model === 'B'
+  const depositAmount = isModelB ? Number(service?.quote_fee ?? 0) : Number(service?.deposit_amount ?? 0)
+  const isCustomer = !isProvider
+  // Texty se správnými tvary: záloha "uhrazena", poplatek "uhrazen"
+  const payLabel = isModelB ? 'poplatek za výjezd' : 'rezervační zálohu'
+  const paidTitle = isModelB ? 'Poplatek za výjezd uhrazen' : 'Rezervační záloha uhrazena'
+  const notPaidLabel = isModelB ? 'Poplatek za výjezd zatím nebyl uhrazen.' : 'Rezervační záloha zatím nebyla uhrazena.'
+  const isPaid = order.deposit_status === 'paid' || order.deposit_status === 'released'
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -113,6 +127,18 @@ export default function OrderDetailClient({
       setText('')
     }
     setSending(false)
+  }
+
+  const handlePay = async () => {
+    setPayBusy(true)
+    setPayError('')
+    const res = await createDepositCheckout(order.id)
+    if (res.success) {
+      window.location.href = res.url
+    } else {
+      setPayError(res.error)
+      setPayBusy(false)
+    }
   }
 
   const cardInner = (
@@ -167,6 +193,16 @@ export default function OrderDetailClient({
             </div>
           )}
 
+          {/* Stav zálohy i pro POSKYTOVATELE (rychlý přehled) */}
+          {isProvider && depositAmount > 0 && order.status !== 'cekajici' && order.status !== 'zruseno' && (
+            <div className={`mt-4 flex items-center gap-2 rounded-xl px-4 py-3 text-sm ${isPaid ? 'border border-emerald-200 bg-emerald-50 text-emerald-800' : 'border border-amber-200 bg-amber-50 text-amber-800'}`}>
+              {isPaid ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <Clock className="h-4 w-4 shrink-0" />}
+              {isPaid
+                ? `${paidTitle} (${Number(order.deposit_amount ?? depositAmount).toLocaleString('cs-CZ')} Kč) – drží se přes Propojo`
+                : `Čeká se na úhradu (${depositAmount.toLocaleString('cs-CZ')} Kč) od zákazníka`}
+            </div>
+          )}
+
           {order.description && (
             <div className="mt-4">
               <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Poznámka od zákazníka</h3>
@@ -175,11 +211,63 @@ export default function OrderDetailClient({
           )}
 
           {isProvider && (
-            <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-5">
-              <OrderStatusButton orderId={order.id} currentStatus={order.status} />
+            <div className="mt-5 border-t border-slate-100 pt-5">
+              <OrderStatusButton orderId={order.id} currentStatus={order.status} depositStatus={order.deposit_status} />
             </div>
           )}
         </div>
+
+        {/* ── PLATBA ZÁLOHY (jen zákazník, po přijetí) ───────── */}
+        {isCustomer && depositAmount > 0 && (order.status === 'prijato' || order.status === 'v_procesu') && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            {platbaStav === 'uspech' && (
+              <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                <CheckCircle2 className="h-4 w-4 shrink-0" /> Platba proběhla. Potvrzení se může projevit do pár sekund – obnovte stránku.
+              </div>
+            )}
+            {platbaStav === 'zruseno' && (
+              <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                <Clock className="h-4 w-4 shrink-0" /> Platba byla zrušena. {notPaidLabel}
+              </div>
+            )}
+
+            {isPaid ? (
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-100">
+                  <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-900">{paidTitle}</p>
+                  <p className="text-sm text-slate-500">
+                    {Number(order.deposit_amount ?? depositAmount).toLocaleString('cs-CZ')} Kč · drží se bezpečně přes Propojo
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="mb-1 flex items-center gap-2">
+                  <CreditCard className="h-5 w-5 text-emerald-600" />
+                  <h2 className="font-black text-slate-900">Zaplaťte {payLabel}</h2>
+                </div>
+                <p className="mb-4 text-sm text-slate-500">
+                  Poskytovatel objednávku přijal. Pro potvrzení uhraďte {payLabel} ve výši{' '}
+                  <strong className="text-slate-800">{depositAmount.toLocaleString('cs-CZ')} Kč</strong>.
+                  {!isModelB && ' Záloha se započítá do konečné ceny.'}
+                </p>
+
+                <div className="mb-4 flex items-start gap-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
+                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                  <span>Platba je bezpečně držená přes Propojo a poskytovateli se uvolní až po {isModelB ? 'provedení výjezdu' : 'dokončení práce'}.</span>
+                </div>
+
+                <button onClick={handlePay} disabled={payBusy} className="btn-primary w-full justify-center disabled:opacity-60">
+                  {payBusy ? <><Loader2 className="h-4 w-4 animate-spin" /> Přesměrovávám…</> : <><CreditCard className="h-4 w-4" /> Zaplatit {depositAmount.toLocaleString('cs-CZ')} Kč</>}
+                </button>
+                {payError && <p className="mt-2 text-center text-sm text-red-600">{payError}</p>}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Chat */}
         <div className="flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -239,7 +327,6 @@ export default function OrderDetailClient({
             cardInner
           )}
 
-          {/* Důvěryhodnostní info o druhé straně */}
           <div className="mt-4 space-y-2 border-t border-slate-100 pt-4 text-sm text-slate-600">
             {memberSince && (
               <div className="flex items-center gap-2">
@@ -253,7 +340,6 @@ export default function OrderDetailClient({
             </div>
           </div>
 
-          {/* Kontakt odhalíme až po přijetí objednávky */}
           {order.status !== 'cekajici' && order.status !== 'zruseno' && otherProfile?.phone && (
             <a href={`tel:${otherProfile.phone}`} className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600 hover:text-emerald-700">
               <Phone className="h-4 w-4" /> {otherProfile.phone}

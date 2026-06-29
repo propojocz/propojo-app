@@ -6,7 +6,7 @@ import { ArrowLeft } from 'lucide-react'
 import OrderDetailClient from './OrderDetailClient'
 import ReviewForm from '@/components/ui/ReviewForm'
 
-interface Props { params: { id: string } }
+interface Props { params: { id: string }; searchParams: { platba?: string } }
 
 type ServiceLite = {
   id: string
@@ -30,6 +30,8 @@ type OrderRow = {
   description: string | null
   total_price: number | null
   created_at: string
+  deposit_status: string | null
+  deposit_amount: number | null
   services: ServiceLite | null
 }
 
@@ -52,7 +54,7 @@ type MessageRow = {
   image_url: string | null
 }
 
-export default async function OrderDetailPage({ params }: Props) {
+export default async function OrderDetailPage({ params, searchParams }: Props) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/prihlasit')
@@ -122,6 +124,7 @@ export default async function OrderDetailPage({ params }: Props) {
         initialMessages={messages ?? []}
         isProvider={isProvider}
         userId={user.id}
+        platbaStav={searchParams.platba ?? null}
       />
     </div>
   )
