@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { Loader2, CheckCircle2, XCircle, PlayCircle, Lock } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, PlayCircle, Lock, Flag } from 'lucide-react'
 import { updateOrderStatus } from '@/lib/actions/orders'
 
 const NEXT_STATUS: Record<string, { status: string; label: string; icon: any; color: string }[]> = {
@@ -13,7 +13,7 @@ const NEXT_STATUS: Record<string, { status: string; label: string; icon: any; co
     { status: 'zruseno', label: 'Zrušit', icon: XCircle, color: 'text-red-600 border-red-200 hover:bg-red-50' },
   ],
   v_procesu: [
-    { status: 'dokonceno', label: 'Dokončit', icon: CheckCircle2, color: 'text-emerald-600 border-emerald-200 hover:bg-emerald-50' },
+    { status: 'ceka_potvrzeni', label: 'Označit jako splněno', icon: Flag, color: 'text-emerald-600 border-emerald-200 hover:bg-emerald-50' },
   ],
 }
 
@@ -29,9 +29,16 @@ export default function OrderStatusButton({
   const [loading, setLoading] = useState<string | null>(null)
   const [err, setErr] = useState('')
   const actions = NEXT_STATUS[currentStatus] ?? []
+
+  // Ve stavu "čeká na potvrzení" poskytovatel jen čeká na zákazníka
+  if (currentStatus === 'ceka_potvrzeni') {
+    return (
+      <p className="text-sm text-slate-500">Čeká se na potvrzení dokončení od zákazníka.</p>
+    )
+  }
+
   if (actions.length === 0) return null
 
-  // "Zahájit" (prijato → v_procesu) jen když není záloha ve stavu 'pending'.
   const waitingForDeposit = depositStatus === 'pending'
 
   const handleAction = async (status: string) => {

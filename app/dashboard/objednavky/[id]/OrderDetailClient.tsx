@@ -1,10 +1,11 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
-import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2, CreditCard, ShieldCheck, Clock } from 'lucide-react'
+import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2, CreditCard, ShieldCheck, Clock, XCircle, Flag } from 'lucide-react'
 import OrderStatusButton from '../OrderStatusButton'
-import { sendOrderMessage } from '@/lib/actions/orders'
+import { sendOrderMessage, updateOrderStatus } from '@/lib/actions/orders'
 import { createDepositCheckout } from '@/lib/actions/deposit'
+import ConfirmCompletionButton from '@/components/ui/ConfirmCompletionButton'
 import Avatar from '@/components/ui/Avatar'
 
 type ServiceLite = {
@@ -57,6 +58,7 @@ const STATUS_LABELS: Record<string, string> = {
   cekajici: 'Čeká na přijetí',
   prijato: 'Přijato',
   v_procesu: 'V procesu',
+  ceka_potvrzeni: 'Čeká na potvrzení',
   dokonceno: 'Dokončeno',
   zruseno: 'Zrušeno',
 }
@@ -64,6 +66,7 @@ const STATUS_COLORS: Record<string, string> = {
   cekajici: 'bg-amber-100 text-amber-700 border-amber-200',
   prijato: 'bg-blue-100 text-blue-700 border-blue-200',
   v_procesu: 'bg-indigo-100 text-indigo-700 border-indigo-200',
+  ceka_potvrzeni: 'bg-purple-100 text-purple-700 border-purple-200',
   dokonceno: 'bg-emerald-100 text-emerald-700 border-emerald-200',
   zruseno: 'bg-red-100 text-red-700 border-red-200',
 }
@@ -92,6 +95,8 @@ export default function OrderDetailClient({
   const [sending, setSending] = useState(false)
   const [payBusy, setPayBusy] = useState(false)
   const [payError, setPayError] = useState('')
+  const [cancelBusy, setCancelBusy] = useState(false)
+  const [cancelErr, setCancelErr] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const service = order.services
@@ -107,11 +112,11 @@ export default function OrderDetailClient({
   const isModelB = service?.payment_model === 'B'
   const depositAmount = isModelB ? Number(service?.quote_fee ?? 0) : Number(service?.deposit_amount ?? 0)
   const isCustomer = !isProvider
-  // Texty se správnými tvary: záloha "uhrazena", poplatek "uhrazen"
   const payLabel = isModelB ? 'poplatek za výjezd' : 'rezervační zálohu'
   const paidTitle = isModelB ? 'Poplatek za výjezd uhrazen' : 'Rezervační záloha uhrazena'
   const notPaidLabel = isModelB ? 'Poplatek za výjezd zatím nebyl uhrazen.' : 'Rezervační záloha zatím nebyla uhrazena.'
   const isPaid = order.deposit_status === 'paid' || order.deposit_status === 'released'
+  const hasDeposit = depositAmount > 0
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -141,6 +146,17 @@ export default function OrderDetailClient({
     }
   }
 
+  const handleCustomerCancel = async () => {
+    if (!confirm('Opravdu chcete objednávku zrušit?')) return
+    setCancelBusy(true)
+    setCancelErr('')
+    const res = await updateOrderStatus(order.id, 'zruseno' as any)
+    if (!res.success) {
+      setCancelErr(res.error ?? 'Nepodařilo se zrušit.')
+      setCancelBusy(false)
+    }
+  }
+
   const cardInner = (
     <div className="flex items-center gap-3">
       <Avatar name={otherProfile?.full_name} url={otherProfile?.avatar_url} size={48} />
@@ -151,6 +167,8 @@ export default function OrderDetailClient({
       {profileHref && <ExternalLink className="h-4 w-4 shrink-0 text-slate-300" />}
     </div>
   )
+
+  const canCustomerCancel = isCustomer && ['cekajici', 'prijato', 'v_procesu', 'ceka_potvrzeni'].includes(order.status)
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
@@ -193,13 +211,15 @@ export default function OrderDetailClient({
             </div>
           )}
 
-          {/* Stav zálohy i pro POSKYTOVATELE (rychlý přehled) */}
-          {isProvider && depositAmount > 0 && order.status !== 'cekajici' && order.status !== 'zruseno' && (
+          {/* Stav zálohy i pro POSKYTOVATELE */}
+          {isProvider && hasDeposit && order.status !== 'cekajici' && order.status !== 'zruseno' && (
             <div className={`mt-4 flex items-center gap-2 rounded-xl px-4 py-3 text-sm ${isPaid ? 'border border-emerald-200 bg-emerald-50 text-emerald-800' : 'border border-amber-200 bg-amber-50 text-amber-800'}`}>
               {isPaid ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <Clock className="h-4 w-4 shrink-0" />}
-              {isPaid
-                ? `${paidTitle} (${Number(order.deposit_amount ?? depositAmount).toLocaleString('cs-CZ')} Kč) – drží se přes Propojo`
-                : `Čeká se na úhradu (${depositAmount.toLocaleString('cs-CZ')} Kč) od zákazníka`}
+              {order.deposit_status === 'released'
+                ? `${paidTitle} a uvolněn vám (${Number(order.deposit_amount ?? depositAmount).toLocaleString('cs-CZ')} Kč)`
+                : isPaid
+                  ? `${paidTitle} (${Number(order.deposit_amount ?? depositAmount).toLocaleString('cs-CZ')} Kč) – drží se přes Propojo`
+                  : `Čeká se na úhradu (${depositAmount.toLocaleString('cs-CZ')} Kč) od zákazníka`}
             </div>
           )}
 
@@ -210,15 +230,32 @@ export default function OrderDetailClient({
             </div>
           )}
 
+          {/* Akce poskytovatele */}
           {isProvider && (
             <div className="mt-5 border-t border-slate-100 pt-5">
               <OrderStatusButton orderId={order.id} currentStatus={order.status} depositStatus={order.deposit_status} />
             </div>
           )}
+
+          {/* Zrušení zákazníkem */}
+          {canCustomerCancel && (
+            <div className="mt-5 border-t border-slate-100 pt-5">
+              <button
+                onClick={handleCustomerCancel}
+                disabled={cancelBusy}
+                className="flex items-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition-all hover:bg-red-50 disabled:opacity-60"
+              >
+                {cancelBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                Zrušit objednávku
+              </button>
+              {isPaid && <p className="mt-2 text-xs text-slate-400">Zaplacená záloha vám bude vrácena.</p>}
+              {cancelErr && <p className="mt-2 text-sm text-red-600">{cancelErr}</p>}
+            </div>
+          )}
         </div>
 
         {/* ── PLATBA ZÁLOHY (jen zákazník, po přijetí) ───────── */}
-        {isCustomer && depositAmount > 0 && (order.status === 'prijato' || order.status === 'v_procesu') && (
+        {isCustomer && hasDeposit && (order.status === 'prijato' || order.status === 'v_procesu') && (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             {platbaStav === 'uspech' && (
               <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
@@ -266,6 +303,22 @@ export default function OrderDetailClient({
                 {payError && <p className="mt-2 text-center text-sm text-red-600">{payError}</p>}
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── POTVRZENÍ DOKONČENÍ (jen zákazník, stav ceka_potvrzeni) ── */}
+        {isCustomer && order.status === 'ceka_potvrzeni' && (
+          <div className="rounded-2xl border border-purple-200 bg-white p-6 shadow-sm">
+            <div className="mb-1 flex items-center gap-2">
+              <Flag className="h-5 w-5 text-purple-600" />
+              <h2 className="font-black text-slate-900">Poskytovatel označil zakázku jako splněnou</h2>
+            </div>
+            <p className="mb-4 text-sm text-slate-500">
+              Pokud {isModelB ? 'výjezd a nacenění proběhly' : 'řemeslník dorazil a plní zakázku'}, potvrďte to.
+              {hasDeposit && ' Tím se mu uvolní zaplacená záloha.'}
+              {' '}Další domluva o ceně a postupu probíhá přímo s řemeslníkem.
+            </p>
+            <ConfirmCompletionButton orderId={order.id} hasDeposit={hasDeposit} />
           </div>
         )}
 

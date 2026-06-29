@@ -6,6 +6,7 @@ import { Resend } from 'resend'
 import { newOrderEmail, orderStatusEmail } from '@/lib/email/templates'
 import type { ActionResult, OrderStatus } from './types'
 import { createNotification } from '@/lib/actions/notifications'
+import { refundDeposit } from '@/lib/actions/payout'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://propojo.cz'
 
@@ -54,12 +55,11 @@ export async function createOrder(values: {
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return { success: false, error: 'Pro objednávku musíte být přihlášeni.' }
 
-  // Pojistka: nelze objednat sám u sebe (zneužití – falešné objednávky, recenze, točení peněz).
+  // Pojistka: nelze objednat sám u sebe.
   if (values.provider_id === user.id) {
     return { success: false, error: 'Nemůžete si objednat vlastní službu.' }
   }
 
-  // Pojistka: u pozastaveného poskytovatele nelze objednat.
   const { data: providerProfile } = await supabase
     .from('profiles')
     .select('is_suspended')
@@ -146,37 +146,62 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return { success: false, error: 'Nejste přihlášeni.' }
 
-  // Při PŘIJETÍ objednávky zjistíme, jestli je co platit (záloha A / výjezd B).
-  // Pokud ano, nastavíme deposit_status='pending' (čeká se na platbu zákazníka).
+  // Načteme objednávku pro kontroly
+  const { data: ordCheck } = await supabase
+    .from('orders')
+    .select('customer_id, provider_id, deposit_status, services(payment_model, deposit_amount, quote_fee)')
+    .eq('id', orderId)
+    .single() as { data: any }
+
+  if (!ordCheck) return { success: false, error: 'Objednávka nenalezena.' }
+
+  const isProvider = ordCheck.provider_id === user.id
+  const isCustomer = ordCheck.customer_id === user.id
+
+  // Při PŘIJETÍ: nastavíme deposit_status='pending' když je co platit
   let extraUpdate: Record<string, any> = {}
   if (status === 'prijato') {
-    const { data: ord } = await supabase
-      .from('orders')
-      .select('services(payment_model, deposit_amount, quote_fee)')
-      .eq('id', orderId)
-      .single() as { data: any }
-
-    const svc = ord?.services
+    const svc = ordCheck.services
     const amount = svc?.payment_model === 'B'
       ? Number(svc?.quote_fee ?? 0)
       : Number(svc?.deposit_amount ?? 0)
-
-    if (amount > 0) {
-      extraUpdate = { deposit_status: 'pending' }
-    }
+    if (amount > 0) extraUpdate = { deposit_status: 'pending' }
   }
 
-  // Pojistka: do 'v_procesu' jen když je záloha zaplacená (nebo žádná není potřeba).
-  if (status === 'v_procesu') {
-    const { data: ord } = await supabase
-      .from('orders')
-      .select('deposit_status')
-      .eq('id', orderId)
-      .single() as { data: { deposit_status: string | null } | null }
+  // Do 'v_procesu' jen když je záloha zaplacená (nebo žádná není potřeba)
+  if (status === 'v_procesu' && ordCheck.deposit_status === 'pending') {
+    return { success: false, error: 'Práci lze zahájit až po úhradě zálohy zákazníkem.' }
+  }
 
-    if (ord?.deposit_status === 'pending') {
-      return { success: false, error: 'Práci lze zahájit až po úhradě zálohy zákazníkem.' }
+  // Status 'dokonceno' se NEnastavuje napřímo – děje se přes potvrzení zákazníka (releaseDeposit).
+  if (status === 'dokonceno') {
+    return { success: false, error: 'Dokončení potvrzuje zákazník.' }
+  }
+
+  // ZRUŠENÍ: smí poskytovatel i zákazník; když je záloha zaplacená → refund (4a: plná vratka)
+  if (status === 'zruseno') {
+    if (!isProvider && !isCustomer) {
+      return { success: false, error: 'K této objednávce nemáte přístup.' }
     }
+    if (ordCheck.deposit_status === 'paid') {
+      const refundRes = await refundDeposit(orderId, user.id)
+      if (!refundRes.success) return refundRes
+    }
+    const { error: cancelErr } = await (getAdminClient().from('orders') as any)
+      .update({ status: 'zruseno' })
+      .eq('id', orderId)
+    if (cancelErr) {
+      console.error('[updateOrderStatus] cancel:', cancelErr)
+      return { success: false, error: 'Nepodařilo se zrušit objednávku.' }
+    }
+    revalidatePath('/dashboard/objednavky')
+    revalidatePath(`/dashboard/objednavky/${orderId}`)
+    return { success: true, id: orderId }
+  }
+
+  // Ostatní změny stavu smí jen poskytovatel
+  if (!isProvider) {
+    return { success: false, error: 'Tuto akci může provést jen poskytovatel.' }
   }
 
   const { error } = await (supabase.from('orders') as any)
@@ -189,33 +214,31 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
     return { success: false, error: 'Nepodařilo se změnit stav.' }
   }
 
+  // Notifikace zákazníkovi
   try {
     const STATUS_TEXT: Record<string, string> = {
       prijato: 'Vaše poptávka byla přijata',
       v_procesu: 'Práce na vaší objednávce byla zahájena',
-      dokonceno: 'Vaše objednávka byla dokončena',
+      ceka_potvrzeni: 'Poskytovatel označil zakázku jako splněnou – potvrďte prosím',
       zruseno: 'Vaše objednávka byla zrušena',
     }
-    const { data: ord } = await supabase
-      .from('orders')
-      .select('customer_id, services(title)')
-      .eq('id', orderId)
-      .single() as { data: any }
-
-    if (ord && ord.customer_id !== user.id) {
+    if (ordCheck.customer_id !== user.id) {
+      const { data: svc } = await supabase
+        .from('orders').select('services(title)').eq('id', orderId).single() as { data: any }
       await createNotification({
-        userId: ord.customer_id,
+        userId: ordCheck.customer_id,
         type: 'status_change',
         orderId,
         actorId: user.id,
         title: STATUS_TEXT[status] ?? 'Změna stavu objednávky',
-        preview: ord.services?.title ?? null,
+        preview: svc?.services?.title ?? null,
       })
     }
   } catch (err) {
     console.error('[updateOrderStatus] notifikace:', err)
   }
 
+  // E-mail zákazníkovi
   try {
     const { data: order } = await supabase
       .from('orders')

@@ -7,6 +7,7 @@ import { logout } from '@/lib/actions/auth'
 import MobileDashboardNav from './MobileDashboardNav'
 import Avatar from '@/components/ui/Avatar'
 import SuspendedBanner from '@/components/ui/SuspendedBanner'
+import ConnectBanner from '@/components/ui/ConnectBanner'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = createClient()
@@ -89,8 +90,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </aside>
 
           <main className="flex-1 min-w-0 space-y-4">
-            {/* Banner pro pozastaveného uživatele */}
+            {/* Bannery: pozastavení + výzva k napojení účtu */}
             <SuspendedBanner />
+            <ConnectBanner />
             {children}
           </main>
         </div>
