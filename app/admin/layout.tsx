@@ -1,17 +1,24 @@
 // app/admin/layout.tsx
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Link from 'next/link'
 import { Inbox, Users, AlertTriangle, ShieldCheck } from 'lucide-react'
 
 export const metadata = { title: 'Admin | Propojo' }
+
+function getAdminClient() {
+  return createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+}
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/prihlasit?next=/admin')
 
-  // Ochrana: dovnitř jen admin
   const { data: profile } = await supabase
     .from('profiles')
     .select('is_admin')
@@ -20,10 +27,15 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   if (profile?.is_admin !== true) redirect('/dashboard')
 
+  // Počet otevřených sporů (pro odznak)
+  const admin = getAdminClient()
+  const { count: disputeCount } = await admin
+    .from('orders').select('id', { count: 'exact', head: true }).eq('status', 'spor')
+
   const NAV = [
-    { href: '/admin/poptavky', label: 'Poptávky', icon: 'Inbox', ready: true },
-    { href: '/admin/uzivatele', label: 'Uživatelé', icon: 'Users', ready: true },
-    { href: '/admin/spory', label: 'Spory', icon: 'AlertTriangle', ready: false },
+    { href: '/admin/poptavky', label: 'Poptávky', icon: 'Inbox', ready: true, badge: 0 },
+    { href: '/admin/uzivatele', label: 'Uživatelé', icon: 'Users', ready: true, badge: 0 },
+    { href: '/admin/spory', label: 'Spory', icon: 'AlertTriangle', ready: true, badge: disputeCount ?? 0 },
   ]
 
   return (
@@ -52,7 +64,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                   >
                     {item.icon === 'Inbox' && <Inbox className="h-4 w-4 shrink-0 text-slate-400" />}
                     {item.icon === 'Users' && <Users className="h-4 w-4 shrink-0 text-slate-400" />}
+                    {item.icon === 'AlertTriangle' && <AlertTriangle className="h-4 w-4 shrink-0 text-slate-400" />}
                     {item.label}
+                    {item.badge > 0 && (
+                      <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
+                        {item.badge}
+                      </span>
+                    )}
                   </Link>
                 ) : (
                   <div

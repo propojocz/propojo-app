@@ -72,7 +72,6 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
   const isProvider = order.provider_id === user.id
   const otherId = isProvider ? order.customer_id : order.provider_id
 
-  // Profily obou stran (u druhé strany i created_at kvůli "na Propojo od…")
   const [myProfileRes, otherProfileRes] = await Promise.all([
     supabase.from('profiles').select('id, full_name, avatar_url, phone, city, created_at').eq('id', user.id).single(),
     supabase.from('profiles').select('id, full_name, avatar_url, phone, city, created_at').eq('id', otherId).single(),
@@ -80,7 +79,6 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
   const myProfile = myProfileRes.data as ProfileLite | null
   const otherProfile = otherProfileRes.data as ProfileLite | null
 
-  // Počet DOKONČENÝCH objednávek druhé strany (signál důvěry).
   const otherCompletedField = isProvider ? 'customer_id' : 'provider_id'
   const { count: otherCompletedCount } = await supabase
     .from('orders')
@@ -95,7 +93,23 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
     .eq('order_id', params.id)
     .order('created_at', { ascending: true }) as { data: MessageRow[] | null }
 
-  // Recenze: ukázat formulář jen zákazníkovi, u dokončené objednávky, když ještě nehodnotil
+  // Mapa jmen VŠECH, kdo v chatu psali (vč. admina/Propojo, pokud zasáhl).
+  // Slouží k zobrazení jména nad cizími bublinami.
+  const senderIds = Array.from(new Set((messages ?? []).map((m) => m.sender_id)))
+  const namesMap: Record<string, string> = {}
+  // Předvyplníme z už načtených profilů
+  if (myProfile?.id) namesMap[myProfile.id] = myProfile.full_name ?? 'Já'
+  if (otherProfile?.id) namesMap[otherProfile.id] = otherProfile.full_name ?? (isProvider ? 'Zákazník' : 'Živnostník')
+  // Dohledáme zbylé (typicky admin/Propojo)
+  const missing = senderIds.filter((id) => !namesMap[id])
+  if (missing.length > 0) {
+    const { data: extraProfiles } = await supabase
+      .from('profiles').select('id, full_name, is_admin').in('id', missing) as { data: { id: string; full_name: string | null; is_admin: boolean | null }[] | null }
+    for (const p of extraProfiles ?? []) {
+      namesMap[p.id] = p.is_admin ? 'Propojo' : (p.full_name ?? 'Uživatel')
+    }
+  }
+
   const isCustomer = order.customer_id === user.id
   let canReview = false
   if (isCustomer && order.status === 'dokonceno') {
@@ -113,7 +127,6 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
         <ArrowLeft className="h-4 w-4" /> Zpět na objednávky
       </Link>
 
-      {/* Formulář recenze – jen zákazník, dokončená objednávka, zatím bez recenze */}
       {canReview && <ReviewForm orderId={order.id} />}
 
       <OrderDetailClient
@@ -122,6 +135,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
         otherProfile={otherProfile}
         otherCompletedCount={otherCompletedCount ?? 0}
         initialMessages={messages ?? []}
+        senderNames={namesMap}
         isProvider={isProvider}
         userId={user.id}
         platbaStav={searchParams.platba ?? null}

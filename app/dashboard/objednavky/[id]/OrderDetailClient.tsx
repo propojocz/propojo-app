@@ -1,7 +1,8 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
-import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2, CreditCard, ShieldCheck, Clock, XCircle, Flag } from 'lucide-react'
+import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2, CreditCard, ShieldCheck, Clock, XCircle, Flag, AlertTriangle, ImagePlus, X } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
 import OrderStatusButton from '../OrderStatusButton'
 import { sendOrderMessage, updateOrderStatus } from '@/lib/actions/orders'
 import { createDepositCheckout } from '@/lib/actions/deposit'
@@ -52,6 +53,7 @@ type MessageRow = {
   created_at: string
   read_at: string | null
   image_url: string | null
+  is_admin?: boolean | null
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -61,6 +63,7 @@ const STATUS_LABELS: Record<string, string> = {
   ceka_potvrzeni: 'Čeká na potvrzení',
   dokonceno: 'Dokončeno',
   zruseno: 'Zrušeno',
+  spor: 'Řeší se',
 }
 const STATUS_COLORS: Record<string, string> = {
   cekajici: 'bg-amber-100 text-amber-700 border-amber-200',
@@ -69,6 +72,7 @@ const STATUS_COLORS: Record<string, string> = {
   ceka_potvrzeni: 'bg-purple-100 text-purple-700 border-purple-200',
   dokonceno: 'bg-emerald-100 text-emerald-700 border-emerald-200',
   zruseno: 'bg-red-100 text-red-700 border-red-200',
+  spor: 'bg-orange-100 text-orange-700 border-orange-200',
 }
 
 export default function OrderDetailClient({
@@ -77,6 +81,7 @@ export default function OrderDetailClient({
   otherProfile,
   otherCompletedCount,
   initialMessages,
+  senderNames,
   isProvider,
   userId,
   platbaStav,
@@ -86,6 +91,7 @@ export default function OrderDetailClient({
   otherProfile: ProfileLite | null
   otherCompletedCount: number
   initialMessages: MessageRow[]
+  senderNames: Record<string, string>
   isProvider: boolean
   userId: string
   platbaStav?: string | null
@@ -93,6 +99,9 @@ export default function OrderDetailClient({
   const [messages, setMessages] = useState<MessageRow[]>(initialMessages)
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
+  const [chatImage, setChatImage] = useState<string | null>(null)
+  const [imgUploading, setImgUploading] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
   const [payBusy, setPayBusy] = useState(false)
   const [payError, setPayError] = useState('')
   const [cancelBusy, setCancelBusy] = useState(false)
@@ -124,14 +133,33 @@ export default function OrderDetailClient({
 
   const handleSend = async () => {
     const content = text.trim()
-    if (!content || sending) return
+    if ((!content && !chatImage) || sending) return
     setSending(true)
-    const result = await sendOrderMessage(order.id, content)
+    const result = await sendOrderMessage(order.id, content, chatImage)
     if (result.success && result.message) {
       setMessages((prev) => [...prev, result.message as MessageRow])
       setText('')
+      setChatImage(null)
     }
     setSending(false)
+  }
+
+  const handleChatImage = async (file: File) => {
+    if (!file.type.startsWith('image/')) return
+    if (file.size > 5 * 1024 * 1024) { alert('Obrázek je příliš velký (max 5 MB).'); return }
+    setImgUploading(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setImgUploading(false); return }
+    const ext = file.name.split('.').pop()
+    const fileName = `${user.id}/chat/${Date.now()}.${ext}`
+    const { data, error } = await supabase.storage.from('images').upload(fileName, file, { upsert: false, contentType: file.type })
+    if (!error && data) {
+      const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(data.path)
+      setChatImage(publicUrl)
+    }
+    setImgUploading(false)
+    if (fileRef.current) fileRef.current.value = ''
   }
 
   const handlePay = async () => {
@@ -168,7 +196,7 @@ export default function OrderDetailClient({
     </div>
   )
 
-  const canCustomerCancel = isCustomer && ['cekajici', 'prijato', 'v_procesu', 'ceka_potvrzeni'].includes(order.status)
+  const canCustomerCancel = isCustomer && ['cekajici', 'prijato', 'v_procesu'].includes(order.status)
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
@@ -254,6 +282,21 @@ export default function OrderDetailClient({
           )}
         </div>
 
+        {/* ── SPOR: informace pro obě strany ─────────────────── */}
+        {order.status === 'spor' && (
+          <div className="rounded-2xl border border-orange-200 bg-orange-50 p-6">
+            <div className="mb-1 flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-orange-600" />
+              <h2 className="font-black text-orange-900">Objednávku řeší Propojo</h2>
+            </div>
+            <p className="text-sm text-orange-800">
+              {isCustomer
+                ? 'Nahlásili jste problém. Zálohu jsme podrželi a situaci posoudíme. Ozveme se vám.'
+                : 'Zákazník nahlásil problém. Zálohu jsme podrželi a situaci posoudíme. Ozveme se vám.'}
+            </p>
+          </div>
+        )}
+
         {/* ── PLATBA ZÁLOHY (jen zákazník, po přijetí) ───────── */}
         {isCustomer && hasDeposit && (order.status === 'prijato' || order.status === 'v_procesu') && (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -333,11 +376,43 @@ export default function OrderDetailClient({
               <p className="py-8 text-center text-sm text-slate-400">Zatím žádné zprávy. Napište první.</p>
             ) : (
               messages.map((m) => {
-                const mine = m.sender_id === userId
+                const mine = m.sender_id === userId && !m.is_admin
+                const isPropojo = m.is_admin === true
+                if (isPropojo) {
+                  // Oficiální zpráva od Propojo – modrá, vystředěná dojmem "systémová"
+                  return (
+                    <div key={m.id} className="flex flex-col items-center">
+                      <span className="mb-0.5 flex items-center gap-1 px-1 text-[11px] font-semibold text-blue-600">
+                        <ShieldCheck className="h-3 w-3" /> Propojo
+                      </span>
+                      <div className="max-w-[85%] rounded-2xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900">
+                        {m.image_url && (
+                          <a href={m.image_url} target="_blank" rel="noopener noreferrer" className="block">
+                            <img src={m.image_url} alt="Příloha" className="mb-1.5 max-h-60 w-full rounded-lg object-cover" />
+                          </a>
+                        )}
+                        {m.content && <p className="whitespace-pre-wrap break-words">{m.content}</p>}
+                        <p className="mt-1 text-[11px] text-blue-400">
+                          {new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(m.created_at))}
+                        </p>
+                      </div>
+                    </div>
+                  )
+                }
                 return (
-                  <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                  <div key={m.id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
+                    {!mine && (
+                      <span className="mb-0.5 px-1 text-[11px] font-semibold text-slate-500">
+                        {senderNames[m.sender_id] ?? 'Uživatel'}
+                      </span>
+                    )}
                     <div className={`max-w-[75%] rounded-2xl px-4 py-2 text-sm ${mine ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-800'}`}>
-                      <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                      {m.image_url && (
+                        <a href={m.image_url} target="_blank" rel="noopener noreferrer" className="block">
+                          <img src={m.image_url} alt="Příloha" className="mb-1.5 max-h-60 w-full rounded-lg object-cover" />
+                        </a>
+                      )}
+                      {m.content && <p className="whitespace-pre-wrap break-words">{m.content}</p>}
                       <p className={`mt-1 text-[11px] ${mine ? 'text-emerald-100' : 'text-slate-400'}`}>
                         {new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(m.created_at))}
                       </p>
@@ -348,21 +423,46 @@ export default function OrderDetailClient({
             )}
           </div>
 
-          <div className="flex items-center gap-2 border-t border-slate-100 p-3">
-            <input
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
-              placeholder="Napište zprávu…"
-              className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-            />
-            <button
-              onClick={handleSend}
-              disabled={sending || !text.trim()}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white transition-colors hover:bg-emerald-600 disabled:opacity-40"
-            >
-              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            </button>
+          <div className="border-t border-slate-100 p-3">
+            {chatImage && (
+              <div className="mb-2 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-1.5">
+                <img src={chatImage} alt="Náhled" className="h-12 w-12 rounded object-cover" />
+                <button onClick={() => setChatImage(null)} className="flex h-6 w-6 items-center justify-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-600">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleChatImage(f) }}
+              />
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={imgUploading || sending}
+                title="Přidat fotku"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-40"
+              >
+                {imgUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+              </button>
+              <input
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+                placeholder="Napište zprávu…"
+                className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+              />
+              <button
+                onClick={handleSend}
+                disabled={sending || (!text.trim() && !chatImage)}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white transition-colors hover:bg-emerald-600 disabled:opacity-40"
+              >
+                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              </button>
+            </div>
           </div>
         </div>
       </div>

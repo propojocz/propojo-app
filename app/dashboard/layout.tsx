@@ -1,6 +1,7 @@
 // app/dashboard/layout.tsx
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Link from 'next/link'
 import { LayoutDashboard, Package, ShoppingBag, User, LogOut, ChevronRight, ShieldCheck, CreditCard, Landmark } from 'lucide-react'
 import { logout } from '@/lib/actions/auth'
@@ -8,6 +9,13 @@ import MobileDashboardNav from './MobileDashboardNav'
 import Avatar from '@/components/ui/Avatar'
 import SuspendedBanner from '@/components/ui/SuspendedBanner'
 import ConnectBanner from '@/components/ui/ConnectBanner'
+
+function getAdminClient() {
+  return createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+}
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = createClient()
@@ -22,6 +30,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const isProvider = profile?.is_provider === true
   const isAdmin = profile?.is_admin === true
+
+  // Počet otevřených sporů – jen pro admina (odznak u Admin panel)
+  let disputeCount = 0
+  if (isAdmin) {
+    const admin = getAdminClient()
+    const { count } = await admin
+      .from('orders').select('id', { count: 'exact', head: true }).eq('status', 'spor')
+    disputeCount = count ?? 0
+  }
 
   const NAV = [
     { href: '/dashboard', label: 'Přehled', icon: 'LayoutDashboard' },
@@ -84,7 +101,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
               >
                 <ShieldCheck className="h-4 w-4 shrink-0" />
                 Admin panel
-                <ChevronRight className="ml-auto h-3.5 w-3.5 text-slate-400" />
+                {disputeCount > 0 && (
+                  <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
+                    {disputeCount}
+                  </span>
+                )}
+                <ChevronRight className={`h-3.5 w-3.5 text-slate-400 ${disputeCount > 0 ? '' : 'ml-auto'}`} />
               </Link>
             )}
           </aside>

@@ -274,20 +274,24 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
 
 export async function sendOrderMessage(
   orderId: string,
-  content: string
+  content: string,
+  imageUrl?: string | null
 ): Promise<ActionResult & { message?: any }> {
   const supabase = createClient()
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return { success: false, error: 'Nejste přihlášeni.' }
 
   const trimmed = content.trim()
-  if (!trimmed) return { success: false, error: 'Zpráva je prázdná.' }
+  const img = imageUrl?.trim() || null
+  // Zpráva musí mít aspoň text NEBO fotku
+  if (!trimmed && !img) return { success: false, error: 'Zpráva je prázdná.' }
 
   const { data, error } = await (supabase.from('messages') as any)
     .insert({
       order_id: orderId,
       sender_id: user.id,
       content: trimmed,
+      image_url: img,
     })
     .select('*')
     .single() as { data: any; error: any }
@@ -315,7 +319,7 @@ export async function sendOrderMessage(
         orderId,
         actorId: user.id,
         title: `Nová zpráva od ${senderProfile?.full_name ?? 'uživatele'}`,
-        preview: trimmed.length > 80 ? trimmed.slice(0, 80) + '…' : trimmed,
+        preview: trimmed ? (trimmed.length > 80 ? trimmed.slice(0, 80) + '…' : trimmed) : '📷 Fotka',
       })
     }
   } catch (err) {
