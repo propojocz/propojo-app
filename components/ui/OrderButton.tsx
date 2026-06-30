@@ -3,7 +3,7 @@
 
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle2, Loader2, MessageSquare, LogIn } from 'lucide-react'
+import { CheckCircle2, Loader2, MessageSquare, LogIn, MapPin } from 'lucide-react'
 import Link from 'next/link'
 import { createOrder } from '@/lib/actions/orders'
 
@@ -18,10 +18,10 @@ interface OrderButtonProps {
 export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAgreed, paymentModel }: OrderButtonProps) {
   const [state, setState] = useState<'idle' | 'form' | 'loading' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
+  const [city, setCity] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
 
   const isModelB = paymentModel === 'B'
-  // Jasný text podle modelu (místo vágního "Mám zájem")
   const ctaLabel = 'domluvit cenu'
 
   if (!isLoggedIn) {
@@ -34,12 +34,18 @@ export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAg
   }
 
   const handleOrder = async () => {
+    if (!city.trim()) {
+      setState('error')
+      setErrorMsg('Zadejte prosím město nebo obec, kde se má služba provést.')
+      return
+    }
     setState('loading')
     const result = await createOrder({
       service_id: serviceId,
       provider_id: providerId,
       message: message || undefined,
       price_agreed: priceAgreed,
+      location_city: city.trim(),
     })
 
     if (result.success) {
@@ -72,7 +78,23 @@ export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAg
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
+            className="space-y-2"
           >
+            {/* Město / obec – kam se má služba provést */}
+            <div>
+              <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                <MapPin className="h-3.5 w-3.5 text-slate-400" /> Město nebo obec *
+              </label>
+              <input
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                placeholder="Např. Zubří"
+                className="form-input text-sm"
+                maxLength={100}
+              />
+              <p className="mt-1 text-[11px] text-slate-400">Přesnou adresu doplníte až po přijetí objednávky.</p>
+            </div>
+
             <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
@@ -99,7 +121,7 @@ export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAg
         </button>
       )}
 
-      {state === 'form' && (
+      {(state === 'form' || state === 'error') && (
         <div className="flex gap-2">
           <button
             onClick={() => setState('idle')}

@@ -32,6 +32,8 @@ type OrderRow = {
   created_at: string
   deposit_status: string | null
   deposit_amount: number | null
+  location_city: string | null
+  location_address: string | null
   services: ServiceLite | null
 }
 

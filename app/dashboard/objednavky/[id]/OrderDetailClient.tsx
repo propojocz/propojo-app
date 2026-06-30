@@ -4,9 +4,10 @@ import Link from 'next/link'
 import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2, CreditCard, ShieldCheck, Clock, XCircle, Flag, AlertTriangle, ImagePlus, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import OrderStatusButton from '../OrderStatusButton'
-import { sendOrderMessage, updateOrderStatus } from '@/lib/actions/orders'
+import { sendOrderMessage, updateOrderStatus, setOrderAddress } from '@/lib/actions/orders'
 import { createDepositCheckout } from '@/lib/actions/deposit'
 import ConfirmCompletionButton from '@/components/ui/ConfirmCompletionButton'
+import ChatThread from '@/components/ui/ChatThread'
 import Avatar from '@/components/ui/Avatar'
 
 type ServiceLite = {
@@ -33,6 +34,8 @@ type OrderRow = {
   created_at: string
   deposit_status: string | null
   deposit_amount: number | null
+  location_city: string | null
+  location_address: string | null
   services: ServiceLite | null
 }
 
@@ -106,6 +109,10 @@ export default function OrderDetailClient({
   const [payError, setPayError] = useState('')
   const [cancelBusy, setCancelBusy] = useState(false)
   const [cancelErr, setCancelErr] = useState('')
+  const [addressInput, setAddressInput] = useState(order.location_address ?? '')
+  const [addrBusy, setAddrBusy] = useState(false)
+  const [addrErr, setAddrErr] = useState('')
+  const [addrSaved, setAddrSaved] = useState(!!order.location_address)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const service = order.services
@@ -126,6 +133,23 @@ export default function OrderDetailClient({
   const notPaidLabel = isModelB ? 'Poplatek za výjezd zatím nebyl uhrazen.' : 'Rezervační záloha zatím nebyla uhrazena.'
   const isPaid = order.deposit_status === 'paid' || order.deposit_status === 'released'
   const hasDeposit = depositAmount > 0
+  const hasAddress = !!order.location_address || addrSaved
+
+  const handleSaveAddress = async () => {
+    if (addressInput.trim().length < 5) {
+      setAddrErr('Zadejte prosím úplnou adresu (ulice a číslo).')
+      return
+    }
+    setAddrBusy(true)
+    setAddrErr('')
+    const res = await setOrderAddress(order.id, addressInput)
+    if (res.success) {
+      setAddrSaved(true)
+    } else {
+      setAddrErr(res.error ?? 'Nepodařilo se uložit.')
+    }
+    setAddrBusy(false)
+  }
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -251,6 +275,20 @@ export default function OrderDetailClient({
             </div>
           )}
 
+          {/* Místo výkonu */}
+          {(order.location_city || order.location_address) && order.status !== 'zruseno' && (
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Místo</p>
+                {/* Přesná adresa se ukáže až po přijetí (oběma); předtím jen město */}
+                {order.location_address && order.status !== 'cekajici'
+                  ? <p className="font-medium text-slate-800">{order.location_address}</p>
+                  : <p className="font-medium text-slate-800">{order.location_city ?? '—'}{order.status === 'cekajici' ? '' : ' (přesná adresa se doplní)'}</p>}
+              </div>
+            </div>
+          )}
+
           {order.description && (
             <div className="mt-4">
               <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Poznámka od zákazníka</h3>
@@ -297,6 +335,42 @@ export default function OrderDetailClient({
           </div>
         )}
 
+        {/* ── PŘESNÁ ADRESA (jen zákazník, po přijetí, před zaplacením) ── */}
+        {isCustomer && (order.status === 'prijato' || order.status === 'v_procesu') && !isPaid && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-1 flex items-center gap-2">
+              <MapPin className="h-5 w-5 text-emerald-600" />
+              <h2 className="font-black text-slate-900">Přesná adresa{hasAddress ? '' : ' *'}</h2>
+            </div>
+            <p className="mb-3 text-sm text-slate-500">
+              {hasAddress
+                ? 'Adresa je vyplněná. Můžete ji ještě upravit, dokud nezaplatíte.'
+                : `Objednávka byla přijata. Doplňte přesnou adresu${hasDeposit ? ', kam má řemeslník dorazit — pak budete moci zaplatit.' : ', kam má řemeslník dorazit.'}`}
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                value={addressInput}
+                onChange={(e) => { setAddressInput(e.target.value); setAddrSaved(false) }}
+                placeholder="Ulice a číslo, město"
+                className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                maxLength={200}
+              />
+              <button
+                onClick={handleSaveAddress}
+                disabled={addrBusy}
+                className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-60"
+              >
+                {addrBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : (hasAddress ? 'Upravit' : 'Uložit adresu')}
+              </button>
+            </div>
+            {order.location_city && (
+              <p className="mt-2 text-xs text-slate-400">Město z objednávky: {order.location_city}</p>
+            )}
+            {addrSaved && <p className="mt-2 text-sm text-emerald-600">Adresa uložena.</p>}
+            {addrErr && <p className="mt-2 text-sm text-red-600">{addrErr}</p>}
+          </div>
+        )}
+
         {/* ── PLATBA ZÁLOHY (jen zákazník, po přijetí) ───────── */}
         {isCustomer && hasDeposit && (order.status === 'prijato' || order.status === 'v_procesu') && (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -340,10 +414,18 @@ export default function OrderDetailClient({
                   <span>Platba je bezpečně držená přes Propojo a poskytovateli se uvolní až po {isModelB ? 'provedení výjezdu' : 'dokončení práce'}.</span>
                 </div>
 
-                <button onClick={handlePay} disabled={payBusy} className="btn-primary w-full justify-center disabled:opacity-60">
-                  {payBusy ? <><Loader2 className="h-4 w-4 animate-spin" /> Přesměrovávám…</> : <><CreditCard className="h-4 w-4" /> Zaplatit {depositAmount.toLocaleString('cs-CZ')} Kč</>}
-                </button>
-                {payError && <p className="mt-2 text-center text-sm text-red-600">{payError}</p>}
+                {!hasAddress ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    Nejdříve prosím vyplňte přesnou adresu výše — pak budete moci zaplatit.
+                  </div>
+                ) : (
+                  <>
+                    <button onClick={handlePay} disabled={payBusy} className="btn-primary w-full justify-center disabled:opacity-60">
+                      {payBusy ? <><Loader2 className="h-4 w-4 animate-spin" /> Přesměrovávám…</> : <><CreditCard className="h-4 w-4" /> Zaplatit {depositAmount.toLocaleString('cs-CZ')} Kč</>}
+                    </button>
+                    {payError && <p className="mt-2 text-center text-sm text-red-600">{payError}</p>}
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -372,55 +454,7 @@ export default function OrderDetailClient({
           </div>
 
           <div ref={scrollRef} className="max-h-[420px] min-h-[200px] space-y-3 overflow-y-auto px-5 py-4">
-            {messages.length === 0 ? (
-              <p className="py-8 text-center text-sm text-slate-400">Zatím žádné zprávy. Napište první.</p>
-            ) : (
-              messages.map((m) => {
-                const mine = m.sender_id === userId && !m.is_admin
-                const isPropojo = m.is_admin === true
-                if (isPropojo) {
-                  // Oficiální zpráva od Propojo – modrá, vystředěná dojmem "systémová"
-                  return (
-                    <div key={m.id} className="flex flex-col items-center">
-                      <span className="mb-0.5 flex items-center gap-1 px-1 text-[11px] font-semibold text-blue-600">
-                        <ShieldCheck className="h-3 w-3" /> Propojo
-                      </span>
-                      <div className="max-w-[85%] rounded-2xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900">
-                        {m.image_url && (
-                          <a href={m.image_url} target="_blank" rel="noopener noreferrer" className="block">
-                            <img src={m.image_url} alt="Příloha" className="mb-1.5 max-h-60 w-full rounded-lg object-cover" />
-                          </a>
-                        )}
-                        {m.content && <p className="whitespace-pre-wrap break-words">{m.content}</p>}
-                        <p className="mt-1 text-[11px] text-blue-400">
-                          {new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(m.created_at))}
-                        </p>
-                      </div>
-                    </div>
-                  )
-                }
-                return (
-                  <div key={m.id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
-                    {!mine && (
-                      <span className="mb-0.5 px-1 text-[11px] font-semibold text-slate-500">
-                        {senderNames[m.sender_id] ?? 'Uživatel'}
-                      </span>
-                    )}
-                    <div className={`max-w-[75%] rounded-2xl px-4 py-2 text-sm ${mine ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-800'}`}>
-                      {m.image_url && (
-                        <a href={m.image_url} target="_blank" rel="noopener noreferrer" className="block">
-                          <img src={m.image_url} alt="Příloha" className="mb-1.5 max-h-60 w-full rounded-lg object-cover" />
-                        </a>
-                      )}
-                      {m.content && <p className="whitespace-pre-wrap break-words">{m.content}</p>}
-                      <p className={`mt-1 text-[11px] ${mine ? 'text-emerald-100' : 'text-slate-400'}`}>
-                        {new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(m.created_at))}
-                      </p>
-                    </div>
-                  </div>
-                )
-              })
-            )}
+            <ChatThread messages={messages as any} myUserId={userId} senderNames={senderNames} />
           </div>
 
           <div className="border-t border-slate-100 p-3">

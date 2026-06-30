@@ -50,6 +50,7 @@ export async function createOrder(values: {
   message?: string
   scheduled_at?: string
   price_agreed?: number
+  location_city?: string
 }): Promise<ActionResult> {
   const supabase = createClient()
   const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -78,6 +79,7 @@ export async function createOrder(values: {
       customer_id: user.id,
       description: values.message ?? null,
       total_price: values.price_agreed ?? null,
+      location_city: values.location_city ?? null,
       status: 'cekajici',
     } as any)
     .select('id')
@@ -268,6 +270,40 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   }
 
   revalidatePath('/dashboard/objednavky')
+  revalidatePath(`/dashboard/objednavky/${orderId}`)
+  return { success: true, id: orderId }
+}
+
+// ── DOPLNĚNÍ PŘESNÉ ADRESY ZÁKAZNÍKEM (po přijetí, před platbou) ──
+export async function setOrderAddress(orderId: string, address: string): Promise<ActionResult> {
+  const supabase = createClient()
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError || !user) return { success: false, error: 'Nejste přihlášeni.' }
+
+  const trimmed = address.trim()
+  if (trimmed.length < 5) return { success: false, error: 'Zadejte prosím úplnou adresu (ulice a číslo).' }
+
+  const { data: order } = await supabase
+    .from('orders')
+    .select('customer_id, status')
+    .eq('id', orderId)
+    .single() as { data: { customer_id: string; status: string } | null }
+
+  if (!order) return { success: false, error: 'Objednávka nenalezena.' }
+  if (order.customer_id !== user.id) {
+    return { success: false, error: 'Adresu může doplnit jen zákazník objednávky.' }
+  }
+
+  const { error } = await (supabase.from('orders') as any)
+    .update({ location_address: trimmed })
+    .eq('id', orderId)
+    .eq('customer_id', user.id)
+
+  if (error) {
+    console.error('[setOrderAddress]', error)
+    return { success: false, error: 'Adresu se nepodařilo uložit.' }
+  }
+
   revalidatePath(`/dashboard/objednavky/${orderId}`)
   return { success: true, id: orderId }
 }
