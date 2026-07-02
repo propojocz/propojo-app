@@ -27,6 +27,9 @@ const serviceSchema = z.object({
   free_km: z.number().int().min(0).max(100000).nullable().optional(),
   quote_days: z.number().int().min(0).max(365).nullable().optional(),
 
+  // Kde se služba vykonává
+  location_type: z.enum(['u_poskytovatele','u_zakaznika','oboji'] as const).optional(),
+
   // Storno politika
   cancellation_policy: z.enum(['zadna','mirna','standardni','prisna'] as const).optional(),
 })
@@ -36,6 +39,8 @@ function normalize(data: z.infer<typeof serviceSchema>) {
   const d = { ...data }
   // Výchozí storno politika
   if (!d.cancellation_policy) d.cancellation_policy = 'zadna'
+  // Výchozí místo výkonu
+  if (!d.location_type) d.location_type = 'u_zakaznika'
   if (d.payment_model === 'B') {
     d.price = 0
     d.price_type = 'on_agreement'
@@ -82,7 +87,7 @@ export async function createService(values: ServiceFormValues): Promise<ActionRe
   const primarySub = rest.subcategory_id || (subcategory_ids && subcategory_ids[0]) || null
   const insertData = { ...rest, subcategory_id: primarySub, provider_id: user.id, image_url: image_url || null }
 
-  const { data, error } = await supabase.from('services').insert(insertData).select('id').single()
+  const { data, error } = await (supabase.from('services') as any).insert(insertData).select('id').single()
   if (error) { console.error('INSERT services error:', error); return { success: false, error: 'Nepodařilo se uložit službu.' } }
 
   await saveSubcategories(supabase, data.id, subcategory_ids)
@@ -103,7 +108,7 @@ export async function updateService(id: string, values: ServiceFormValues): Prom
   const primarySub = rest.subcategory_id || (subcategory_ids && subcategory_ids[0]) || null
   const updateData = { ...rest, subcategory_id: primarySub, image_url: image_url || null }
 
-  const { error } = await supabase.from('services').update(updateData).eq('id', id).eq('provider_id', user.id)
+  const { error } = await (supabase.from('services') as any).update(updateData).eq('id', id).eq('provider_id', user.id)
   if (error) { console.error('UPDATE services error:', error); return { success: false, error: 'Nepodařilo se uložit změny.' } }
 
   await saveSubcategories(supabase, id, subcategory_ids)
@@ -116,8 +121,8 @@ export async function deleteService(id: string): Promise<ActionResult> {
   const supabase = createClient()
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return { success: false, error: 'Nejste přihlášeni.' }
-  const { error } = await supabase.from('services').delete().eq('id', id).eq('provider_id', user.id)
-  if (error) return { success: false, error: 'Nepodařilo se smazat.' }
+  const { error } = await (supabase.from('services') as any).delete().eq('id', id).eq('provider_id', user.id)
+  if (error) { console.error('DELETE services error:', error); return { success: false, error: 'Nepodařilo se smazat. Služba může mít navázané objednávky – zkuste ji místo mazání skrýt.' } }
   revalidatePath('/'); revalidatePath('/marketplace')
   return { success: true, id }
 }
@@ -126,7 +131,7 @@ export async function toggleServiceActive(id: string, is_active: boolean): Promi
   const supabase = createClient()
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return { success: false, error: 'Nejste přihlášeni.' }
-  const { error } = await supabase.from('services').update({ is_active }).eq('id', id).eq('provider_id', user.id)
+  const { error } = await (supabase.from('services') as any).update({ is_active }).eq('id', id).eq('provider_id', user.id)
   if (error) return { success: false, error: 'Nepodařilo se změnit stav.' }
   revalidatePath('/'); revalidatePath('/marketplace')
   return { success: true, id }

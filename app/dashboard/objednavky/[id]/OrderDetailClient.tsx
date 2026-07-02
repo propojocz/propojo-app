@@ -21,6 +21,7 @@ type ServiceLite = {
   payment_model: string | null
   deposit_amount: number | null
   quote_fee: number | null
+  location_type: string | null
 }
 
 type OrderRow = {
@@ -36,6 +37,7 @@ type OrderRow = {
   deposit_amount: number | null
   location_city: string | null
   location_address: string | null
+  service_location: string | null
   services: ServiceLite | null
 }
 
@@ -134,6 +136,11 @@ export default function OrderDetailClient({
   const isPaid = order.deposit_status === 'paid' || order.deposit_status === 'released'
   const hasDeposit = depositAmount > 0
   const hasAddress = !!order.location_address || addrSaved
+  // Adresu zákazníka řešíme JEN když se služba koná u zákazníka.
+  // service_location má přednost; když chybí (starší objednávky), odvodíme z location_type služby.
+  const atCustomer = order.service_location
+    ? order.service_location === 'u_zakaznika'
+    : (service?.location_type ? service.location_type !== 'u_poskytovatele' : true)
 
   const handleSaveAddress = async () => {
     if (addressInput.trim().length < 5) {
@@ -276,15 +283,16 @@ export default function OrderDetailClient({
           )}
 
           {/* Místo výkonu */}
-          {(order.location_city || order.location_address) && order.status !== 'zruseno' && (
+          {order.status !== 'zruseno' && (atCustomer ? (order.location_city || order.location_address) : true) && (
             <div className="mt-4 flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
               <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Místo</p>
-                {/* Přesná adresa se ukáže až po přijetí (oběma); předtím jen město */}
-                {order.location_address && order.status !== 'cekajici'
-                  ? <p className="font-medium text-slate-800">{order.location_address}</p>
-                  : <p className="font-medium text-slate-800">{order.location_city ?? '—'}{order.status === 'cekajici' ? '' : ' (přesná adresa se doplní)'}</p>}
+                {!atCustomer
+                  ? <p className="font-medium text-slate-800">U poskytovatele (provozovna)</p>
+                  : order.location_address && order.status !== 'cekajici'
+                    ? <p className="font-medium text-slate-800">{order.location_address}</p>
+                    : <p className="font-medium text-slate-800">{order.location_city ?? '—'}{order.status === 'cekajici' ? '' : ' (přesná adresa se doplní)'}</p>}
               </div>
             </div>
           )}
@@ -335,8 +343,8 @@ export default function OrderDetailClient({
           </div>
         )}
 
-        {/* ── PŘESNÁ ADRESA (jen zákazník, po přijetí, před zaplacením) ── */}
-        {isCustomer && (order.status === 'prijato' || order.status === 'v_procesu') && !isPaid && (
+        {/* ── PŘESNÁ ADRESA (jen zákazník, jen když se koná U ZÁKAZNÍKA, po přijetí, před zaplacením) ── */}
+        {isCustomer && atCustomer && (order.status === 'prijato' || order.status === 'v_procesu') && !isPaid && (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-1 flex items-center gap-2">
               <MapPin className="h-5 w-5 text-emerald-600" />
@@ -414,7 +422,7 @@ export default function OrderDetailClient({
                   <span>Platba je bezpečně držená přes Propojo a poskytovateli se uvolní až po {isModelB ? 'provedení výjezdu' : 'dokončení práce'}.</span>
                 </div>
 
-                {!hasAddress ? (
+                {atCustomer && !hasAddress ? (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                     Nejdříve prosím vyplňte přesnou adresu výše — pak budete moci zaplatit.
                   </div>

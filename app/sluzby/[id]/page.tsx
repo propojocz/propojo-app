@@ -320,7 +320,7 @@ export default async function ServiceDetailPage({ params }: Props) {
               <p className="mb-3 text-sm font-semibold text-emerald-800">
                 {isModelB ? 'Chceš nacenit tuto práci?' : 'Máš zájem o tuto službu?'}
               </p>
-              <OrderButton serviceId={s.id} providerId={s.provider_id} isLoggedIn={!!user} priceAgreed={price} paymentModel={s.payment_model} />
+              <OrderButton serviceId={s.id} providerId={s.provider_id} isLoggedIn={!!user} priceAgreed={price} paymentModel={s.payment_model} locationType={s.location_type} />
             </div>
 
             <p className="text-center text-xs text-slate-400">

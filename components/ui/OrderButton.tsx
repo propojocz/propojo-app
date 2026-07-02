@@ -1,9 +1,11 @@
 'use client'
 // components/ui/OrderButton.tsx
+// Objednání služby. Adresu (město) řešíme JEN když se služba koná u zákazníka.
+// location_type služby: 'u_poskytovatele' | 'u_zakaznika' | 'oboji'
 
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle2, Loader2, MessageSquare, LogIn, MapPin } from 'lucide-react'
+import { CheckCircle2, Loader2, MessageSquare, LogIn, MapPin, Home, Store } from 'lucide-react'
 import Link from 'next/link'
 import { createOrder } from '@/lib/actions/orders'
 
@@ -13,16 +15,26 @@ interface OrderButtonProps {
   isLoggedIn: boolean
   priceAgreed?: number
   paymentModel?: string | null
+  locationType?: string | null // 'u_poskytovatele' | 'u_zakaznika' | 'oboji'
 }
 
-export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAgreed, paymentModel }: OrderButtonProps) {
+export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAgreed, paymentModel, locationType = 'u_zakaznika' }: OrderButtonProps) {
   const [state, setState] = useState<'idle' | 'form' | 'loading' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
   const [city, setCity] = useState('')
+  // U 'oboji' si zákazník volí, kde chce službu. U pevných typů je to dané.
+  const [place, setPlace] = useState<'u_zakaznika' | 'u_poskytovatele'>(
+    locationType === 'u_poskytovatele' ? 'u_poskytovatele' : 'u_zakaznika'
+  )
   const [errorMsg, setErrorMsg] = useState('')
 
   const isModelB = paymentModel === 'B'
   const ctaLabel = 'domluvit cenu'
+
+  // Ptáme se na město jen když se služba koná u zákazníka
+  const isChoice = locationType === 'oboji'
+  const atCustomer = isChoice ? place === 'u_zakaznika' : locationType === 'u_zakaznika'
+  const needsCity = atCustomer
 
   if (!isLoggedIn) {
     return (
@@ -34,7 +46,7 @@ export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAg
   }
 
   const handleOrder = async () => {
-    if (!city.trim()) {
+    if (needsCity && !city.trim()) {
       setState('error')
       setErrorMsg('Zadejte prosím město nebo obec, kde se má služba provést.')
       return
@@ -45,7 +57,8 @@ export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAg
       provider_id: providerId,
       message: message || undefined,
       price_agreed: priceAgreed,
-      location_city: city.trim(),
+      location_city: needsCity ? city.trim() : undefined,
+      service_location: atCustomer ? 'u_zakaznika' : 'u_poskytovatele',
     })
 
     if (result.success) {
@@ -78,22 +91,55 @@ export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAg
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            className="space-y-2"
+            className="space-y-3"
           >
-            {/* Město / obec – kam se má služba provést */}
-            <div>
-              <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
-                <MapPin className="h-3.5 w-3.5 text-slate-400" /> Město nebo obec *
-              </label>
-              <input
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
-                placeholder="Např. Zubří"
-                className="form-input text-sm"
-                maxLength={100}
-              />
-              <p className="mt-1 text-[11px] text-slate-400">Přesnou adresu doplníte až po přijetí objednávky.</p>
-            </div>
+            {/* U 'oboji': zákazník zvolí, kde chce službu */}
+            {isChoice && (
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-slate-600">Kde chcete službu využít?</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPlace('u_poskytovatele')}
+                    className={`flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${place === 'u_poskytovatele' ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                  >
+                    <Store className="h-4 w-4" /> U poskytovatele
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPlace('u_zakaznika')}
+                    className={`flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${place === 'u_zakaznika' ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                  >
+                    <Home className="h-4 w-4" /> U mě
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Město – jen když se koná u zákazníka */}
+            {needsCity && (
+              <div>
+                <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                  <MapPin className="h-3.5 w-3.5 text-slate-400" /> Město nebo obec *
+                </label>
+                <input
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  placeholder="Např. Zubří"
+                  className="form-input text-sm"
+                  maxLength={100}
+                />
+                <p className="mt-1 text-[11px] text-slate-400">Přesnou adresu doplníte až po přijetí objednávky.</p>
+              </div>
+            )}
+
+            {/* Info když se jde za poskytovatelem */}
+            {!needsCity && (
+              <div className="flex items-start gap-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
+                <Store className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                <span>Služba probíhá na adrese poskytovatele. Adresu uvidíte po přijetí objednávky.</span>
+              </div>
+            )}
 
             <textarea
               value={message}

@@ -1,5 +1,5 @@
 'use client'
-// components/forms/ServiceForm.tsx – kategorie z DB + Model A/B + storno politika
+// components/forms/ServiceForm.tsx – kategorie z DB + Model A/B + storno politika + místo výkonu
 
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronRight, Info } from 'lucide-react'
+import { CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronRight, Info, Store, Home, Shuffle } from 'lucide-react'
 import { createService, updateService } from '@/lib/actions/services'
 import type { Service } from '@/types/database'
 import ImageUpload from '@/components/ui/ImageUpload'
@@ -36,6 +36,9 @@ const schema = z.object({
   price_per_km: z.number().min(0).max(99999).nullable().optional(),
   free_km: z.number().int().min(0).max(100000).nullable().optional(),
   quote_days: z.number().int().min(0).max(365).nullable().optional(),
+
+  // Kde se služba vykonává
+  location_type: z.enum(['u_poskytovatele','u_zakaznika','oboji']),
 
   // Storno politika
   cancellation_policy: z.enum(['zadna','mirna','standardni','prisna']),
@@ -92,6 +95,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
       price_per_km: init.price_per_km ?? null,
       free_km: init.free_km ?? null,
       quote_days: init.quote_days ?? null,
+      location_type: (init.location_type as 'u_poskytovatele'|'u_zakaznika'|'oboji') ?? 'u_zakaznika',
       cancellation_policy: (init.cancellation_policy as CancellationKey) ?? 'zadna',
     } : {
       price_unit: 'hod',
@@ -101,6 +105,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
       deposit_amount: 200,
       price_max: null, duration_minutes: null,
       quote_fee: null, price_per_km: null, free_km: null, quote_days: null,
+      location_type: 'u_zakaznika',
       cancellation_policy: 'zadna',
     },
   })
@@ -111,6 +116,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
   const model = watch('payment_model')
   const priceType = watch('price_type')
   const cancellationPolicy = watch('cancellation_policy')
+  const locationType = watch('location_type')
 
   // Načti kategorie z DB
   useEffect(() => {
@@ -286,6 +292,36 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
           a doplníme ho.
         </p>
       )}
+
+      {/* ============ KDE VYKONÁVÁTE SLUŽBU? ============ */}
+      <div className="space-y-3">
+        <label className="form-label">Kde vykonáváte svou službu? *</label>
+        <p className="-mt-1 text-xs text-slate-400">Podle toho poznáme, jestli po zákazníkovi chtít adresu.</p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {([
+            { value: 'u_poskytovatele', icon: Store, title: 'Zákazník přijde za mnou', desc: 'Mám provozovnu (salon, dílna)' },
+            { value: 'u_zakaznika', icon: Home, title: 'Jezdím za zákazníkem', desc: 'Dorazím na jeho adresu' },
+            { value: 'oboji', icon: Shuffle, title: 'Obojí', desc: 'Podle domluvy se zákazníkem' },
+          ] as const).map(opt => {
+            const Icon = opt.icon
+            const isSel = locationType === opt.value
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setValue('location_type', opt.value)}
+                className={`rounded-2xl border-2 p-4 text-left transition-all ${
+                  isSel ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-emerald-300'
+                }`}
+              >
+                <Icon className={`mb-1.5 h-5 w-5 ${isSel ? 'text-emerald-600' : 'text-slate-400'}`} />
+                <p className="text-sm font-extrabold text-slate-900">{opt.title}</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{opt.desc}</p>
+              </button>
+            )
+          })}
+        </div>
+      </div>
 
       {/* ============ ZPŮSOB PLATBY (Model A/B) ============ */}
       <div className="space-y-3">

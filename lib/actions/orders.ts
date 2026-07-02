@@ -51,6 +51,7 @@ export async function createOrder(values: {
   scheduled_at?: string
   price_agreed?: number
   location_city?: string
+  service_location?: string
 }): Promise<ActionResult> {
   const supabase = createClient()
   const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -80,6 +81,7 @@ export async function createOrder(values: {
       description: values.message ?? null,
       total_price: values.price_agreed ?? null,
       location_city: values.location_city ?? null,
+      service_location: values.service_location ?? null,
       status: 'cekajici',
     } as any)
     .select('id')
