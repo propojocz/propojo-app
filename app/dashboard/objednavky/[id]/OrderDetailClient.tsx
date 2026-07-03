@@ -38,6 +38,7 @@ type OrderRow = {
   location_city: string | null
   location_address: string | null
   service_location: string | null
+  scheduled_at: string | null
   services: ServiceLite | null
 }
 
@@ -279,6 +280,19 @@ export default function OrderDetailClient({
                 : isPaid
                   ? `${paidTitle} (${Number(order.deposit_amount ?? depositAmount).toLocaleString('cs-CZ')} Kč) – drží se přes Propojo`
                   : `Čeká se na úhradu (${depositAmount.toLocaleString('cs-CZ')} Kč) od zákazníka`}
+            </div>
+          )}
+
+          {/* Termín (z rezervace) */}
+          {order.scheduled_at && order.status !== 'zruseno' && (
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm">
+              <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Termín</p>
+                <p className="font-bold text-slate-800">
+                  {new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(new Date(order.scheduled_at))}
+                </p>
+              </div>
             </div>
           )}
 

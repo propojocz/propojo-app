@@ -2,7 +2,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { PlusCircle, Eye, EyeOff, Trash2, Loader2, BarChart2, Pencil } from 'lucide-react'
+import { PlusCircle, Eye, EyeOff, Trash2, Loader2, BarChart2, Pencil, CalendarPlus } from 'lucide-react'
 import { toggleServiceActive, deleteService } from '@/lib/actions/services'
 import { CATEGORY_META } from '@/types/database'
 
@@ -99,6 +99,11 @@ export default function NabidkyPage() {
                 <Link href={`/dashboard/nabidky/${s.id}/upravit`} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition-colors hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700">
                   <Pencil className="h-4 w-4" /> Upravit
                 </Link>
+                {s.payment_model === 'A' && (
+                  <Link href={`/dashboard/terminy?service=${s.id}`} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition-colors hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700">
+                    <CalendarPlus className="h-4 w-4" /> Přidat termín
+                  </Link>
+                )}
                 <button onClick={() => handleToggle(s.id, s.is_active)} disabled={actionId === s.id} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition-colors hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 disabled:opacity-50">
                   {actionId === s.id ? <Loader2 className="h-4 w-4 animate-spin" /> : s.is_active ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   {s.is_active ? 'Skrýt' : 'Zveřejnit'}

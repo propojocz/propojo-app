@@ -153,7 +153,7 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   // Načteme objednávku pro kontroly
   const { data: ordCheck } = await supabase
     .from('orders')
-    .select('customer_id, provider_id, deposit_status, services(payment_model, deposit_amount, quote_fee)')
+    .select('customer_id, provider_id, deposit_status, slot_id, services(payment_model, deposit_amount, quote_fee)')
     .eq('id', orderId)
     .single() as { data: any }
 
@@ -198,8 +198,15 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
       console.error('[updateOrderStatus] cancel:', cancelErr)
       return { success: false, error: 'Nepodařilo se zrušit objednávku.' }
     }
+    // Byla-li objednávka vázaná na rezervovaný termín, uvolni ho zpět jako volný
+    if (ordCheck.slot_id) {
+      await (getAdminClient().from('availability_slots') as any)
+        .update({ status: 'volno', order_id: null })
+        .eq('id', ordCheck.slot_id)
+    }
     revalidatePath('/dashboard/objednavky')
     revalidatePath(`/dashboard/objednavky/${orderId}`)
+    revalidatePath('/dashboard/terminy')
     return { success: true, id: orderId }
   }
 

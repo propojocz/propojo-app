@@ -9,6 +9,7 @@ import OrderButton from '@/components/ui/OrderButton'
 import Avatar from '@/components/ui/Avatar'
 import { getCancellation } from '@/lib/cancellation'
 import type { Metadata } from 'next'
+import SlotPicker from '@/components/ui/SlotPicker'
 
 interface Props { params: { id: string } }
 
@@ -88,6 +89,20 @@ export default async function ServiceDetailPage({ params }: Props) {
   const subcatNames = (subcatLinks ?? [])
     .map((r: any) => r.subcategories?.name)
     .filter(Boolean) as string[]
+
+  // Volné budoucí termíny této služby (jen Model A)
+  let freeSlots: { id: string; starts_at: string; ends_at: string }[] = []
+  if (s.payment_model !== 'B') {
+    const { data: slotLinks } = await supabase
+      .from('slot_services')
+      .select('availability_slots(id, starts_at, ends_at, status)')
+      .eq('service_id', s.id)
+    freeSlots = (slotLinks ?? [])
+      .map((l: any) => l.availability_slots)
+      .filter((sl: any) => sl && sl.status === 'volno' && new Date(sl.starts_at) > new Date())
+      .sort((a: any, b: any) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime())
+      .slice(0, 8)
+  }
 
   // ── Cenové údaje ──────────────────────────────────────────
   const isModelB = s.payment_model === 'B'
@@ -229,6 +244,16 @@ export default async function ServiceDetailPage({ params }: Props) {
           </div>
 
           <div className="space-y-4">
+            {/* Volné termíny (Model A) – hned nahoře, ať je vidět jako první */}
+            {!isModelB && freeSlots.length > 0 && (
+              <SlotPicker
+                serviceId={s.id}
+                slots={freeSlots}
+                isLoggedIn={!!user}
+                locationType={s.location_type}
+              />
+            )}
+
             {/* Poskytovatel */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <Link href={`/profil/${s.provider_id}`} className="flex items-center gap-3 hover:opacity-80 transition-opacity">

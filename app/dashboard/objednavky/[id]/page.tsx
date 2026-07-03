@@ -36,6 +36,7 @@ type OrderRow = {
   location_city: string | null
   location_address: string | null
   service_location: string | null
+  scheduled_at: string | null
   services: ServiceLite | null
 }
 

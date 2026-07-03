@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Link from 'next/link'
-import { LayoutDashboard, Package, ShoppingBag, User, LogOut, ChevronRight, ShieldCheck, CreditCard, Landmark } from 'lucide-react'
+import { LayoutDashboard, Package, ShoppingBag, User, LogOut, ChevronRight, ShieldCheck, CreditCard, Landmark, CalendarDays } from 'lucide-react'
 import { logout } from '@/lib/actions/auth'
 import MobileDashboardNav from './MobileDashboardNav'
 import Avatar from '@/components/ui/Avatar'
@@ -43,6 +43,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const NAV = [
     { href: '/dashboard', label: 'Přehled', icon: 'LayoutDashboard' },
     ...(isProvider ? [{ href: '/dashboard/nabidky', label: 'Moje nabídky', icon: 'Package' }] : []),
+    ...(isProvider ? [{ href: '/dashboard/terminy', label: 'Termíny', icon: 'CalendarDays' }] : []),
     { href: '/dashboard/objednavky', label: isProvider ? 'Poptávky' : 'Objednávky', icon: 'ShoppingBag' },
     ...(isProvider ? [{ href: '/dashboard/predplatne', label: 'Předplatné', icon: 'CreditCard' }] : []),
     ...(isProvider ? [{ href: '/dashboard/vyplaty', label: 'Výplaty', icon: 'Landmark' }] : []),
@@ -78,6 +79,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 <Link key={item.href} href={item.href} className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-slate-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700 border-b border-slate-100 last:border-0">
                   {item.icon === 'LayoutDashboard' && <LayoutDashboard className="h-4 w-4 shrink-0" />}
                   {item.icon === 'Package' && <Package className="h-4 w-4 shrink-0" />}
+                  {item.icon === 'CalendarDays' && <CalendarDays className="h-4 w-4 shrink-0" />}
                   {item.icon === 'ShoppingBag' && <ShoppingBag className="h-4 w-4 shrink-0" />}
                   {item.icon === 'CreditCard' && <CreditCard className="h-4 w-4 shrink-0" />}
                   {item.icon === 'Landmark' && <Landmark className="h-4 w-4 shrink-0" />}
