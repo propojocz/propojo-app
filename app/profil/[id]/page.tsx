@@ -9,6 +9,7 @@ import ProfileViewTracker from '@/components/ui/ProfileViewTracker'
 import Avatar from '@/components/ui/Avatar'
 import ProfileGallery from '@/components/ui/ProfileGallery'
 import ProfileBookingBox from '@/components/ui/ProfileBookingBox'
+import ReviewCard from '@/components/ui/ReviewCard'
 import { getResponseHours, getCompletedCount, getUpcomingSlots } from '@/lib/provider-stats'
 
 interface Props { params: { id: string } }
@@ -51,6 +52,9 @@ type ReviewRow = {
   rating: number
   comment: string | null
   created_at: string
+  provider_response: string | null
+  response_created_at: string | null
+  reported_at: string | null
   profiles: { full_name: string | null; avatar_url: string | null } | null
 }
 
@@ -90,6 +94,7 @@ export default async function ProfilPage({ params }: Props) {
   const { data: { user } } = await supabase.auth.getUser()
   const favorited = user ? await isFavorited(params.id) : false
   const displayName = profile.company_name || profile.full_name || 'Poskytovatel'
+  const isOwner = false // odpovídání se řeší v dashboardu (/dashboard/recenze), profil jen zobrazuje
 
   const { data: services } = await supabase
     .from('services')
@@ -100,7 +105,7 @@ export default async function ProfilPage({ params }: Props) {
 
   const { data: reviews } = await supabase
     .from('reviews')
-    .select('id, rating, comment, created_at, profiles!reviews_reviewer_id_fkey(full_name, avatar_url)')
+    .select('id, rating, comment, created_at, provider_response, response_created_at, reported_at, profiles!reviews_reviewer_id_fkey(full_name, avatar_url)')
     .eq('provider_id', params.id)
     .order('created_at', { ascending: false })
     .limit(20) as { data: ReviewRow[] | null }
@@ -254,21 +259,21 @@ export default async function ProfilPage({ params }: Props) {
             ) : (
               <div className="space-y-4">
                 {reviews.map((r) => (
-                  <div key={r.id} className="border-b border-slate-100 pb-4 last:border-none last:pb-0">
-                    <div className="flex items-center gap-3">
-                      <Avatar name={r.profiles?.full_name} url={r.profiles?.avatar_url} size={36} className="bg-slate-100 text-slate-600 text-sm" />
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-slate-900">{r.profiles?.full_name ?? 'Zákazník'}</p>
-                        <div className="flex items-center gap-2">
-                          <Stars value={r.rating} />
-                          <span className="text-xs text-slate-400">
-                            {new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(r.created_at))}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                    {r.comment && <p className="mt-2 text-sm leading-relaxed text-slate-600">{r.comment}</p>}
-                  </div>
+                  <ReviewCard
+                    key={r.id}
+                    isOwner={isOwner}
+                    review={{
+                      id: r.id,
+                      rating: r.rating,
+                      comment: r.comment,
+                      created_at: r.created_at,
+                      provider_response: r.provider_response,
+                      response_created_at: r.response_created_at,
+                      reported_at: r.reported_at,
+                      reviewerName: r.profiles?.full_name ?? null,
+                      reviewerAvatar: r.profiles?.avatar_url ?? null,
+                    }}
+                  />
                 ))}
               </div>
             )}

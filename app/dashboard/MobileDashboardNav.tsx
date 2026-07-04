@@ -8,13 +8,13 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, Package, ShoppingBag, User,
   PlusCircle, LogOut, Menu, X, ChevronRight,
-  CalendarDays, CreditCard, Landmark, Heart
+  CalendarDays, CreditCard, Landmark, Heart, Star
 } from 'lucide-react'
 import { logout } from '@/lib/actions/auth'
 
 const ICONS: Record<string, any> = {
   LayoutDashboard, Package, ShoppingBag, User,
-  CalendarDays, CreditCard, Landmark, Heart,
+  CalendarDays, CreditCard, Landmark, Heart, Star,
 }
 
 interface NavItem {

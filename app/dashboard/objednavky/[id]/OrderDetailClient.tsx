@@ -1,7 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
-import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2, CreditCard, ShieldCheck, Clock, XCircle, Flag, AlertTriangle, ImagePlus, X } from 'lucide-react'
+import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2, CreditCard, ShieldCheck, Clock, XCircle, Flag, AlertTriangle, ImagePlus, X, RotateCcw } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import OrderStatusButton from '../OrderStatusButton'
 import { sendOrderMessage, updateOrderStatus, setOrderAddress } from '@/lib/actions/orders'
@@ -137,8 +137,6 @@ export default function OrderDetailClient({
   const isPaid = order.deposit_status === 'paid' || order.deposit_status === 'released'
   const hasDeposit = depositAmount > 0
   const hasAddress = !!order.location_address || addrSaved
-  // Adresu zákazníka řešíme JEN když se služba koná u zákazníka.
-  // service_location má přednost; když chybí (starší objednávky), odvodíme z location_type služby.
   const atCustomer = order.service_location
     ? order.service_location === 'u_zakaznika'
     : (service?.location_type ? service.location_type !== 'u_poskytovatele' : true)
@@ -262,12 +260,12 @@ export default function OrderDetailClient({
 
           {service?.payment_model === 'A' && (service?.deposit_amount ?? 0) > 0 && (
             <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-              <strong>Model A — rezervační záloha:</strong> {Number(service?.deposit_amount).toLocaleString('cs-CZ')} Kč (započítává se do ceny)
+              <strong>Rezervace se zálohou:</strong> {Number(service?.deposit_amount).toLocaleString('cs-CZ')} Kč (započítává se do ceny)
             </div>
           )}
           {service?.payment_model === 'B' && (
             <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-              <strong>Model B — nacenění na místě</strong>{(service?.quote_fee ?? 0) > 0 ? `: poplatek za výjezd ${Number(service?.quote_fee).toLocaleString('cs-CZ')} Kč` : ''}
+              <strong>Výjezd a nacenění</strong>{(service?.quote_fee ?? 0) > 0 ? `: poplatek za výjezd ${Number(service?.quote_fee).toLocaleString('cs-CZ')} Kč` : ''}
             </div>
           )}
 
@@ -338,6 +336,19 @@ export default function OrderDetailClient({
               </button>
               {isPaid && <p className="mt-2 text-xs text-slate-400">Zaplacená záloha vám bude vrácena.</p>}
               {cancelErr && <p className="mt-2 text-sm text-red-600">{cancelErr}</p>}
+            </div>
+          )}
+
+          {/* Rebook – zákazník u dokončené objednávky */}
+          {isCustomer && order.status === 'dokonceno' && service && (
+            <div className="mt-5 border-t border-slate-100 pt-5">
+              <Link
+                href={`/sluzby/${order.service_id}`}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-600"
+              >
+                <RotateCcw className="h-4 w-4" /> Objednat znovu
+              </Link>
+              <p className="mt-2 text-center text-xs text-slate-400">Spokojenost? Objednejte si stejnou službu znovu jedním klikem.</p>
             </div>
           )}
         </div>

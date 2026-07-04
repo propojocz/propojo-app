@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Link from 'next/link'
-import { LayoutDashboard, Package, ShoppingBag, User, LogOut, ChevronRight, ShieldCheck, CreditCard, Landmark, CalendarDays } from 'lucide-react'
+import { LayoutDashboard, Package, ShoppingBag, User, LogOut, ChevronRight, ShieldCheck, CreditCard, Landmark, CalendarDays, Star } from 'lucide-react'
 import { logout } from '@/lib/actions/auth'
 import MobileDashboardNav from './MobileDashboardNav'
 import Avatar from '@/components/ui/Avatar'
@@ -40,11 +40,22 @@ export default async function DashboardLayout({ children }: { children: React.Re
     disputeCount = count ?? 0
   }
 
+  // Počet recenzí bez odpovědi (odznak pro poskytovatele)
+  let unansweredReviews = 0
+  if (isProvider) {
+    const admin = getAdminClient()
+    const { count } = await admin
+      .from('reviews').select('id', { count: 'exact', head: true })
+      .eq('provider_id', user.id).is('provider_response', null).is('reported_at', null)
+    unansweredReviews = count ?? 0
+  }
+
   const NAV = [
     { href: '/dashboard', label: 'Přehled', icon: 'LayoutDashboard' },
     ...(isProvider ? [{ href: '/dashboard/nabidky', label: 'Moje nabídky', icon: 'Package' }] : []),
     ...(isProvider ? [{ href: '/dashboard/terminy', label: 'Termíny', icon: 'CalendarDays' }] : []),
     { href: '/dashboard/objednavky', label: isProvider ? 'Poptávky' : 'Objednávky', icon: 'ShoppingBag' },
+    ...(isProvider ? [{ href: '/dashboard/recenze', label: 'Moje recenze', icon: 'Star', badge: unansweredReviews }] : []),
     ...(isProvider ? [{ href: '/dashboard/predplatne', label: 'Předplatné', icon: 'CreditCard' }] : []),
     ...(isProvider ? [{ href: '/dashboard/vyplaty', label: 'Výplaty', icon: 'Landmark' }] : []),
     { href: '/dashboard/profil', label: 'Profil', icon: 'User' },
@@ -81,11 +92,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
                   {item.icon === 'Package' && <Package className="h-4 w-4 shrink-0" />}
                   {item.icon === 'CalendarDays' && <CalendarDays className="h-4 w-4 shrink-0" />}
                   {item.icon === 'ShoppingBag' && <ShoppingBag className="h-4 w-4 shrink-0" />}
+                  {item.icon === 'Star' && <Star className="h-4 w-4 shrink-0" />}
                   {item.icon === 'CreditCard' && <CreditCard className="h-4 w-4 shrink-0" />}
                   {item.icon === 'Landmark' && <Landmark className="h-4 w-4 shrink-0" />}
                   {item.icon === 'User' && <User className="h-4 w-4 shrink-0" />}
                   {item.label}
-                  <ChevronRight className="ml-auto h-3.5 w-3.5 text-slate-300" />
+                  {(item as any).badge > 0 ? (
+                    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-white">{(item as any).badge}</span>
+                  ) : (
+                    <ChevronRight className="ml-auto h-3.5 w-3.5 text-slate-300" />
+                  )}
                 </Link>
               ))}
               <form action={logout}>

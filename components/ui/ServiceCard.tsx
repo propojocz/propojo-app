@@ -73,9 +73,6 @@ export default function ServiceCard({
             <CalendarCheck className="h-3.5 w-3.5" /> Volný termín
           </span>
         )}
-        <div className="absolute right-3 top-3" onClick={(e) => e.preventDefault()}>
-          <FavoriteButton providerId={providerId} initialFavorited={isFavorited} isLoggedIn={isLoggedIn} variant="icon" />
-        </div>
       </Link>
 
       {/* Tělo */}
@@ -89,13 +86,17 @@ export default function ServiceCard({
               <div className="flex h-full w-full items-center justify-center text-sm font-extrabold text-emerald-600">{initial}</div>
             )}
           </Link>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <Link href={`/profil/${providerId}`}>
               <h3 className="truncate font-extrabold leading-tight text-slate-900 transition-colors group-hover:text-emerald-700">{providerName}</h3>
             </Link>
             <p className="flex items-center gap-1 text-xs font-bold text-emerald-700">
               <span>{meta.emoji}</span> {obor}
             </p>
+          </div>
+          {/* Srdíčko = oblíbený poskytovatel (ne konkrétní služba) */}
+          <div className="shrink-0" title="Uložit poskytovatele do oblíbených">
+            <FavoriteButton providerId={providerId} initialFavorited={isFavorited} isLoggedIn={isLoggedIn} variant="icon" />
           </div>
         </div>
 
