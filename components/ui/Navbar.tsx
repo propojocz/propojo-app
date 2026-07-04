@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase/server'
-import { PlusCircle, LogIn } from 'lucide-react'
+import { PlusCircle, LogIn, Heart } from 'lucide-react'
 import NavUserMenu from './NavUserMenu'
 import NotificationBadge from './NotificationBadge'
 import MobileNav from './MobileNav'
@@ -53,6 +53,14 @@ export default async function Navbar() {
                 <Link href="/pridat-sluzbu" className="btn-primary hidden sm:inline-flex">
                   <PlusCircle className="h-4 w-4" />
                   Přidat službu
+                </Link>
+                {/* Oblíbení */}
+                <Link
+                  href="/dashboard/oblibene"
+                  title="Oblíbení"
+                  className="hidden h-10 w-10 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-500 sm:inline-flex"
+                >
+                  <Heart className="h-5 w-5" />
                 </Link>
                 <NotificationBadge />
                 <NavUserMenu
