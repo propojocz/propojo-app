@@ -2,7 +2,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { MapPin, BadgeCheck, Star, Eye, Zap, CheckCircle2, Clock, ChevronRight } from 'lucide-react'
+import { MapPin, BadgeCheck, Star, Eye, Zap, CheckCircle2, Clock, ChevronRight, Pencil } from 'lucide-react'
 import FavoriteButton from '@/components/ui/FavoriteButton'
 import { isFavorited } from '@/lib/actions/favorites'
 import ProfileViewTracker from '@/components/ui/ProfileViewTracker'
@@ -95,6 +95,7 @@ export default async function ProfilPage({ params }: Props) {
   const favorited = user ? await isFavorited(params.id) : false
   const displayName = profile.company_name || profile.full_name || 'Poskytovatel'
   const isOwner = false // odpovídání se řeší v dashboardu (/dashboard/recenze), profil jen zobrazuje
+  const viewerIsOwner = user?.id === profile.id // vlastník si prohlíží svůj profil
 
   const { data: services } = await supabase
     .from('services')
@@ -183,7 +184,16 @@ export default async function ProfilPage({ params }: Props) {
             </div>
           </div>
         </div>
-        <FavoriteButton providerId={profile.id} initialFavorited={favorited} isLoggedIn={!!user} variant="full" />
+        {viewerIsOwner ? (
+          <Link
+            href="/dashboard/profil"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700"
+          >
+            <Pencil className="h-4 w-4" /> Upravit profil
+          </Link>
+        ) : (
+          <FavoriteButton providerId={profile.id} initialFavorited={favorited} isLoggedIn={!!user} variant="full" />
+        )}
       </div>
 
       {/* Pruh důvěry */}
