@@ -98,7 +98,6 @@ async function ServiceList({
     }
   }
 
-  // Město: hledá ve službě NEBO u poskytovatele (řeší prázdné city u služby)
   if (city) {
     const { data: provRows } = await supabase.from('profiles').select('id').ilike('city', `%${city}%`)
     const provIds = (provRows ?? []).map((p: any) => p.id)
@@ -165,18 +164,15 @@ async function ServiceList({
     )
   }
 
-  // ── Doplňková data pro karty: názvy kategorií, podkategorie, volné sloty, oblíbené ──
   const serviceIds = sorted.map((s) => s.id)
   const providerIds = Array.from(new Set(sorted.map((s) => (s.profiles as any)?.id ?? s.provider_id)))
   const catSlugs = Array.from(new Set(sorted.map((s) => s.category).filter(Boolean)))
 
-  // Názvy kategorií (slug → name)
   const { data: catRows } = catSlugs.length > 0
     ? await supabase.from('categories').select('slug, name').in('slug', catSlugs)
     : { data: [] as any[] }
   const catName: Record<string, string> = Object.fromEntries((catRows ?? []).map((c: any) => [c.slug, c.name]))
 
-  // Podkategorie na službu
   const { data: subLinks } = serviceIds.length > 0
     ? await supabase.from('service_subcategories').select('service_id, subcategories(name)').in('service_id', serviceIds)
     : { data: [] as any[] }
@@ -187,7 +183,6 @@ async function ServiceList({
     ;(subsByService[l.service_id] ??= []).push(nm)
   }
 
-  // Volné sloty (poskytovatelé, co mají budoucí volno)
   const freeSlotProviders = new Set<string>()
   if (providerIds.length > 0) {
     const { data: slotRows } = await supabase
@@ -196,7 +191,6 @@ async function ServiceList({
     for (const r of (slotRows ?? []) as any[]) freeSlotProviders.add(r.provider_id)
   }
 
-  // Oblíbení tohoto uživatele
   const favSet = new Set<string>()
   if (user && providerIds.length > 0) {
     const { data: favRows } = await supabase
@@ -242,8 +236,8 @@ export default async function MarketplacePage({ searchParams }: Props) {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-emerald-600">Živnostenský marketplace</p>
-              <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">Najdi zkušeného řemeslníka</h1>
-              <p className="mt-1.5 text-slate-500">Ověření živnostníci ve tvém okolí. Žádné přirážky, přímý kontakt.</p>
+              <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">Najděte zkušeného řemeslníka</h1>
+              <p className="mt-1.5 text-slate-500">Ověření živnostníci ve vašem okolí. Žádné přirážky, přímý kontakt.</p>
             </div>
             <Link href="/pridat-sluzbu" className="inline-flex shrink-0 items-center gap-2 self-start rounded-xl bg-emerald-500 px-5 py-2.5 font-bold text-white transition hover:bg-emerald-600 sm:self-auto">
               <PlusCircle className="h-4 w-4" /> Nabídnout službu

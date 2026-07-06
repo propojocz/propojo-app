@@ -20,12 +20,12 @@ interface Category {
  
 interface Props {
   categories: Category[]
-  subcategories?: Subcategory[]   // podkategorie aktivní kategorie (z page.tsx)
+  subcategories?: Subcategory[]
   activeCategory?: string
   currentPriceMin?: string
   currentPriceMax?: string
   currentMinRating?: string
-  currentSubcats?: string         // "id1,id2"
+  currentSubcats?: string
 }
  
 export default function FilterSidebar({
@@ -56,7 +56,6 @@ export default function FilterSidebar({
     startTransition(() => router.push(`${pathname}?${params.toString()}`, { scroll: false }))
   }
  
-  // Při změně kategorie vyčisti i vybrané podkategorie
   const selectCategory = (slug?: string) => {
     const params = new URLSearchParams(searchParams.toString())
     if (slug) params.set('category', slug)
@@ -103,11 +102,11 @@ export default function FilterSidebar({
       }`}
     >
       <div className="mb-5 flex items-center justify-between">
-        <h2 className="text-lg font-extrabold text-slate-900">Filtry</h2>
+        <h2 className="text-lg font-semibold text-slate-900">Filtry</h2>
         {hasFilters && (
           <button
             onClick={clearFilters}
-            className="flex items-center gap-1 text-xs font-bold text-slate-400 hover:text-slate-600"
+            className="flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-slate-600"
           >
             <X className="h-3.5 w-3.5" /> Vymazat
           </button>
@@ -116,13 +115,13 @@ export default function FilterSidebar({
  
       {/* Kategorie */}
       <div className="mb-6">
-        <h3 className="mb-3 text-sm font-bold text-slate-800">Kategorie</h3>
+        <h3 className="mb-3 text-sm font-semibold text-slate-800">Kategorie</h3>
         <div className="space-y-1">
           <button
             onClick={() => selectCategory(undefined)}
             className={`block w-full rounded-lg px-3 py-2 text-left text-sm transition ${
               !activeCategory
-                ? 'bg-emerald-50 font-bold text-emerald-700'
+                ? 'bg-emerald-50 font-semibold text-emerald-700'
                 : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -136,14 +135,13 @@ export default function FilterSidebar({
                   onClick={() => selectCategory(cat.slug)}
                   className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${
                     active
-                      ? 'bg-emerald-50 font-bold text-emerald-700'
+                      ? 'bg-emerald-50 font-semibold text-emerald-700'
                       : 'text-slate-600 hover:bg-slate-100'
                   }`}
                 >
                   <span>{cat.icon}</span> {cat.name}
                 </button>
  
-                {/* Podkategorie – jen pod aktivní kategorií */}
                 {active && subcategories.length > 0 && (
                   <div className="mt-1 space-y-0.5 border-l-2 border-emerald-100 pl-3">
                     {subcategories.map((sub) => {
@@ -177,7 +175,7 @@ export default function FilterSidebar({
  
       {/* Cena */}
       <div className="mb-6">
-        <h3 className="mb-3 text-sm font-bold text-slate-800">Cena (Kč)</h3>
+        <h3 className="mb-3 text-sm font-semibold text-slate-800">Cena (Kč)</h3>
         <div className="flex items-center gap-2">
           <input
             type="number"
@@ -205,7 +203,7 @@ export default function FilterSidebar({
  
       {/* Hodnocení */}
       <div>
-        <h3 className="mb-3 text-sm font-bold text-slate-800">Hodnocení</h3>
+        <h3 className="mb-3 text-sm font-semibold text-slate-800">Hodnocení</h3>
         <div className="space-y-1">
           {ratingOpts.map((opt) => {
             const active = (currentMinRating ?? '') === opt.value
@@ -215,7 +213,7 @@ export default function FilterSidebar({
                 onClick={() => setParam('minRating', opt.value || undefined)}
                 className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${
                   active
-                    ? 'bg-emerald-50 font-bold text-emerald-700'
+                    ? 'bg-emerald-50 font-semibold text-emerald-700'
                     : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >

@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase/server'
-import { PlusCircle, LogIn, Heart } from 'lucide-react'
+import { PlusCircle, LogIn, Heart, LayoutDashboard, CalendarDays, ShoppingBag } from 'lucide-react'
 import NavUserMenu from './NavUserMenu'
 import NotificationBadge from './NotificationBadge'
 import MobileNav from './MobileNav'
@@ -22,6 +22,9 @@ export default async function Navbar() {
     profile = data
   }
 
+  const isProvider = profile?.is_provider === true
+  const linkClass = 'flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700'
+
   return (
     <>
       {/* Varovný pruh pro pozastaveného (zobrazí se jen jemu) */}
@@ -35,24 +38,43 @@ export default async function Navbar() {
             <Image src="/propojo-logo.png" alt="Propojo" width={120} height={40} className="h-9 w-auto object-contain" priority />
           </Link>
 
-          {/* Desktop navigace */}
-          <div className="hidden items-center gap-1 sm:flex">
-            <Link href="/marketplace" className="rounded-lg px-3 py-2 text-sm font-medium text-[#7ab937] transition-colors hover:bg-[#7ab937]/10 hover:text-[#7ab937]">
-              Marketplace
-            </Link>
-            <Link href="/jak-to-funguje" className="rounded-lg px-3 py-2 text-sm font-medium text-[#7ab937] transition-colors hover:bg-[#7ab937]/10 hover:text-[#7ab937]">
-              Jak to funguje
-            </Link>
+          {/* Desktop navigace — dle role */}
+          <div className="hidden items-center gap-1 md:flex">
+            <Link href="/marketplace" className={linkClass}>Marketplace</Link>
+
+            {user && (
+              isProvider ? (
+                <>
+                  {/* Poskytovatel = má navíc poskytovatelské odkazy (i zákaznické přes Zakázky) */}
+                  <Link href="/dashboard" className={linkClass}>
+                    <LayoutDashboard className="h-4 w-4" /> Přehled
+                  </Link>
+                  <Link href="/dashboard/terminy" className={linkClass}>
+                    <CalendarDays className="h-4 w-4" /> Termíny
+                  </Link>
+                  <Link href="/dashboard/objednavky" className={linkClass}>
+                    <ShoppingBag className="h-4 w-4" /> Zakázky
+                  </Link>
+                </>
+              ) : (
+                <>
+                  {/* Zákazník — jen zákaznické */}
+                  <Link href="/dashboard/objednavky" className={linkClass}>
+                    <ShoppingBag className="h-4 w-4" /> Moje objednávky
+                  </Link>
+                </>
+              )
+            )}
           </div>
 
           {/* Pravá část */}
           <div className="flex items-center gap-1">
             {user ? (
               <>
-                {/* Desktop tlačítka */}
+                {/* Přidat službu — jen když nabízí (nebo aby se mohl stát poskytovatelem) */}
                 <Link href="/pridat-sluzbu" className="btn-primary hidden sm:inline-flex">
                   <PlusCircle className="h-4 w-4" />
-                  Přidat službu
+                  {isProvider ? 'Přidat službu' : 'Nabídnout službu'}
                 </Link>
                 {/* Oblíbení */}
                 <Link
@@ -71,7 +93,7 @@ export default async function Navbar() {
               </>
             ) : (
               <>
-                {/* Desktop přihlášení */}
+                {/* Nepřihlášený */}
                 <Link href="/prihlasit" className="btn-secondary hidden sm:inline-flex">
                   <LogIn className="h-4 w-4" />
                   Přihlásit se
