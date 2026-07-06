@@ -12,9 +12,12 @@ const serviceSchema = z.object({
   subcategory_ids: z.array(z.string()).optional(),
   service_type: z.string().optional(),
   price: z.number().min(0).max(999999),
-  price_unit: z.enum(['hod','kus','den','projekt'] as const),
+  price_unit: z.enum(['hod','kus','den','projekt','m2'] as const),
   city: z.string().min(2).max(100),
+  city_lat: z.number().nullable().optional(),
+  city_lng: z.number().nullable().optional(),
   image_url: z.string().url().optional().or(z.literal('')),
+  gallery: z.array(z.string()).optional(),
 
   // Model A/B
   payment_model: z.enum(['A','B'] as const),
@@ -29,6 +32,8 @@ const serviceSchema = z.object({
 
   // Kde se služba vykonává
   location_type: z.enum(['u_poskytovatele','u_zakaznika','oboji'] as const).optional(),
+  // Dojezdová vzdálenost (relevantní jen když poskytovatel jezdí za zákazníkem)
+  radius_km: z.number().int().min(1).max(300).nullable().optional(),
 
   // Storno politika
   cancellation_policy: z.enum(['zadna','mirna','standardni','prisna'] as const).optional(),
@@ -41,6 +46,8 @@ function normalize(data: z.infer<typeof serviceSchema>) {
   if (!d.cancellation_policy) d.cancellation_policy = 'zadna'
   // Výchozí místo výkonu
   if (!d.location_type) d.location_type = 'u_zakaznika'
+  // Radius dává smysl jen když poskytovatel jezdí za zákazníkem
+  if (d.location_type === 'u_poskytovatele') d.radius_km = null
   if (d.payment_model === 'B') {
     d.price = 0
     d.price_type = 'on_agreement'

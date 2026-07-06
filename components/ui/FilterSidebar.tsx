@@ -26,6 +26,8 @@ interface Props {
   currentPriceMax?: string
   currentMinRating?: string
   currentSubcats?: string
+  currentCity?: string
+  currentDosah?: string
 }
  
 export default function FilterSidebar({
@@ -36,6 +38,8 @@ export default function FilterSidebar({
   currentPriceMax,
   currentMinRating,
   currentSubcats,
+  currentCity,
+  currentDosah,
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -82,7 +86,7 @@ export default function FilterSidebar({
  
   const clearFilters = () => {
     const params = new URLSearchParams(searchParams.toString())
-    ;['category', 'subcats', 'priceMin', 'priceMax', 'minRating'].forEach((k) => params.delete(k))
+    ;['category', 'subcats', 'priceMin', 'priceMax', 'minRating', 'dosah'].forEach((k) => params.delete(k))
     startTransition(() => router.push(`${pathname}?${params.toString()}`, { scroll: false }))
   }
  
@@ -93,7 +97,7 @@ export default function FilterSidebar({
   ]
  
   const hasFilters =
-    !!activeCategory || !!currentSubcats || !!currentPriceMin || !!currentPriceMax || !!currentMinRating
+    !!activeCategory || !!currentSubcats || !!currentPriceMin || !!currentPriceMax || !!currentMinRating || !!currentDosah
  
   return (
     <div
@@ -223,6 +227,24 @@ export default function FilterSidebar({
             )
           })}
         </div>
+      </div>
+
+      {/* Dojezd */}
+      <div className="mt-6 border-t border-slate-100 pt-5">
+        <h3 className="mb-3 text-sm font-semibold text-slate-800">Dojezd</h3>
+        {currentCity ? (
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={currentDosah === '1'}
+              onChange={(e) => setParam('dosah', e.target.checked ? '1' : undefined)}
+              className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+            />
+            Jen v mém dosahu
+          </label>
+        ) : (
+          <p className="text-xs text-slate-400">Nejdřív zadejte město ve vyhledávání nahoře.</p>
+        )}
       </div>
     </div>
   )

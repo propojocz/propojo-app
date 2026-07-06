@@ -1,5 +1,8 @@
 'use client'
 // components/forms/ServiceForm.tsx – kategorie z DB + Model A/B + storno politika + místo výkonu
+// + dojezdová vzdálenost (radius) + galerie ukázek práce
+// Pořadí: Název → Popis → Kategorie → Kde vykonáváte → Město → Dojezd → Platba (+jednotka)
+//         → Storno → Fotky (titulní + galerie)
 
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -11,7 +14,9 @@ import { CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronRight, Info, St
 import { createService, updateService } from '@/lib/actions/services'
 import type { Service } from '@/types/database'
 import ImageUpload from '@/components/ui/ImageUpload'
+import GalleryUpload from '@/components/ui/GalleryUpload'
 import CancellationSlider from '@/components/ui/CancellationSlider'
+import SearchAutocomplete from '@/components/ui/SearchAutocomplete'
 import type { CancellationKey } from '@/lib/cancellation'
 
 const schema = z.object({
@@ -22,9 +27,12 @@ const schema = z.object({
   subcategory_ids: z.array(z.string()).optional(),
   service_type: z.string().optional(),
   price: z.number({ invalid_type_error: 'Zadejte platnou cenu' }).min(0).max(999999),
-  price_unit: z.enum(['hod','kus','den','projekt']),
+  price_unit: z.enum(['hod','kus','den','projekt','m2']),
   city: z.string().min(2, 'Zadejte město').max(100),
+  city_lat: z.number().nullable().optional(),
+  city_lng: z.number().nullable().optional(),
   image_url: z.string().optional(),
+  gallery: z.array(z.string()).optional(),
 
   // Model A/B
   payment_model: z.enum(['A','B']),
@@ -39,6 +47,8 @@ const schema = z.object({
 
   // Kde se služba vykonává
   location_type: z.enum(['u_poskytovatele','u_zakaznika','oboji']),
+  // Dojezdová vzdálenost (relevantní jen když poskytovatel jezdí za zákazníkem)
+  radius_km: z.number().int().min(1).max(300).nullable().optional(),
 
   // Storno politika
   cancellation_policy: z.enum(['zadna','mirna','standardni','prisna']),
@@ -61,7 +71,12 @@ const PRICE_UNITS = [
   { value: 'den', label: 'za den' },
   { value: 'kus', label: 'za kus' },
   { value: 'projekt', label: 'za projekt' },
+  { value: 'm2', label: 'za m²' },
 ] as const
+
+// Konkrétní příklad, ne jen instrukce — ukazuje strukturu dobrého popisu (zkušenost, co je
+// v ceně, spolehlivost), aby poskytovatel věděl, co a jak napsat, i když dělá jiný obor.
+const DESCRIPTION_PLACEHOLDER = 'Např.: Této práci se věnuji už 6 let a mám za sebou desítky spokojených zákazníků. Pracuji pečlivě a se vším potřebným vybavením, takže se nemusíte o nic starat. Rád se s vámi předem domluvím na přesném rozsahu i termínu, ať víte, co očekávat.'
 
 // pomocná: number | null z inputu
 const numOrNull = (v: string) => (v === '' || v == null ? null : Number(v))
@@ -84,7 +99,10 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
       price: initialData.price ?? 0,
       price_unit: initialData.price_unit as any,
       city: initialData.city,
+      city_lat: init.city_lat ?? null,
+      city_lng: init.city_lng ?? null,
       image_url: initialData.image_url ?? '',
+      gallery: init.gallery ?? [],
       subcategory_ids: (init.subcategory_id ? [init.subcategory_id] : []),
       payment_model: (init.payment_model as 'A'|'B') ?? 'A',
       price_type: (init.price_type as 'fixed'|'range'|'on_agreement') ?? 'fixed',
@@ -96,16 +114,21 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
       free_km: init.free_km ?? null,
       quote_days: init.quote_days ?? null,
       location_type: (init.location_type as 'u_poskytovatele'|'u_zakaznika'|'oboji') ?? 'u_zakaznika',
+      radius_km: init.radius_km ?? null,
       cancellation_policy: (init.cancellation_policy as CancellationKey) ?? 'zadna',
     } : {
       price_unit: 'hod',
       subcategory_ids: [],
+      city_lat: null,
+      city_lng: null,
+      gallery: [],
       payment_model: 'A',
       price_type: 'fixed',
       deposit_amount: 200,
       price_max: null, duration_minutes: null,
       quote_fee: null, price_per_km: null, free_km: null, quote_days: null,
       location_type: 'u_zakaznika',
+      radius_km: null,
       cancellation_policy: 'zadna',
     },
   })
@@ -117,6 +140,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
   const priceType = watch('price_type')
   const cancellationPolicy = watch('cancellation_policy')
   const locationType = watch('location_type')
+  const priceUnit = watch('price_unit')
 
   // Načti kategorie z DB
   useEffect(() => {
@@ -155,21 +179,21 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
   return (
     <motion.form onSubmit={handleSubmit(onSubmit as any)} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="space-y-6">
 
-      {/* Název */}
+      {/* ============ 1. NÁZEV ============ */}
       <div className="space-y-1.5">
         <label className="form-label">Název služby *</label>
         <input {...f('title')} placeholder="např. Montáž klimatizace" className={`form-input ${errors.title ? 'form-input-error' : ''}`} />
         {errors.title && <p className="form-error">{errors.title.message}</p>}
       </div>
 
-      {/* Popis */}
+      {/* ============ 2. POPIS ============ */}
       <div className="space-y-1.5">
         <label className="form-label">Popis služby *</label>
-        <textarea {...f('description')} rows={4} placeholder="Popište co přesně nabízíte, zkušenosti, oblast působení..." className={`form-input resize-none ${errors.description ? 'form-input-error' : ''}`} />
+        <textarea {...f('description')} rows={4} placeholder={DESCRIPTION_PLACEHOLDER} className={`form-input resize-none ${errors.description ? 'form-input-error' : ''}`} />
         {errors.description && <p className="form-error">{errors.description.message}</p>}
       </div>
 
-      {/* Kategorie z DB – 3 úrovně */}
+      {/* ============ 3. KATEGORIE (3 úrovně z DB) ============ */}
       <div className="space-y-3">
         <label className="form-label">Kategorie *</label>
 
@@ -279,21 +303,17 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
         {errors.category && <p className="form-error">{errors.category.message}</p>}
       </div>
 
-      {/* Bod D – nenašli jste obor? */}
       {selectedCategory && (
         <p className="-mt-2 text-xs text-slate-400">
           Nevidíte svůj obor?{' '}
-          <a
-            href="mailto:podpora@propojo.cz?subject=Chybejici%20obor"
-            className="font-semibold text-emerald-600 hover:underline"
-          >
+          <a href="mailto:podpora@propojo.cz?subject=Chybejici%20obor" className="font-semibold text-emerald-600 hover:underline">
             Napište nám
           </a>{' '}
           a doplníme ho.
         </p>
       )}
 
-      {/* ============ KDE VYKONÁVÁTE SLUŽBU? ============ */}
+      {/* ============ 4. KDE VYKONÁVÁTE SLUŽBU? ============ */}
       <div className="space-y-3">
         <label className="form-label">Kde vykonáváte svou službu? *</label>
         <p className="-mt-1 text-xs text-slate-400">Podle toho poznáme, jestli po zákazníkovi chtít adresu.</p>
@@ -323,11 +343,53 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
         </div>
       </div>
 
-      {/* ============ ZPŮSOB PLATBY (Model A/B) ============ */}
+      {/* ============ 5. MĚSTO PŮSOBIŠTĚ ============ */}
+      <div className="space-y-1.5">
+        <label className="form-label">Město působiště *</label>
+        <SearchAutocomplete
+          mode="obce"
+          defaultValue={watch('city')}
+          placeholder="Začněte psát a vyberte obec ze seznamu…"
+          onPickObec={(item) => {
+            setValue('city', item.obec, { shouldValidate: true })
+            setValue('city_lat', item.latitude)
+            setValue('city_lng', item.longitude)
+          }}
+          onFreeText={(text) => {
+            setValue('city', text, { shouldValidate: true })
+            setValue('city_lat', null)
+            setValue('city_lng', null)
+          }}
+        />
+        {errors.city && <p className="form-error">{errors.city.message}</p>}
+        <p className="text-xs text-slate-400">
+          Vyberte obec ze seznamu (ne jen napište) — jinak nepůjde spočítat dojezdovou vzdálenost pro zákazníky.
+        </p>
+      </div>
+
+      {/* ============ 6. DOJEZDOVÁ VZDÁLENOST ============ */}
+      <AnimatePresence>
+        {locationType !== 'u_poskytovatele' && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-1.5 overflow-hidden">
+            <label className="form-label">Dojezdová vzdálenost (km)</label>
+            <input
+              type="number" min={1} max={300} placeholder="20"
+              defaultValue={watch('radius_km') ?? ''}
+              onChange={e => setValue('radius_km', numOrNull(e.target.value) as any)}
+              className="form-input"
+            />
+            <p className="text-xs text-slate-400">
+              Jak daleko od zadaného města jste ochotní dojet. Zákazníci si podle toho budou moct vyfiltrovat,
+              jestli je váš dosah pokrývá.
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ============ 7. ZPŮSOB PLATBY (Model A/B) ============ */}
       <div className="space-y-3">
         <label className="form-label">Způsob platby *</label>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {/* Model A */}
           <button
             type="button"
             onClick={() => { setValue('payment_model', 'A'); setValue('price_type', 'fixed') }}
@@ -339,12 +401,11 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
               <span className={`flex h-4 w-4 items-center justify-center rounded-full border-2 ${model === 'A' ? 'border-emerald-500' : 'border-slate-300'}`}>
                 {model === 'A' && <span className="h-2 w-2 rounded-full bg-emerald-500" />}
               </span>
-              <span className="text-sm font-extrabold text-slate-900">Model A</span>
+              <span className="text-sm font-extrabold text-slate-900">Rezervace se zálohou</span>
             </div>
             <p className="text-xs leading-relaxed text-slate-500">Rezervační záloha. Pro služby s předvídatelnou cenou (kadeřnictví, úklid, drobné opravy).</p>
           </button>
 
-          {/* Model B */}
           <button
             type="button"
             onClick={() => { setValue('payment_model', 'B'); setValue('price', 0); setValue('price_type', 'on_agreement') }}
@@ -356,14 +417,14 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
               <span className={`flex h-4 w-4 items-center justify-center rounded-full border-2 ${model === 'B' ? 'border-emerald-500' : 'border-slate-300'}`}>
                 {model === 'B' && <span className="h-2 w-2 rounded-full bg-emerald-500" />}
               </span>
-              <span className="text-sm font-extrabold text-slate-900">Model B</span>
+              <span className="text-sm font-extrabold text-slate-900">Výjezd a nacenění</span>
             </div>
             <p className="text-xs leading-relaxed text-slate-500">Výjezd + nacenění. Pro stavby a větší práce, kde cenu nelze určit předem.</p>
           </button>
         </div>
       </div>
 
-      {/* ====== MODEL A SEKCE ====== */}
+      {/* ── Model A: detaily ceny (vč. jednotky ceny hned u typu ceny) ── */}
       <AnimatePresence>
         {model === 'A' && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-4 overflow-hidden">
@@ -387,21 +448,36 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
               ))}
             </div>
 
+            {/* Jednotka ceny — hned u typu ceny, patří logicky sem (netýká se Modelu B) */}
+            {priceType !== 'on_agreement' && (
+              <div className="space-y-1.5">
+                <label className="form-label">Jednotka ceny *</label>
+                <div className="relative">
+                  <select {...f('price_unit')} className="form-input appearance-none pr-8">
+                    {PRICE_UNITS.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                </div>
+              </div>
+            )}
+
             {/* Pevná cena */}
             {priceType === 'fixed' && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className={`grid gap-4 ${priceUnit === 'hod' || priceUnit === 'kus' ? 'grid-cols-2' : 'grid-cols-1'}`}>
                 <div className="space-y-1.5">
                   <label className="form-label">Cena (Kč) *</label>
                   <input {...f('price', { valueAsNumber: true })} type="number" min={0} placeholder="350" className={`form-input ${errors.price ? 'form-input-error' : ''}`} />
                   {errors.price && <p className="form-error">{errors.price.message}</p>}
                 </div>
-                <div className="space-y-1.5">
-                  <label className="form-label">Délka (minut)</label>
-                  <input type="number" min={0} placeholder="120"
-                    defaultValue={watch('duration_minutes') ?? ''}
-                    onChange={e => setValue('duration_minutes', numOrNull(e.target.value))}
-                    className="form-input" />
-                </div>
+                {(priceUnit === 'hod' || priceUnit === 'kus') && (
+                  <div className="space-y-1.5">
+                    <label className="form-label">Délka (minut)</label>
+                    <input type="number" min={0} placeholder="120"
+                      defaultValue={watch('duration_minutes') ?? ''}
+                      onChange={e => setValue('duration_minutes', numOrNull(e.target.value))}
+                      className="form-input" />
+                  </div>
+                )}
               </div>
             )}
 
@@ -443,23 +519,11 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
                 <span>Minimální záloha je 200 Kč. Záloha se započítá do konečné ceny.</span>
               </div>
             </div>
-
-            {/* Storno politika */}
-            <div className="space-y-1.5">
-              <label className="form-label">Storno podmínky</label>
-              <p className="text-xs text-slate-400">Nastavte, za jakých podmínek se zákazníkovi vrací záloha při zrušení. Zákazník je uvidí u služby.</p>
-              <div className="pt-2">
-                <CancellationSlider
-                  value={cancellationPolicy}
-                  onChange={(key) => setValue('cancellation_policy', key)}
-                />
-              </div>
-            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ====== MODEL B SEKCE ====== */}
+      {/* ── Model B: detaily výjezdu ── */}
       <AnimatePresence>
         {model === 'B' && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-4 overflow-hidden">
@@ -501,30 +565,42 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
         )}
       </AnimatePresence>
 
-      {/* Jednotka ceny (platí pro Model A s cenou) */}
-      {model === 'A' && priceType !== 'on_agreement' && (
+      {/* ============ 8. STORNO PODMÍNKY (vlastní krok, jen u Modelu A — je záloha) ============ */}
+      <AnimatePresence>
+        {model === 'A' && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-1.5 overflow-hidden">
+            <label className="form-label">Storno podmínky</label>
+            <p className="text-xs text-slate-400">Nastavte, za jakých podmínek se zákazníkovi vrací záloha při zrušení. Zákazník je uvidí u služby.</p>
+            <div className="pt-2">
+              <CancellationSlider
+                value={cancellationPolicy}
+                onChange={(key) => setValue('cancellation_policy', key)}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ============ 9. FOTKY — titulní + galerie ukázek práce ============ */}
+      <div className="space-y-5 border-t border-slate-100 pt-5">
         <div className="space-y-1.5">
-          <label className="form-label">Jednotka ceny *</label>
-          <div className="relative">
-            <select {...f('price_unit')} className="form-input appearance-none pr-8">
-              {PRICE_UNITS.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          </div>
+          <label className="form-label">
+            Titulní fotografie <span className="font-normal text-slate-400">(volitelné)</span>
+          </label>
+          <p className="text-xs text-slate-400">Hlavní fotka — zobrazí se na kartě v marketplace a nahoře na detailu služby.</p>
+          <ImageUpload value={watch('image_url')} onChange={url => setValue('image_url', url)} folder="services" />
         </div>
-      )}
 
-      {/* Město */}
-      <div className="space-y-1.5">
-        <label className="form-label">Město působiště *</label>
-        <input {...f('city')} placeholder="Praha, Brno, Ostrava…" className={`form-input ${errors.city ? 'form-input-error' : ''}`} />
-        {errors.city && <p className="form-error">{errors.city.message}</p>}
-      </div>
-
-      {/* Foto */}
-      <div className="space-y-1.5">
-        <label className="form-label">Fotografie <span className="font-normal text-slate-400">(volitelné)</span></label>
-        <ImageUpload value={watch('image_url')} onChange={url => setValue('image_url', url)} folder="services" />
+        <div className="space-y-1.5">
+          <label className="form-label">
+            Ukázky práce <span className="font-normal text-slate-400">(volitelné)</span>
+          </label>
+          <p className="text-xs text-slate-400">
+            Několik fotek odvedené práce — zobrazí se jako galerie na detailu služby. Zákazníci díky nim líp
+            uvidí, na jaké úrovni pracujete, ještě než si vás objednají.
+          </p>
+          <GalleryUpload value={watch('gallery') ?? []} onChange={(urls) => setValue('gallery', urls)} />
+        </div>
       </div>
 
       {/* Feedback */}

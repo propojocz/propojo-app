@@ -9,6 +9,7 @@ import FilterSidebar from '@/components/ui/FilterSidebar'
 import Link from 'next/link'
 import { PlusCircle, Send } from 'lucide-react'
 import type { Metadata } from 'next'
+import { haversineKm } from '@/lib/geo'
 
 interface Props {
   searchParams: {
@@ -20,6 +21,7 @@ interface Props {
     priceMax?: string
     minRating?: string
     subcats?: string
+    dosah?: string
   }
 }
 
@@ -62,10 +64,10 @@ async function serviceIdsBySubcatText(q: string): Promise<string[]> {
 }
 
 async function ServiceList({
-  category, city, q, sort, priceMin, priceMax, minRating, subcats,
+  category, city, q, sort, priceMin, priceMax, minRating, subcats, dosah,
 }: {
   category?: string; city?: string; q?: string; sort?: string
-  priceMin?: string; priceMax?: string; minRating?: string; subcats?: string
+  priceMin?: string; priceMax?: string; minRating?: string; subcats?: string; dosah?: string
 }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -137,6 +139,25 @@ async function ServiceList({
   }
   if (sort === 'hodnoceni') {
     sorted = [...sorted].sort((a, b) => Number(b.profiles?.rating ?? 0) - Number(a.profiles?.rating ?? 0))
+  }
+
+  // ── Filtr "Jen v mém dosahu" — vzdušná vzdálenost mezi hledaným městem a městem služby ──
+  // Vztahuje se jen na služby, kde poskytovatel jezdí za zákazníkem (u_zakaznika/oboji)
+  // a má vyplněný radius i souřadnice města. Fixní provozovny (u_poskytovatele) sem nepatří —
+  // tam nejde o to, jak daleko je poskytovatel ochotný jet.
+  if (dosah === '1' && city) {
+    const { data: cityRow } = await supabase
+      .from('obce').select('latitude, longitude').ilike('obec', city).limit(1).maybeSingle() as
+      { data: { latitude: number; longitude: number } | null }
+
+    if (cityRow) {
+      sorted = sorted.filter((s: any) => {
+        if (s.location_type === 'u_poskytovatele') return false
+        if (!s.radius_km || s.city_lat == null || s.city_lng == null) return false
+        const dist = haversineKm(cityRow.latitude, cityRow.longitude, s.city_lat, s.city_lng)
+        return dist <= s.radius_km
+      })
+    }
   }
 
   if (sorted.length === 0) {
@@ -225,7 +246,7 @@ async function ServiceList({
 }
 
 export default async function MarketplacePage({ searchParams }: Props) {
-  const { category, city, q, sort, priceMin, priceMax, minRating, subcats } = searchParams
+  const { category, city, q, sort, priceMin, priceMax, minRating, subcats, dosah } = searchParams
   const categories = await getCategories()
   const subcategories = await getSubcategories(category)
 
@@ -259,15 +280,17 @@ export default async function MarketplacePage({ searchParams }: Props) {
               currentPriceMax={priceMax}
               currentMinRating={minRating}
               currentSubcats={subcats}
+              currentCity={city}
+              currentDosah={dosah}
             />
           </aside>
 
           <div className="min-w-0 flex-1">
             <Suspense
-              key={`${category}-${city}-${q}-${sort}-${priceMin}-${priceMax}-${minRating}-${subcats}`}
+              key={`${category}-${city}-${q}-${sort}-${priceMin}-${priceMax}-${minRating}-${subcats}-${dosah}`}
               fallback={<ServiceListSkeleton />}
             >
-              <ServiceList category={category} city={city} q={q} sort={sort} priceMin={priceMin} priceMax={priceMax} minRating={minRating} subcats={subcats} />
+              <ServiceList category={category} city={city} q={q} sort={sort} priceMin={priceMin} priceMax={priceMax} minRating={minRating} subcats={subcats} dosah={dosah} />
             </Suspense>
           </div>
         </div>

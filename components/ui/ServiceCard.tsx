@@ -70,25 +70,39 @@ export default function ServiceCard({
       </Link>
 
       <div className="flex flex-1 flex-col gap-2 p-4">
-        <div className="flex items-start gap-2.5">
-          <Link href={`/profil/${providerId}`} className="relative h-9 w-9 shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-emerald-50 to-blue-50">
-            {service.profiles?.avatar_url ? (
-              <Image src={service.profiles.avatar_url} alt={providerName} fill className="object-cover" sizes="36px" />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-emerald-600">{initial}</div>
-            )}
+        {/* Název služby — hlavní, to co zákazník hledá */}
+        <div className="flex items-start justify-between gap-2">
+          <Link href={`/sluzby/${service.id}`} className="min-w-0 flex-1">
+            <h3 className="truncate font-semibold leading-tight text-slate-900 transition-colors group-hover:text-emerald-700">
+              {service.title}
+            </h3>
           </Link>
-          <div className="min-w-0 flex-1">
-            <Link href={`/profil/${providerId}`}>
-              <h3 className="truncate font-semibold leading-tight text-slate-900 transition-colors group-hover:text-emerald-700">{providerName}</h3>
-            </Link>
-            <p className="flex items-center gap-1 text-xs font-semibold text-emerald-700">
-              <span>{meta.emoji}</span> {obor}
-            </p>
-          </div>
           <div className="shrink-0" title="Uložit poskytovatele do oblíbených">
             <FavoriteButton providerId={providerId} initialFavorited={isFavorited} isLoggedIn={isLoggedIn} variant="icon" />
           </div>
+        </div>
+
+        {/* Poskytovatel — menší, doplňková informace */}
+        <Link href={`/profil/${providerId}`} className="-mt-1 flex items-center gap-1.5">
+          <div className="relative h-6 w-6 shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-emerald-50 to-blue-50">
+            {service.profiles?.avatar_url ? (
+              <Image src={service.profiles.avatar_url} alt={providerName} fill className="object-cover" sizes="24px" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-[10px] font-semibold text-emerald-600">{initial}</div>
+            )}
+          </div>
+          <span className="truncate text-xs text-slate-500 transition-colors hover:text-emerald-700">{providerName}</span>
+        </Link>
+
+        {/* Obor + podkategorie (kategorie — podkategorie) */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+            <span>{meta.emoji}</span> {obor}
+          </span>
+          {shownSubs.map((name) => (
+            <span key={name} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{name}</span>
+          ))}
+          {moreSubs > 0 && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">+{moreSubs}</span>}
         </div>
 
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-500">
@@ -104,15 +118,6 @@ export default function ServiceCard({
             <span className="inline-flex items-center gap-1 text-emerald-700"><ShieldCheck className="h-3.5 w-3.5" /> Ověřeno</span>
           )}
         </div>
-
-        {shownSubs.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {shownSubs.map((name) => (
-              <span key={name} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{name}</span>
-            ))}
-            {moreSubs > 0 && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">+{moreSubs}</span>}
-          </div>
-        )}
 
         <div className="mt-auto flex items-end justify-between gap-2 border-t border-slate-100 pt-3">
           <div>
