@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Link from 'next/link'
-import { Inbox, Users, AlertTriangle, ShieldCheck } from 'lucide-react'
+import { Inbox, Users, AlertTriangle, ShieldCheck, Flag, FolderTree } from 'lucide-react'
 
 export const metadata = { title: 'Admin | Propojo' }
 
@@ -27,15 +27,18 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   if (profile?.is_admin !== true) redirect('/dashboard')
 
-  // Počet otevřených sporů (pro odznak)
   const admin = getAdminClient()
   const { count: disputeCount } = await admin
     .from('orders').select('id', { count: 'exact', head: true }).eq('status', 'spor')
+  const { count: reportedCount } = await admin
+    .from('reviews').select('id', { count: 'exact', head: true }).not('reported_at', 'is', null)
 
   const NAV = [
     { href: '/admin/poptavky', label: 'Poptávky', icon: 'Inbox', ready: true, badge: 0 },
     { href: '/admin/uzivatele', label: 'Uživatelé', icon: 'Users', ready: true, badge: 0 },
     { href: '/admin/spory', label: 'Spory', icon: 'AlertTriangle', ready: true, badge: disputeCount ?? 0 },
+    { href: '/admin/recenze', label: 'Recenze', icon: 'Flag', ready: true, badge: reportedCount ?? 0 },
+    { href: '/admin/kategorie', label: 'Kategorie', icon: 'FolderTree', ready: true, badge: 0 },
   ]
 
   return (
@@ -65,6 +68,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                     {item.icon === 'Inbox' && <Inbox className="h-4 w-4 shrink-0 text-slate-400" />}
                     {item.icon === 'Users' && <Users className="h-4 w-4 shrink-0 text-slate-400" />}
                     {item.icon === 'AlertTriangle' && <AlertTriangle className="h-4 w-4 shrink-0 text-slate-400" />}
+                    {item.icon === 'Flag' && <Flag className="h-4 w-4 shrink-0 text-slate-400" />}
+                    {item.icon === 'FolderTree' && <FolderTree className="h-4 w-4 shrink-0 text-slate-400" />}
                     {item.label}
                     {item.badge > 0 && (
                       <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
