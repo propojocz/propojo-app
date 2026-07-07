@@ -41,14 +41,14 @@ export default function MobileNav({ user, profileName, isProvider }: MobileNavPr
 
   return (
     <>
-      {/* Rychlé ikony v horní liště – jen na mobilu */}
+      {/* Rychlý odkaz na marketplace – jen na mobilu */}
       <Link
         href="/marketplace"
-        className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 sm:hidden"
-        aria-label="Marketplace"
-        title="Marketplace"
+        className="flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 sm:hidden"
+        aria-label="Nabídky"
       >
-        <ShoppingBag className="h-5 w-5" />
+        <ShoppingBag className="h-4 w-4" />
+        Nabídky
       </Link>
 
       {/* Hamburger tlačítko – pouze na mobilu */}
@@ -69,7 +69,8 @@ export default function MobileNav({ user, profileName, isProvider }: MobileNavPr
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setOpen(false)}
-              className="fixed inset-0 z-[55] bg-black/40 backdrop-blur-sm sm:hidden"
+              className="fixed inset-0 z-[55] bg-slate-900/60 sm:hidden"
+              style={{ backgroundColor: 'rgba(15,23,42,0.6)' }}
             />
 
             {/* Drawer */}
@@ -79,8 +80,10 @@ export default function MobileNav({ user, profileName, isProvider }: MobileNavPr
               exit={{ x: '100%' }}
               transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
               className="fixed right-0 top-0 z-[60] flex h-full w-72 flex-col bg-white shadow-2xl sm:hidden"
-              style={{ backgroundColor: '#ffffff' }}
+              style={{ backgroundColor: '#ffffff', opacity: 1 }}
             >
+              {/* Plná bílá podkladová vrstva – pojistka proti prosvítání během animace */}
+              <div className="absolute inset-0 -z-10 bg-white" style={{ backgroundColor: '#ffffff' }} />
               {/* Header */}
               <div className="flex items-center justify-between border-b border-slate-100 p-5">
                 <span className="text-lg font-black text-slate-900">Menu</span>
