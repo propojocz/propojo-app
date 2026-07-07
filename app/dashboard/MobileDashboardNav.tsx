@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, Package, ShoppingBag, User,
   PlusCircle, LogOut, Menu, X, ChevronRight,
-  CalendarDays, CreditCard, Landmark, Heart, Star
+  CalendarDays, CreditCard, Landmark, Heart, Star, ShieldCheck
 } from 'lucide-react'
 import { logout } from '@/lib/actions/auth'
 
@@ -27,9 +27,11 @@ interface Props {
   nav: NavItem[]
   isProvider: boolean
   profileName: string
+  isAdmin?: boolean
+  disputeCount?: number
 }
 
-export default function MobileDashboardNav({ nav, isProvider, profileName }: Props) {
+export default function MobileDashboardNav({ nav, isProvider, profileName, isAdmin = false, disputeCount = 0 }: Props) {
   const [open, setOpen] = useState(false)
   const pathname = usePathname()
 
@@ -131,6 +133,24 @@ export default function MobileDashboardNav({ nav, isProvider, profileName }: Pro
                   )
                 })}
               </nav>
+
+              {/* Admin panel – jen pro adminy */}
+              {isAdmin && (
+                <div className="border-t border-slate-100 p-4">
+                  <Link
+                    href="/admin"
+                    className="flex items-center gap-3 rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-slate-800"
+                  >
+                    <ShieldCheck className="h-4 w-4 shrink-0" />
+                    Admin panel
+                    {disputeCount > 0 && (
+                      <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
+                        {disputeCount}
+                      </span>
+                    )}
+                  </Link>
+                </div>
+              )}
 
               {/* Odhlášení */}
               <div className="border-t border-slate-100 p-4">

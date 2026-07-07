@@ -128,8 +128,25 @@ export async function deleteService(id: string): Promise<ActionResult> {
   const supabase = createClient()
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return { success: false, error: 'Nejste přihlášeni.' }
+
+  // Nejdřív zkontroluj, jestli k nabídce patří nějaké objednávky.
+  // Pokud ano, tvrdé smazání by rozbilo historii — nabídneme skrytí.
+  const { count } = await supabase
+    .from('orders').select('id', { count: 'exact', head: true }).eq('service_id', id)
+
+  if ((count ?? 0) > 0) {
+    return {
+      success: false,
+      hasOrders: true,
+      error: `K této nabídce patří ${count} ${count === 1 ? 'objednávka' : (count ?? 0) < 5 ? 'objednávky' : 'objednávek'}, proto ji nelze smazat — historie objednávek musí zůstat zachována. Můžete ji ale skrýt: zmizí z marketplace, ale zůstane vám v přehledu.`,
+    } as any
+  }
+
   const { error } = await (supabase.from('services') as any).delete().eq('id', id).eq('provider_id', user.id)
-  if (error) { console.error('DELETE services error:', error); return { success: false, error: 'Nepodařilo se smazat. Služba může mít navázané objednávky – zkuste ji místo mazání skrýt.' } }
+  if (error) {
+    console.error('DELETE services error:', error)
+    return { success: false, error: 'Nepodařilo se smazat nabídku. Zkuste to prosím znovu, nebo ji místo mazání skryjte.' }
+  }
   revalidatePath('/'); revalidatePath('/marketplace')
   return { success: true, id }
 }

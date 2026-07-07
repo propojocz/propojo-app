@@ -68,6 +68,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
         nav={NAV}
         isProvider={isProvider}
         profileName={profile?.full_name ?? 'Uživatel'}
+        isAdmin={isAdmin}
+        disputeCount={disputeCount}
       />
 
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
