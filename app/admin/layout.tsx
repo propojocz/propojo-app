@@ -92,7 +92,40 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           </aside>
 
           {/* Obsah */}
-          <main className="flex-1 min-w-0">{children}</main>
+          <main className="flex-1 min-w-0">
+            {/* Mobilní admin navigace — vodorovný pruh (desktop má postranní menu) */}
+            <div className="mb-4 lg:hidden">
+              <div className="mb-3 flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white">
+                  <ShieldCheck className="h-4 w-4" />
+                </div>
+                <span className="font-black text-slate-900">Admin</span>
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {NAV.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className="relative flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50"
+                  >
+                    {item.icon === 'Inbox' && <Inbox className="h-4 w-4 shrink-0 text-slate-400" />}
+                    {item.icon === 'Users' && <Users className="h-4 w-4 shrink-0 text-slate-400" />}
+                    {item.icon === 'AlertTriangle' && <AlertTriangle className="h-4 w-4 shrink-0 text-slate-400" />}
+                    {item.icon === 'Flag' && <Flag className="h-4 w-4 shrink-0 text-slate-400" />}
+                    {item.icon === 'FolderTree' && <FolderTree className="h-4 w-4 shrink-0 text-slate-400" />}
+                    {item.label}
+                    {item.badge > 0 && (
+                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
+                        {item.badge}
+                      </span>
+                    )}
+                  </Link>
+                ))}
+              </div>
+            </div>
+
+            {children}
+          </main>
         </div>
       </div>
     </div>
