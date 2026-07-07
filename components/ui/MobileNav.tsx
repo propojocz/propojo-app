@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Menu, X, Home, ShoppingBag, HelpCircle, PlusCircle, LogIn, LayoutDashboard, User, LogOut } from 'lucide-react'
+import { Menu, X, Home, ShoppingBag, PlusCircle, LogIn, LayoutDashboard, User, LogOut } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
@@ -37,11 +37,20 @@ export default function MobileNav({ user, profileName, isProvider }: MobileNavPr
   const NAV_LINKS = [
     { href: '/', label: 'Domů', icon: Home },
     { href: '/marketplace', label: 'Marketplace', icon: ShoppingBag },
-    { href: '/jak-to-funguje', label: 'Jak to funguje', icon: HelpCircle },
   ]
 
   return (
     <>
+      {/* Rychlé ikony v horní liště – jen na mobilu */}
+      <Link
+        href="/marketplace"
+        className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 sm:hidden"
+        aria-label="Marketplace"
+        title="Marketplace"
+      >
+        <ShoppingBag className="h-5 w-5" />
+      </Link>
+
       {/* Hamburger tlačítko – pouze na mobilu */}
       <button
         onClick={() => setOpen(true)}
@@ -60,7 +69,7 @@ export default function MobileNav({ user, profileName, isProvider }: MobileNavPr
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setOpen(false)}
-              className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm sm:hidden"
+              className="fixed inset-0 z-[55] bg-black/40 backdrop-blur-sm sm:hidden"
             />
 
             {/* Drawer */}
@@ -69,7 +78,8 @@ export default function MobileNav({ user, profileName, isProvider }: MobileNavPr
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-              className="fixed right-0 top-0 z-50 flex h-full w-72 flex-col bg-white shadow-2xl sm:hidden"
+              className="fixed right-0 top-0 z-[60] flex h-full w-72 flex-col bg-white shadow-2xl sm:hidden"
+              style={{ backgroundColor: '#ffffff' }}
             >
               {/* Header */}
               <div className="flex items-center justify-between border-b border-slate-100 p-5">
