@@ -3,7 +3,6 @@ import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Link from 'next/link'
 import Image from 'next/image'
-import { ShoppingBag } from 'lucide-react'
 import NotificationBadge from './NotificationBadge'
 import MobileNav from './MobileNav'
 import SuspendedTopBar from './SuspendedTopBar'
@@ -56,6 +55,10 @@ export default async function Navbar() {
     }
   }
 
+  // Světlé postranní tlačítko (Poptávky, Objednávky) — stejný styl pro oba
+  const sideBtn =
+    'inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-5 py-2.5 text-sm font-semibold text-emerald-700 transition-colors hover:bg-emerald-100'
+
   return (
     <>
       <SuspendedTopBar />
@@ -77,12 +80,9 @@ export default async function Navbar() {
             </Link>
           </div>
 
-          {/* UPROSTŘED — Poptávky + Marketplace (jen desktop) */}
+          {/* UPROSTŘED — Poptávky · Marketplace · Objednávky (jen desktop) */}
           <div className="hidden items-center gap-2 md:flex">
-            <Link
-              href="/poptavky"
-              className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-5 py-2.5 text-sm font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
-            >
+            <Link href="/poptavky" className={sideBtn}>
               Poptávky
             </Link>
             <Link
@@ -91,19 +91,16 @@ export default async function Navbar() {
             >
               Marketplace
             </Link>
+            <Link
+              href={user ? '/dashboard/objednavky' : '/prihlasit?next=/dashboard/objednavky'}
+              className={sideBtn}
+            >
+              Objednávky
+            </Link>
           </div>
 
-          {/* VPRAVO — Objednávky (desktop, přihlášený) + zvoneček + pilulka ☰ profil */}
+          {/* VPRAVO — zvoneček + pilulka ☰ profil */}
           <div className="flex items-center justify-end gap-1.5">
-            {user && (
-              <Link
-                href="/dashboard/objednavky"
-                className="hidden items-center gap-1.5 rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50 md:inline-flex"
-              >
-                <ShoppingBag className="h-4 w-4" />
-                Objednávky
-              </Link>
-            )}
             {user && <NotificationBadge />}
             <MobileNav
               user={user ? { id: user.id, email: user.email } : null}
