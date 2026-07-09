@@ -54,7 +54,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     { href: '/dashboard', label: 'Přehled', icon: 'LayoutDashboard' },
     ...(isProvider ? [{ href: '/dashboard/nabidky', label: 'Moje nabídky', icon: 'Package' }] : []),
     ...(isProvider ? [{ href: '/dashboard/terminy', label: 'Termíny', icon: 'CalendarDays' }] : []),
-    { href: '/dashboard/objednavky', label: isProvider ? 'Poptávky' : 'Objednávky', icon: 'ShoppingBag' },
+    { href: '/dashboard/objednavky', label: 'Objednávky', icon: 'ShoppingBag' },
     ...(isProvider ? [{ href: '/dashboard/recenze', label: 'Moje recenze', icon: 'Star', badge: unansweredReviews }] : []),
     ...(isProvider ? [{ href: '/dashboard/predplatne', label: 'Předplatné', icon: 'CreditCard' }] : []),
     ...(isProvider ? [{ href: '/dashboard/vyplaty', label: 'Výplaty', icon: 'Landmark' }] : []),

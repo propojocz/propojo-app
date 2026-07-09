@@ -1,12 +1,19 @@
 // components/ui/Navbar.tsx
+import { createClient } from '@/lib/supabase/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Link from 'next/link'
 import Image from 'next/image'
-import { createClient } from '@/lib/supabase/server'
-import { PlusCircle, LogIn, Heart, LayoutDashboard, CalendarDays, ShoppingBag } from 'lucide-react'
-import NavUserMenu from './NavUserMenu'
+import { ShoppingBag } from 'lucide-react'
 import NotificationBadge from './NotificationBadge'
 import MobileNav from './MobileNav'
 import SuspendedTopBar from './SuspendedTopBar'
+
+function getAdminClient() {
+  return createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+}
 
 export default async function Navbar() {
   const supabase = createClient()
@@ -16,99 +23,96 @@ export default async function Navbar() {
   if (user) {
     const { data } = await supabase
       .from('profiles')
-      .select('full_name, avatar_url, is_provider')
+      .select('full_name, company_name, avatar_url, is_provider, is_admin')
       .eq('id', user.id)
       .single() as { data: any }
     profile = data
   }
 
   const isProvider = profile?.is_provider === true
-  const linkClass = 'flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700'
+  const isAdmin = profile?.is_admin === true
+  const displayName = profile?.company_name || profile?.full_name || user?.email || 'Uživatel'
+
+  // Odznaky s počty — jen pro přihlášené poskytovatele/adminy.
+  let unansweredReviews = 0
+  let disputeCount = 0
+  if (isProvider || isAdmin) {
+    const admin = getAdminClient()
+    if (isProvider) {
+      const { count } = await admin
+        .from('reviews')
+        .select('id', { count: 'exact', head: true })
+        .eq('provider_id', user!.id)
+        .is('provider_response', null)
+        .is('reported_at', null)
+      unansweredReviews = count ?? 0
+    }
+    if (isAdmin) {
+      const { count } = await admin
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'spor')
+      disputeCount = count ?? 0
+    }
+  }
 
   return (
     <>
-      {/* Varovný pruh pro pozastaveného (zobrazí se jen jemu) */}
       <SuspendedTopBar />
 
-      <header className="sticky top-0 z-50 border-b border-[#7ab937]/20 bg-white/95 backdrop-blur-sm">
-        <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur-sm">
+        <nav className="mx-auto grid h-[60px] max-w-7xl grid-cols-[1fr_auto_1fr] items-center px-4 sm:px-6 lg:px-8">
 
-          {/* Logo */}
-          <Link href="/" className="flex items-center gap-2">
-            <Image src="/propojo-logo.png" alt="Propojo" width={120} height={40} className="h-9 w-auto object-contain" priority />
-          </Link>
-
-          {/* Desktop navigace — dle role */}
-          <div className="hidden items-center gap-1 md:flex">
-            <Link href="/marketplace" className={linkClass}>Marketplace</Link>
-
-            {user && (
-              isProvider ? (
-                <>
-                  {/* Poskytovatel = má navíc poskytovatelské odkazy (i zákaznické přes Zakázky) */}
-                  <Link href="/dashboard" className={linkClass}>
-                    <LayoutDashboard className="h-4 w-4" /> Přehled
-                  </Link>
-                  <Link href="/dashboard/terminy" className={linkClass}>
-                    <CalendarDays className="h-4 w-4" /> Termíny
-                  </Link>
-                  <Link href="/dashboard/objednavky" className={linkClass}>
-                    <ShoppingBag className="h-4 w-4" /> Zakázky
-                  </Link>
-                </>
-              ) : (
-                <>
-                  {/* Zákazník — jen zákaznické */}
-                  <Link href="/dashboard/objednavky" className={linkClass}>
-                    <ShoppingBag className="h-4 w-4" /> Moje objednávky
-                  </Link>
-                </>
-              )
-            )}
+          {/* VLEVO — logo (o kousek sytější) */}
+          <div className="flex justify-start">
+            <Link href="/" className="flex items-center">
+              <Image
+                src="/propojo-logo.png"
+                alt="Propojo"
+                width={120}
+                height={40}
+                priority
+                className="h-9 w-auto object-contain [filter:saturate(1.25)]"
+              />
+            </Link>
           </div>
 
-          {/* Pravá část */}
-          <div className="flex items-center gap-1">
-            {user ? (
-              <>
-                {/* Přidat službu — jen když nabízí (nebo aby se mohl stát poskytovatelem) */}
-                <Link href="/pridat-sluzbu" className="btn-primary hidden sm:inline-flex">
-                  <PlusCircle className="h-4 w-4" />
-                  {isProvider ? 'Přidat službu' : 'Nabídnout službu'}
-                </Link>
-                {/* Oblíbení */}
-                <Link
-                  href="/dashboard/oblibene"
-                  title="Oblíbení"
-                  className="hidden h-10 w-10 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-500 sm:inline-flex"
-                >
-                  <Heart className="h-5 w-5" />
-                </Link>
-                <NotificationBadge />
-                <NavUserMenu
-                  name={profile?.full_name ?? user.email ?? 'Uživatel'}
-                  avatarUrl={profile?.avatar_url ?? null}
-                  userId={user.id}
-                />
-              </>
-            ) : (
-              <>
-                {/* Nepřihlášený */}
-                <Link href="/prihlasit" className="btn-secondary hidden sm:inline-flex">
-                  <LogIn className="h-4 w-4" />
-                  Přihlásit se
-                </Link>
-                <Link href="/registrace" className="btn-primary hidden sm:inline-flex">
-                  Začít zdarma
-                </Link>
-              </>
-            )}
+          {/* UPROSTŘED — Poptávky + Marketplace (jen desktop) */}
+          <div className="hidden items-center gap-2 md:flex">
+            <Link
+              href="/poptavky"
+              className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-5 py-2.5 text-sm font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
+            >
+              Poptávky
+            </Link>
+            <Link
+              href="/marketplace"
+              className="inline-flex items-center rounded-full bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-600 hover:shadow-md"
+            >
+              Marketplace
+            </Link>
+          </div>
 
-            {/* Mobilní hamburger */}
+          {/* VPRAVO — Objednávky (desktop, přihlášený) + zvoneček + pilulka ☰ profil */}
+          <div className="flex items-center justify-end gap-1.5">
+            {user && (
+              <Link
+                href="/dashboard/objednavky"
+                className="hidden items-center gap-1.5 rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50 md:inline-flex"
+              >
+                <ShoppingBag className="h-4 w-4" />
+                Objednávky
+              </Link>
+            )}
+            {user && <NotificationBadge />}
             <MobileNav
               user={user ? { id: user.id, email: user.email } : null}
-              profileName={profile?.full_name ?? user?.email}
-              isProvider={profile?.is_provider ?? false}
+              displayName={displayName}
+              avatarUrl={profile?.avatar_url ?? null}
+              isProvider={isProvider}
+              isAdmin={isAdmin}
+              unansweredReviews={unansweredReviews}
+              disputeCount={disputeCount}
             />
           </div>
         </nav>

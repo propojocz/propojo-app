@@ -58,7 +58,7 @@ export default async function ObjednavkyPage() {
   const { data: profile } = await supabase.from('profiles').select('is_provider').eq('id', user.id).single() as { data: { is_provider: boolean } | null }
   const isProvider = profile?.is_provider === true
 
-  // Objednávky, kde jsem POSKYTOVATEL (příchozí poptávky) – jen pokud jsem provider
+  // Objednávky, kde jsem POSKYTOVATEL (příchozí) – jen pokud jsem provider
   const { data: asProvider } = isProvider
     ? await supabase
         .from('orders')
@@ -105,10 +105,10 @@ export default async function ObjednavkyPage() {
         </div>
       )}
 
-      {/* Sekce: poptávky, kde jsem poskytovatel */}
+      {/* Sekce: objednávky, kde jsem poskytovatel */}
       {isProvider && provOrders.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500">Poptávky u mě ({provOrders.length})</h2>
+          <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500">Objednávky u mě ({provOrders.length})</h2>
           {provOrders.map((o: any) => (
             <OrderCard key={o.id} o={o} role="provider" otherName={nameMap[o.customer_id] ?? 'Zákazník'} />
           ))}
