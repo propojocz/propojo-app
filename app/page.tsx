@@ -257,8 +257,11 @@ export default function Home() {
           .hero-search { flex-direction:column; }
           .hs-divider { display:none; }
           .hs-btn { width:100%; }
-          .trust { flex-direction:column; }
-          .trust-stat + .trust-stat { border-left:none; border-top:1px solid var(--gray-100); }
+          /* TRUST — tři statistiky vedle sebe i na mobilu, menší čísla */
+          .trust-stat { padding:20px 8px; }
+          .trust-stat + .trust-stat { border-left:1px solid var(--gray-100); border-top:none; }
+          .trust-stat .num { font-size:20px; }
+          .trust-stat .label { font-size:10.5px; line-height:1.3; }
           .home-section { padding:56px 20px; }
           .cats { grid-template-columns:repeat(2,1fr); }
           .steps { grid-template-columns:1fr; gap:36px; }
