@@ -83,7 +83,7 @@ async function ServiceList({
 
   let query = supabase
     .from('services')
-    .select(`*, profiles (id, full_name, avatar_url, rating, review_count, city, is_suspended, ico_verified)`)
+    .select(`*, profiles (id, full_name, avatar_url, rating, review_count, city, is_suspended, ico_verified, stripe_onboarding_done)`)
     .eq('is_active', true)
 
   if (serviceIdsBySubcat) {
@@ -131,7 +131,13 @@ async function ServiceList({
   }
 
   const { data: services } = await query.limit(60)
-  let sorted = ((services as ServiceWithProvider[]) ?? []).filter((s) => (s.profiles as any)?.is_suspended !== true)
+  // Zobrazujeme jen poskytovatele, kteří prošli Stripe ověřením (KYC).
+  // Tím se zároveň brání zneužití cizího IČO — podvodník KYC neprojde.
+  let sorted = ((services as ServiceWithProvider[]) ?? []).filter(
+    (s) =>
+      (s.profiles as any)?.is_suspended !== true &&
+      (s.profiles as any)?.stripe_onboarding_done === true
+  )
 
   if (minRating) {
     const min = Number(minRating)
@@ -165,7 +171,7 @@ async function ServiceList({
     const hledane = q || category
     if (hledane) params.set('category', hledane)
     if (city) params.set('city', city)
-    const poptavkaHref = `/poptavka${params.toString() ? `?${params.toString()}` : ''}`
+    const poptavkaHref = `/poptavky/nova${params.toString() ? `?${params.toString()}` : ''}`
     return (
       <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white py-16 text-center">
         <div className="mb-4 text-6xl">🔍</div>

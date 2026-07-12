@@ -15,13 +15,46 @@ const schema = z.object({
   company_name: z.string().optional(),
 })
 
+/**
+ * Serverové ověření IČO proti ARES.
+ * Klientské ověření (v prohlížeči) lze obejít – proto ověřujeme znovu tady.
+ * Vrací obchodní jméno z ARES, nebo null pokud IČO neexistuje / ARES nedostupný.
+ */
+async function verifyIcoInAres(ico: string): Promise<{ ok: boolean; companyName?: string }> {
+  try {
+    const res = await fetch(
+      `https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty/${ico}`,
+      { headers: { accept: 'application/json' }, cache: 'no-store' }
+    )
+    if (!res.ok) return { ok: false }
+    const data = await res.json()
+    const name = data?.obchodniJmeno
+    if (!name) return { ok: false }
+    return { ok: true, companyName: name }
+  } catch (err) {
+    console.error('[register-provider] ARES ověření selhalo:', err)
+    return { ok: false }
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json()
     const parsed = schema.safeParse(body)
     if (!parsed.success) return NextResponse.json({ error: 'Neplatná data.' }, { status: 400 })
 
-    const { email, password, full_name, phone, city } = parsed.data
+    const { email, password, full_name, phone, city, ico } = parsed.data
+
+    // 1) Ověřit IČO proti ARES ještě PŘED založením účtu
+    const ares = await verifyIcoInAres(ico)
+    if (!ares.ok) {
+      return NextResponse.json(
+        { error: 'IČO se nepodařilo ověřit v registru ARES. Zkontrolujte prosím zadané číslo.' },
+        { status: 400 }
+      )
+    }
+    // Obchodní jméno bereme z ARES, ne z toho, co poslal prohlížeč
+    const company_name = ares.companyName ?? parsed.data.company_name ?? null
 
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -45,7 +78,23 @@ export async function POST(request: Request) {
     }
 
     if (authData.user) {
-      await supabase.from('profiles').update({ full_name, phone, city, is_provider: true }).eq('id', authData.user.id)
+      // 2) Uložit VŠECHNA data včetně IČO (dřív se ico/company_name zahazovalo!)
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          full_name,
+          phone,
+          city,
+          ico,
+          ico_verified: true,
+          company_name,
+          is_provider: true,
+        })
+        .eq('id', authData.user.id)
+
+      if (profileError) {
+        console.error('[register-provider] uložení profilu selhalo:', profileError)
+      }
 
       // Welcome email
       try {

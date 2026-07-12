@@ -1,155 +1,214 @@
 'use client'
 // app/poptavky/nova/page.tsx
-// Formulář na vyvěšení poptávky. Jen pro přihlášené (dle RLS: author_id = auth.uid()).
+// Formulář pro zanechání poptávky. Funguje i bez přihlášení (fotky jen pro přihlášené).
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
+import { Loader2, CheckCircle2, Send, ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
+import { createLead } from '@/lib/actions/leads'
 import { createClient } from '@/lib/supabase/client'
-import { Loader2, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react'
+import GalleryUpload from '@/components/ui/GalleryUpload'
 
 export default function NovaPoptavkaPage() {
-  const router = useRouter()
-  const supabase = createClient()
+  const searchParams = useSearchParams()
 
-  const [checking, setChecking] = useState(true)
-  const [userId, setUserId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [done, setDone] = useState(false)
+  const [form, setForm] = useState({
+    category: '',
+    description: '',
+    city: '',
+    email: '',
+    phone: '',
+    preferred_date: '',
+  })
+  const [photos, setPhotos] = useState<string[]>([])
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  const [errorMsg, setErrorMsg] = useState('')
 
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [category, setCategory] = useState('')
-  const [city, setCity] = useState('')
-  const [contactName, setContactName] = useState('')
-  const [contactPhone, setContactPhone] = useState('')
-  const [contactEmail, setContactEmail] = useState('')
-
-  // Ověření přihlášení + předvyplnění jména
+  // Předvyplnění z URL (z prázdného stavu marketplace: ?category=...&city=...)
   useEffect(() => {
-    (async () => {
+    const category = searchParams.get('category') ?? ''
+    const city = searchParams.get('city') ?? ''
+    if (category || city) {
+      setForm((f) => ({ ...f, category: category || f.category, city: city || f.city }))
+    }
+  }, [searchParams])
+
+  // Zjistíme přihlášení – fotky umožníme jen přihlášeným. Předvyplníme e-mail.
+  useEffect(() => {
+    const check = async () => {
+      const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/prihlasit?next=/poptavky/nova'); return }
-      setUserId(user.id)
-      const { data: profile } = await supabase
-        .from('profiles').select('full_name').eq('id', user.id).single() as { data: { full_name: string | null } | null }
-      if (profile?.full_name) setContactName(profile.full_name)
-      setContactEmail(user.email ?? '')
-      setChecking(false)
-    })()
-  }, [router, supabase])
+      if (user) {
+        setIsLoggedIn(true)
+        if (user.email) setForm((f) => ({ ...f, email: user.email as string }))
+      }
+    }
+    check()
+  }, [])
+
+  const set = (key: string, value: string) => setForm((f) => ({ ...f, [key]: value }))
 
   const handleSubmit = async () => {
-    setError('')
-    if (title.trim().length < 3) { setError('Napište stručně, co sháníte.'); return }
-    if (city.trim().length < 2) { setError('Zadejte město nebo obec.'); return }
-    if (contactName.trim().length < 2) { setError('Zadejte jméno pro kontakt.'); return }
-    if (!contactPhone.trim() && !contactEmail.trim()) { setError('Zadejte alespoň telefon nebo e-mail.'); return }
-
-    setLoading(true)
-    const { error: insErr } = await (supabase.from('poptavky') as any).insert({
-      author_id: userId,
-      title: title.trim(),
-      description: description.trim() || null,
-      category: category.trim() || null,
-      city: city.trim(),
-      contact_name: contactName.trim(),
-      contact_phone: contactPhone.trim() || null,
-      contact_email: contactEmail.trim() || null,
-    })
-    if (insErr) { setError('Poptávku se nepodařilo uložit. Zkuste to prosím znovu.'); setLoading(false); return }
-    setDone(true)
+    setState('loading')
+    setErrorMsg('')
+    const result = await createLead({ ...form, photos })
+    if (result.success) {
+      setState('done')
+    } else {
+      setState('error')
+      setErrorMsg(result.error ?? 'Něco se nepovedlo.')
+    }
   }
 
-  if (checking) {
+  if (state === 'done') {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-slate-300" />
-      </div>
-    )
-  }
-
-  if (done) {
-    return (
-      <div className="mx-auto max-w-md px-4 py-16 text-center">
-        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100">
-          <CheckCircle2 className="h-8 w-8 text-emerald-600" />
+      <div className="mx-auto max-w-lg px-4 py-16 text-center sm:px-6">
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-8">
+          <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-500" />
+          <h1 className="mt-4 text-xl font-black text-emerald-900">Poptávka odeslána!</h1>
+          <p className="mt-2 text-sm text-emerald-700">
+            Děkujeme. Vaše poptávka je teď vidět řemeslníkům — ozvou se vám. A jakmile najdeme
+            vhodného poskytovatele ve vaší lokalitě, dáme vám vědět i my.
+          </p>
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
+            <Link href="/poptavky" className="btn-primary justify-center">
+              Zobrazit poptávky
+            </Link>
+            <Link href="/marketplace" className="btn-secondary justify-center">
+              Prohlédnout služby
+            </Link>
+          </div>
         </div>
-        <h1 className="mb-2 text-2xl font-black text-slate-900">Poptávka je vyvěšená!</h1>
-        <p className="mb-6 text-slate-500">Řemeslníci ji teď uvidí a mohou se vám ozvat.</p>
-        <Link href="/poptavky" className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 font-bold text-white hover:bg-emerald-600">
-          Zobrazit poptávky
-        </Link>
       </div>
     )
   }
-
-  const inputCls = 'w-full rounded-xl border-[1.5px] border-slate-200 px-4 py-3 text-[15px] outline-none transition focus:border-emerald-500'
 
   return (
-    <div className="mx-auto max-w-lg px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-lg px-4 py-10 sm:px-6">
       <Link href="/poptavky" className="mb-6 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
         <ArrowLeft className="h-4 w-4" /> Zpět na poptávky
       </Link>
 
-      <h1 className="text-2xl font-black text-slate-900">Vyvěsit poptávku</h1>
-      <p className="mb-6 mt-1 text-sm text-slate-500">Popište, co sháníte. Řemeslníci s předplatným se vám ozvou.</p>
+      <div className="mb-6">
+        <h1 className="text-2xl font-black text-slate-900">Nenašli jste, koho hledáte?</h1>
+        <p className="mt-2 text-sm text-slate-600">
+          Zanechte nám poptávku. Uvidí ji ověření řemeslníci a mohou se vám ozvat sami — a pokud ve
+          vaší lokalitě zatím nikoho nemáme, postaráme se a dáme vám vědět.
+        </p>
+      </div>
 
-      <div className="space-y-4">
-        <div>
-          <label className="mb-1.5 block text-sm font-bold text-slate-800">Co sháníte? *</label>
-          <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Např. Sháním malíře na byt 2+1" className={inputCls} maxLength={100} />
+      <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="space-y-1.5">
+          <label className="text-sm font-bold text-slate-800">Jakou službu hledáte? *</label>
+          <input
+            value={form.category}
+            onChange={(e) => set('category', e.target.value)}
+            placeholder="Např. sádrokartonář, malíř, instalatér…"
+            className="w-full rounded-xl border-[1.5px] border-slate-200 px-4 py-3 text-[15px] outline-none transition focus:border-emerald-500"
+          />
         </div>
 
-        <div>
-          <label className="mb-1.5 block text-sm font-bold text-slate-800">Podrobnosti</label>
-          <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Rozsah práce, termín, cokoli důležitého…" rows={4} className={inputCls} maxLength={1000} />
+        <div className="space-y-1.5">
+          <label className="text-sm font-bold text-slate-800">Co potřebujete? *</label>
+          <textarea
+            value={form.description}
+            onChange={(e) => set('description', e.target.value)}
+            rows={4}
+            maxLength={1000}
+            placeholder="Popište práci – co, jak velké, jakou máte představu…"
+            className="w-full resize-none rounded-xl border-[1.5px] border-slate-200 px-4 py-3 text-[15px] outline-none transition focus:border-emerald-500"
+          />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="mb-1.5 block text-sm font-bold text-slate-800">Obor</label>
-            <input value={category} onChange={e => setCategory(e.target.value)} placeholder="Malíř, instalatér…" className={inputCls} maxLength={50} />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <label className="text-sm font-bold text-slate-800">Město / lokalita *</label>
+            <input
+              value={form.city}
+              onChange={(e) => set('city', e.target.value)}
+              placeholder="Např. Kelč"
+              className="w-full rounded-xl border-[1.5px] border-slate-200 px-4 py-3 text-[15px] outline-none transition focus:border-emerald-500"
+            />
           </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-bold text-slate-800">Město / obec *</label>
-            <input value={city} onChange={e => setCity(e.target.value)} placeholder="Vsetín" className={inputCls} maxLength={80} />
+          <div className="space-y-1.5">
+            <label className="text-sm font-bold text-slate-800">
+              Kdy by se hodilo? <span className="font-normal text-slate-400">(nepovinné)</span>
+            </label>
+            <input
+              value={form.preferred_date}
+              onChange={(e) => set('preferred_date', e.target.value)}
+              placeholder="Např. do konce měsíce"
+              className="w-full rounded-xl border-[1.5px] border-slate-200 px-4 py-3 text-[15px] outline-none transition focus:border-emerald-500"
+            />
           </div>
         </div>
 
-        <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-4">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Kontakt pro řemeslníky</p>
-          <div>
-            <label className="mb-1.5 block text-sm font-bold text-slate-800">Jméno *</label>
-            <input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Jan Novák" className={inputCls} maxLength={80} />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <label className="text-sm font-bold text-slate-800">Váš e-mail *</label>
+            <input
+              type="email"
+              value={form.email}
+              onChange={(e) => set('email', e.target.value)}
+              placeholder="vas@email.cz"
+              className="w-full rounded-xl border-[1.5px] border-slate-200 px-4 py-3 text-[15px] outline-none transition focus:border-emerald-500"
+            />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1.5 block text-sm font-bold text-slate-800">Telefon</label>
-              <input value={contactPhone} onChange={e => setContactPhone(e.target.value)} type="tel" placeholder="+420…" className={inputCls} maxLength={20} />
+          <div className="space-y-1.5">
+            <label className="text-sm font-bold text-slate-800">
+              Telefon <span className="font-normal text-slate-400">(nepovinné)</span>
+            </label>
+            <input
+              type="tel"
+              value={form.phone}
+              onChange={(e) => set('phone', e.target.value)}
+              placeholder="+420 777 123 456"
+              className="w-full rounded-xl border-[1.5px] border-slate-200 px-4 py-3 text-[15px] outline-none transition focus:border-emerald-500"
+            />
+          </div>
+        </div>
+
+        {/* Fotky – jen pro přihlášené (Storage je pustí jen jim) */}
+        {isLoggedIn ? (
+          <div className="space-y-1.5">
+            <label className="text-sm font-bold text-slate-800">
+              Fotky <span className="font-normal text-slate-400">(nepovinné)</span>
+            </label>
+            <p className="text-xs text-slate-400">Fotka pomůže řemeslníkovi rychle pochopit, o co jde.</p>
+            <div className="pt-1">
+              <GalleryUpload value={photos} onChange={setPhotos} />
             </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-bold text-slate-800">E-mail</label>
-              <input value={contactEmail} onChange={e => setContactEmail(e.target.value)} type="email" placeholder="vas@email.cz" className={inputCls} maxLength={120} />
-            </div>
           </div>
-          <p className="text-xs text-slate-400">Vyplňte alespoň jedno. Kontakt uvidí jen řemeslníci s aktivním předplatným.</p>
-        </div>
-
-        {error && (
-          <div className="flex items-center gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            <AlertCircle className="h-4 w-4 shrink-0" /> {error}
-          </div>
+        ) : (
+          <p className="rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-500">
+            Chcete přiložit fotky?{' '}
+            <Link href="/prihlasit?next=/poptavky/nova" className="font-bold text-emerald-600 hover:underline">
+              Přihlaste se
+            </Link>{' '}
+            – poptávku ale můžete odeslat i bez přihlášení.
+          </p>
         )}
+
+        {state === 'error' && <p className="text-sm text-red-600">{errorMsg}</p>}
 
         <button
           onClick={handleSubmit}
-          disabled={loading}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3.5 font-bold text-white transition hover:bg-emerald-600 disabled:opacity-70"
+          disabled={state === 'loading'}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3.5 font-extrabold text-white transition hover:bg-emerald-600 disabled:opacity-70"
         >
-          {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Vyvěšuji…</> : 'Vyvěsit poptávku'}
+          {state === 'loading' ? (
+            <><Loader2 className="h-4 w-4 animate-spin" /> Odesílám…</>
+          ) : (
+            <><Send className="h-4 w-4" /> Odeslat poptávku</>
+          )}
         </button>
+
+        <p className="text-center text-xs text-slate-400">
+          Odesláním souhlasíte se zpracováním kontaktu za účelem zprostředkování služby. Vaše poptávka
+          bude viditelná ověřeným řemeslníkům.
+        </p>
       </div>
     </div>
   )

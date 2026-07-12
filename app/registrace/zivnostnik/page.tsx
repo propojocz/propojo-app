@@ -12,10 +12,14 @@ import { z } from 'zod'
 const schema = z.object({
   email: z.string().email('Neplatný email'),
   password: z.string().min(8, 'Heslo musí mít alespoň 8 znaků'),
+  password_confirm: z.string().min(1, 'Zadejte heslo znovu'),
   full_name: z.string().min(2, 'Zadejte celé jméno'),
   ico: z.string().regex(/^\d{8}$/, 'IČO musí mít přesně 8 číslic'),
   phone: z.string().min(9, 'Zadejte platné telefonní číslo'),
   city: z.string().min(2, 'Zadejte město'),
+}).refine((d) => d.password === d.password_confirm, {
+  message: 'Hesla se neshodují',
+  path: ['password_confirm'],
 })
 type FormValues = z.infer<typeof schema>
 
@@ -64,10 +68,11 @@ export default function ZivnostnikRegistracePage() {
     if (!aresData) return
     setIsLoading(true); setServerError('')
     try {
+      const { password_confirm, ...payload } = data
       const res = await fetch('/api/register-provider', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, company_name: aresData.obchodniJmeno }),
+        body: JSON.stringify({ ...payload, company_name: aresData.obchodniJmeno }),
       })
       const result = await res.json()
       if (res.ok) { setSuccess(true) }
@@ -95,9 +100,8 @@ export default function ZivnostnikRegistracePage() {
     <div className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-2xl px-4 py-12 sm:px-6">
         <div className="mb-8 flex items-center justify-between">
-          <Link href="/registrace" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-600 text-white font-black text-sm">P</div>
-            <span className="text-lg font-black text-slate-900">Propojo</span>
+          <Link href="/" className="flex items-center">
+            <img src="/propojo-logo.png" alt="Propojo" className="h-8 w-auto object-contain" />
           </Link>
           <Link href="/registrace" className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
             <ArrowLeft className="h-4 w-4" /> Zpět
@@ -108,10 +112,10 @@ export default function ZivnostnikRegistracePage() {
         <div className="mb-8 flex items-center gap-2">
           {[{ num: 1, label: 'Ověření IČO' }, { num: 2, label: 'Vaše údaje' }, { num: 3, label: 'Heslo a email' }].map((s, i) => (
             <div key={s.num} className="flex items-center gap-2 flex-1">
-              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold transition-all ${step > s.num ? 'bg-emerald-500 text-white' : step === s.num ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold transition-all ${step > s.num ? 'bg-emerald-500 text-white' : step === s.num ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
                 {step > s.num ? <CheckCircle2 className="h-4 w-4" /> : s.num}
               </div>
-              <p className={`hidden sm:block text-xs font-semibold ${step === s.num ? 'text-indigo-600' : 'text-slate-400'}`}>{s.label}</p>
+              <p className={`hidden sm:block text-xs font-semibold ${step === s.num ? 'text-emerald-700' : 'text-slate-400'}`}>{s.label}</p>
               {i < 2 && <div className={`flex-1 h-0.5 ${step > s.num ? 'bg-emerald-400' : 'bg-slate-200'}`} />}
             </div>
           ))}
@@ -169,10 +173,10 @@ export default function ZivnostnikRegistracePage() {
                 <h1 className="mb-1.5 text-2xl font-black text-slate-900">Vaše kontaktní údaje</h1>
                 <p className="mb-6 text-slate-500 text-sm">Tyto údaje uvidí zákazníci na vašem profilu.</p>
                 {aresData && (
-                  <div className="mb-5 flex items-center gap-2 rounded-xl bg-indigo-50 border border-indigo-100 px-4 py-2.5">
-                    <CheckCircle2 className="h-4 w-4 text-indigo-500 shrink-0" />
-                    <span className="text-sm font-semibold text-indigo-700">{aresData.obchodniJmeno}</span>
-                    <span className="text-xs text-indigo-400 ml-auto">IČO {aresData.ico}</span>
+                  <div className="mb-5 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <span className="text-sm font-semibold text-emerald-800">{aresData.obchodniJmeno}</span>
+                    <span className="text-xs text-emerald-600 ml-auto">IČO {aresData.ico}</span>
                   </div>
                 )}
                 <div className="space-y-4">
@@ -188,7 +192,7 @@ export default function ZivnostnikRegistracePage() {
                   </div>
                   <div className="space-y-1.5">
                     <label className="form-label">Město působiště *</label>
-                    <input {...f('city')} placeholder="Praha" className={`form-input ${errors.city ? 'form-input-error' : ''}`} />
+                    <input {...f('city')} placeholder="Vsetín" className={`form-input ${errors.city ? 'form-input-error' : ''}`} />
                     {errors.city && <p className="form-error">{errors.city.message}</p>}
                   </div>
                   <div className="flex gap-3">
@@ -222,8 +226,13 @@ export default function ZivnostnikRegistracePage() {
                     </div>
                     {errors.password && <p className="form-error">{errors.password.message}</p>}
                   </div>
-                  <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-xs text-amber-800">
-                    Registrací souhlasíte s <Link href="/podminky" className="underline">podmínkami služby</Link> a <Link href="/pravidla-komunity" className="underline">pravidly komunity</Link>.
+                  <div className="space-y-1.5">
+                    <label className="form-label">Heslo znovu *</label>
+                    <input {...f('password_confirm')} type={showPassword ? 'text' : 'password'} placeholder="Zadejte heslo ještě jednou" className={`form-input ${errors.password_confirm ? 'form-input-error' : ''}`} />
+                    {errors.password_confirm && <p className="form-error">{errors.password_confirm.message}</p>}
+                  </div>
+                  <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 text-xs text-slate-500">
+                    Registrací souhlasíte s <Link href="/podminky" className="underline text-slate-700">podmínkami služby</Link> a <Link href="/pravidla-komunity" className="underline text-slate-700">pravidly komunity</Link>.
                   </div>
                   <AnimatePresence>
                     {serverError && (
@@ -243,7 +252,7 @@ export default function ZivnostnikRegistracePage() {
             )}
           </AnimatePresence>
         </div>
-        <p className="mt-4 text-center text-sm text-slate-500">Již máte účet? <Link href="/prihlasit" className="font-semibold text-indigo-600 hover:underline">Přihlásit se</Link></p>
+        <p className="mt-4 text-center text-sm text-slate-500">Již máte účet? <Link href="/prihlasit" className="font-semibold text-emerald-600 hover:underline">Přihlásit se</Link></p>
       </div>
     </div>
   )

@@ -486,7 +486,7 @@ export default function Home() {
 
         {/* FAQ */}
         <section className="home-section" style={{ paddingTop: 0 }}>
-          <div className="sec-head reveal"><span className="eyebrow">Časté otázky</span><h2>Ještě váháte?</h2></div>
+          <div className="sec-head reveal"><span className="eyebrow">Časté otázky</span>Ještě váháte?</div>
           <div className="faq reveal">
             <details open>
               <summary>Co když řemeslník nedorazí?</summary>
