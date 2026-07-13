@@ -19,13 +19,24 @@ import Link from 'next/link'
 import { ArrowRight, Share2, Check } from 'lucide-react'
 
 interface ProviderInviteProps {
-  /** Nepovinné — použije se jen pro text pozvánky, ne do nadpisu. */
+  /**
+   * Nadpis boxu. Každé místo si může určit vlastní:
+   *  – marketplace (prázdné hledání): výchozí „Pro tuto službu tu zatím nikoho nemáme"
+   *  – landing page: „Jste řemeslník? Buďte tu první." (nikdo nic nehledal)
+   */
+  heading?: string
+  /** Nepovinné — zatím se nepoužívá v textu, kategorie nejsou profese. */
   category?: string
   city?: string
   compact?: boolean
 }
 
-export default function ProviderInvite({ category, city, compact = false }: ProviderInviteProps) {
+export default function ProviderInvite({
+  heading = 'Pro tuto službu tu zatím nikoho nemáme',
+  category,
+  city,
+  compact = false,
+}: ProviderInviteProps) {
   const [copied, setCopied] = useState(false)
 
   const handleShare = async () => {
@@ -67,7 +78,7 @@ export default function ProviderInvite({ category, city, compact = false }: Prov
           compact ? 'text-lg' : 'text-xl sm:text-2xl'
         }`}
       >
-        Pro tuto službu tu zatím nikoho nemáme
+        {heading}
       </h3>
 
       <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-slate-600">

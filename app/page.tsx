@@ -439,7 +439,7 @@ export default function Home() {
               <p>Teprve začínáme — a hledáme řemeslníky, kteří tu budou první.</p>
             </div>
             <div className="reveal" style={{ maxWidth: 620, margin: "0 auto" }}>
-              <ProviderInvite />
+              <ProviderInvite heading="Jste řemeslník? Buďte tu první." />
             </div>
           </section>
         )}

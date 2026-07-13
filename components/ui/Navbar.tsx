@@ -55,18 +55,21 @@ export default async function Navbar() {
     }
   }
 
-  // Světlé postranní tlačítko (Poptávky, Objednávky) — stejný styl pro oba
+  // Světlé postranní tlačítko (Poptávky, Objednávky) — jen na desktopu
   const sideBtn =
-    'inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-5 py-2.5 text-sm font-semibold text-emerald-700 transition-colors hover:bg-emerald-100'
+    'hidden md:inline-flex items-center whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-5 py-2.5 text-sm font-semibold text-emerald-700 transition-colors hover:bg-emerald-100'
 
   return (
     <>
       <SuspendedTopBar />
 
       <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur-sm">
-        <nav className="mx-auto flex h-[60px] max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8 md:grid md:grid-cols-[1fr_auto_1fr]">
+        {/* Mřížka o třech sloupcích na VŠECH velikostech.
+            Prostřední sloupec je vždy vyplněný (na mobilu aspoň Marketplace),
+            takže logo drží vlevo a zvoneček s pilulkou vpravo. */}
+        <nav className="mx-auto grid h-[60px] max-w-7xl grid-cols-[1fr_auto_1fr] items-center px-3 sm:px-6 lg:px-8">
 
-          {/* VLEVO — logo (o kousek sytější) */}
+          {/* VLEVO — logo */}
           <div className="flex justify-start">
             <Link href="/" className="flex items-center">
               <Image
@@ -75,22 +78,25 @@ export default async function Navbar() {
                 width={120}
                 height={40}
                 priority
-                className="h-9 w-auto object-contain [filter:saturate(1.25)]"
+                className="h-8 w-auto object-contain [filter:saturate(1.25)] md:h-9"
               />
             </Link>
           </div>
 
-          {/* UPROSTŘED — Poptávky · Marketplace · Objednávky (jen desktop) */}
-          <div className="hidden items-center gap-2 md:flex">
+          {/* UPROSTŘED — Marketplace vždy (i na mobilu, i pro nepřihlášené).
+              Poptávky a Objednávky se přidají až na desktopu. */}
+          <div className="flex items-center justify-center gap-2">
             <Link href="/poptavky" className={sideBtn}>
               Poptávky
             </Link>
+
             <Link
               href="/marketplace"
-              className="inline-flex items-center rounded-full bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-600 hover:shadow-md"
+              className="inline-flex items-center whitespace-nowrap rounded-full bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-600 hover:shadow-md"
             >
               Marketplace
             </Link>
+
             <Link
               href={user ? '/dashboard/objednavky' : '/prihlasit?next=/dashboard/objednavky'}
               className={sideBtn}
