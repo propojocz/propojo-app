@@ -50,7 +50,7 @@ export default async function UpravitSluzbuPage({ params }: Props) {
         </Link>
 
         <div className="mb-8">
-          <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-indigo-600">
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-emerald-600">
             Úprava nabídky
           </p>
           <h1 className="text-3xl font-black tracking-tight text-slate-900">

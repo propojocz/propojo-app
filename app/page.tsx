@@ -3,6 +3,9 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import ServiceCard from "@/components/ui/ServiceCard";
+import ProviderInvite from "@/components/ui/ProviderInvite";
+import { Search, CalendarCheck, Handshake, ShieldCheck, CreditCard, CalendarClock } from "lucide-react";
 
 export default function Home() {
   const router = useRouter();
@@ -13,6 +16,9 @@ export default function Home() {
   const [obceSug, setObceSug] = useState<{ obec: string; okres: string }[]>([]);
   const [showObory, setShowObory] = useState(false);
   const [showObce, setShowObce] = useState(false);
+  // Skutečné služby z databáze — žádná vymyšlená data.
+  const [featured, setFeatured] = useState<any[]>([]);
+  const [featuredLoading, setFeaturedLoading] = useState(true);
   const queryBoxRef = useRef<HTMLDivElement>(null);
   const whereBoxRef = useRef<HTMLDivElement>(null);
   const qDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -67,15 +73,23 @@ export default function Home() {
     router.push(`/marketplace${params.toString() ? `?${params.toString()}` : ""}`);
   };
 
+  // Načtení skutečných služeb pro sekci ukázek
+  useEffect(() => {
+    fetch("/api/featured-services")
+      .then((r) => r.json())
+      .then((d) => { setFeatured(d.services ?? []); setFeaturedLoading(false); })
+      .catch(() => setFeaturedLoading(false));
+  }, []);
+
   // Scroll-reveal
   useEffect(() => {
     const obs = new IntersectionObserver(
       (entries) => entries.forEach((e) => { if (e.isIntersecting) e.target.classList.add("visible"); }),
       { threshold: 0.12 }
     );
-    document.querySelectorAll(".reveal").forEach((el) => obs.observe(el));
+    document.querySelectorAll(".reveal:not(.visible)").forEach((el) => obs.observe(el));
     return () => obs.disconnect();
-  }, []);
+  }, [featuredLoading]);
 
   return (
     <>
@@ -212,6 +226,9 @@ export default function Home() {
         .pcards-cta a { display:inline-block; border:1.5px solid var(--gray-200); border-radius:12px; padding:12px 26px; font-weight:600; font-size:14.5px; text-decoration:none; transition:.15s; color:var(--ink); }
         .pcards-cta a:hover { border-color:var(--green); color:var(--green-dark); }
 
+        /* SKUTEČNÉ KARTY (ServiceCard z marketplace — stejná komponenta) */
+        .real-cards { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
+
         /* PROČ */
         .why { display:grid; grid-template-columns:repeat(3,1fr); gap:22px; }
         .why-card { background:#fff; border:1px solid var(--gray-200); border-radius:18px; padding:28px 26px; transition:.25s; }
@@ -221,14 +238,6 @@ export default function Home() {
         .why-card h3 { font-size:18px; font-weight:600; margin-bottom:8px; color:var(--ink); }
         .why-card p { color:var(--gray-600); font-size:14.5px; line-height:1.65; }
 
-        /* RECENZE */
-        .quotes-wrap { background:var(--gray-100); }
-        .quotes { display:grid; grid-template-columns:repeat(2,1fr); gap:22px; max-width:860px; margin:0 auto; }
-        .quote { background:#fff; border:1px solid var(--gray-200); border-radius:18px; padding:26px; }
-        .quote .stars { color:var(--orange); letter-spacing:2px; margin-bottom:12px; font-size:14px; }
-        .quote p { font-size:15px; line-height:1.65; color:var(--ink); margin-bottom:16px; }
-        .quote .who { display:flex; align-items:center; gap:10px; font-size:13px; color:var(--gray-600); font-weight:600; }
-        .quote .who .p-avatar { width:34px; height:34px; font-size:13px; }
 
         /* CTA */
         .pro-cta { max-width:920px; margin:0 auto; background:linear-gradient(135deg,#1a1f2e,#2a3142); border-radius:26px;
@@ -267,8 +276,8 @@ export default function Home() {
           .steps { grid-template-columns:1fr; gap:36px; }
           .thread { display:none; }
           .pcards { grid-template-columns:1fr; }
+          .real-cards { grid-template-columns:1fr; }
           .why { grid-template-columns:1fr; }
-          .quotes { grid-template-columns:1fr; }
         }
       `}</style>
 
@@ -285,7 +294,7 @@ export default function Home() {
           </div>
           <div className="hero-badge"><span className="dot"></span> Ověření živnostníci · Záloha = jistota</div>
           <h1>Snadné propojení zákazníka<br /> <span className="accent">s poskytovateli.</span></h1>
-          <p className="sub">Ověření živnostníci z vašeho okolí. Vyberete termín, zaplatíte zálohu — a máte jistotu, že dorazí.</p>
+          <p className="sub">Ověření živnostníci z vašeho okolí. Vyberete termín, zaplatíte zálohu — a když řemeslník nedorazí, dostanete ji zpět.</p>
 
           <div className="hero-search">
             <div className="hs-field" ref={queryBoxRef}>
@@ -383,19 +392,19 @@ export default function Home() {
             <div className="steps reveal">
               <div className="thread"></div>
               <div className="step s-green">
-                <div className="step-dot">🔎</div>
+                <div className="step-dot"><Search size={24} strokeWidth={2} color="#059669" /></div>
                 <div className="who">Vy</div>
                 <h3>Najdete a porovnáte</h3>
                 <p>Hledáte podle služby a města. Porovnáte ceny, recenze a volné termíny ověřených živnostníků.</p>
               </div>
               <div className="step s-blue">
-                <div className="step-dot">📅</div>
+                <div className="step-dot"><CalendarCheck size={24} strokeWidth={2} color="#2563eb" /></div>
                 <div className="who">Propojo</div>
                 <h3>Rezervujete se zálohou</h3>
-                <p>Kliknete na volný termín a zaplatíte zálohu. Držíme ji v bezpečí my — a celá se počítá do ceny.</p>
+                <p>Kliknete na volný termín a zaplatíte zálohu přes zabezpečenou platební bránu. Celá se počítá do konečné ceny.</p>
               </div>
               <div className="step s-orange">
-                <div className="step-dot">🤝</div>
+                <div className="step-dot"><Handshake size={24} strokeWidth={2} color="#d97706" /></div>
                 <div className="who">Řemeslník</div>
                 <h3>Přijde a hotovo</h3>
                 <p>Dorazí podle domluvy. Kdyby ne, vrátíme vám zálohu do poslední koruny. Bez dohadování.</p>
@@ -404,41 +413,36 @@ export default function Home() {
           </section>
         </div>
 
-        {/* ŽIVNOSTNÍCI */}
-        <section className="home-section">
-          <div className="sec-head reveal">
-            <span className="eyebrow">Startujeme na Valašsku</span>
-            <h2>Ověření živnostníci z vašeho okolí</h2>
-            <p>Vsetínsko a Zlínsko jako první. Každý profil má IČO ověřené v ARES.</p>
-          </div>
-          <div className="pcards reveal">
-            <Link className="pcard c1" href="/marketplace">
-              <div className="pcard-photo">✂️</div>
-              <div className="pcard-body">
-                <div className="pcard-top"><div className="p-avatar">L</div><div><div className="pcard-name">Lucie Kovářová</div><div className="pcard-obor">💇 Kadeřnictví</div></div></div>
-                <div className="pcard-meta"><span>★ 4,9 (27)</span><span>📍 Vsetín</span><span className="verified">✓ Ověřeno</span></div>
-                <div className="pcard-bottom"><div className="pcard-price">od 350 Kč<small>dámský střih</small></div><span className="pcard-go">Zobrazit</span></div>
-              </div>
-            </Link>
-            <Link className="pcard c2" href="/marketplace">
-              <div className="pcard-photo">🔧</div>
-              <div className="pcard-body">
-                <div className="pcard-top"><div className="p-avatar" style={{ background: "var(--blue-soft)", color: "var(--blue-dark)" }}>P</div><div><div className="pcard-name">Petr Hruška</div><div className="pcard-obor" style={{ color: "var(--blue-dark)" }}>🔧 Instalatér</div></div></div>
-                <div className="pcard-meta"><span>★ 5,0 (14)</span><span>📍 Rožnov p. R.</span><span className="verified">✓ Ověřeno</span></div>
-                <div className="pcard-bottom"><div className="pcard-price">Nacenění zdarma<small>výjezd do 20 km</small></div><span className="pcard-go">Zobrazit</span></div>
-              </div>
-            </Link>
-            <Link className="pcard c3" href="/marketplace">
-              <div className="pcard-photo">⚡</div>
-              <div className="pcard-body">
-                <div className="pcard-top"><div className="p-avatar" style={{ background: "var(--orange-soft)", color: "var(--orange-dark)" }}>M</div><div><div className="pcard-name">Marek Tichý</div><div className="pcard-obor" style={{ color: "var(--orange-dark)" }}>⚡ Elektrikář</div></div></div>
-                <div className="pcard-meta"><span>★ 4,8 (31)</span><span>📍 Valašské Meziříčí</span><span className="verified">✓ Ověřeno</span></div>
-                <div className="pcard-bottom"><div className="pcard-price">od 550 Kč<small>za hodinu</small></div><span className="pcard-go">Zobrazit</span></div>
-              </div>
-            </Link>
-          </div>
-          <div className="pcards-cta"><Link href="/marketplace">Prohlédnout všechny nabídky →</Link></div>
-        </section>
+        {/* ŽIVNOSTNÍCI — skutečné karty z databáze, žádná vymyšlená data */}
+        {!featuredLoading && featured.length >= 3 && (
+          <section className="home-section">
+            <div className="sec-head reveal">
+              <span className="eyebrow">Startujeme na Valašsku</span>
+              <h2>Ověření živnostníci z vašeho okolí</h2>
+              <p>Vsetínsko a Zlínsko jako první. Každý profil má IČO ověřené v ARES.</p>
+            </div>
+            <div className="real-cards reveal">
+              {featured.map((service, i) => (
+                <ServiceCard key={service.id} service={service} index={i} isLoggedIn={false} />
+              ))}
+            </div>
+            <div className="pcards-cta"><Link href="/marketplace">Prohlédnout všechny nabídky →</Link></div>
+          </section>
+        )}
+
+        {/* Když ještě není dost nabídek — pozvánka pro řemeslníky místo prázdna */}
+        {!featuredLoading && featured.length < 3 && (
+          <section className="home-section">
+            <div className="sec-head reveal">
+              <span className="eyebrow">Startujeme na Valašsku</span>
+              <h2>Vsetínsko a Zlínsko jako první</h2>
+              <p>Teprve začínáme — a hledáme řemeslníky, kteří tu budou první.</p>
+            </div>
+            <div className="reveal" style={{ maxWidth: 620, margin: "0 auto" }}>
+              <ProviderInvite />
+            </div>
+          </section>
+        )}
 
         {/* PROČ */}
         <section className="home-section" style={{ paddingTop: 0 }}>
@@ -448,37 +452,18 @@ export default function Home() {
             <p>Tři věci, které jinde nenajdete pohromadě.</p>
           </div>
           <div className="why reveal">
-            <div className="why-card c1"><div className="icon">🛡️</div><h3>Ověřené IČO přes ARES</h3><p>Žádné falešné profily. Každého živnostníka ověřujeme v oficiálním rejstříku, než se u nás objeví.</p></div>
-            <div className="why-card c2"><div className="icon">💳</div><h3>Záloha jako jistota</h3><p>Zaplatíte zálohu kterou drží Propojo, ne řemeslník. Když nedorazí, vrátí se vám celá. Když dorazí, počítá se do celkové ceny.</p></div>
-            <div className="why-card c3"><div className="icon">📅</div><h3>Termín bez telefonování</h3><p>Vidíte volné termíny v kalendáři. Kliknete — a termín je váš. Žádné „zavolám vám zpátky".</p></div>
+            <div className="why-card c1"><div className="icon"><ShieldCheck size={22} strokeWidth={2} color="#059669" /></div><h3>Ověřené IČO přes ARES</h3><p>Žádné falešné profily. Každého živnostníka ověřujeme v oficiálním rejstříku, než se u nás objeví.</p></div>
+            <div className="why-card c2"><div className="icon"><CreditCard size={22} strokeWidth={2} color="#2563eb" /></div><h3>Záloha jako jistota</h3><p>Záloha jde přes zabezpečenou platební bránu a řemeslníkovi se uvolní až po provedení práce. Když nedorazí, vrátí se vám celá.</p></div>
+            <div className="why-card c3"><div className="icon"><CalendarClock size={22} strokeWidth={2} color="#d97706" /></div><h3>Termín bez telefonování</h3><p>Vidíte volné termíny v kalendáři. Kliknete — a termín je váš. Žádné „zavolám vám zpátky".</p></div>
           </div>
         </section>
-
-        {/* RECENZE */}
-        <div className="quotes-wrap">
-          <section className="home-section">
-            <div className="sec-head reveal"><span className="eyebrow">Recenze</span><h2>Co říkají sousedi</h2></div>
-            <div className="quotes reveal">
-              <div className="quote">
-                <div className="stars">★★★★★</div>
-                <p>„Konečně jsem nemusela nikam volat. Vybrala jsem termín, zaplatila zálohu a kadeřnice dorazila přesně na čas."</p>
-                <div className="who"><div className="p-avatar">J</div> Jana N. · Vsetín</div>
-              </div>
-              <div className="quote">
-                <div className="stars">★★★★★</div>
-                <p>„Instalatér přijel druhý den, nacenil na místě a hned se domluvil zbytek. Žádné čekání na pět nabídek."</p>
-                <div className="who"><div className="p-avatar" style={{ background: "var(--blue-soft)", color: "var(--blue-dark)" }}>T</div> Tomáš K. · Zubří</div>
-              </div>
-            </div>
-          </section>
-        </div>
 
         {/* CTA ŽIVNOSTNÍK */}
         <section className="home-section">
           <div className="pro-cta reveal">
             <span className="eyebrow">Pro živnostníky</span>
-            <h2>Zákázky bez provizí pro Propojo</h2>
-            <p>Z vaší práce vám nebereme ani korunu. Platíte jen předplatné — a kalendář vám plníme my.</p>
+            <h2>Zakázky bez provizí</h2>
+            <p>Z vaší práce si nebereme ani korunu. Platíte jen předplatné — zákazníci vás najdou a rezervují si termín sami.</p>
             <Link className="btn" href="/registrace">Začít zdarma →</Link>
             <span className="note">První měsíc zdarma · zrušíte kdykoli · 299 Kč/měsíc</span>
           </div>
@@ -486,11 +471,11 @@ export default function Home() {
 
         {/* FAQ */}
         <section className="home-section" style={{ paddingTop: 0 }}>
-          <div className="sec-head reveal"><span className="eyebrow">Časté otázky</span>Ještě váháte?</div>
+          <div className="sec-head reveal"><span className="eyebrow">Časté otázky</span><h2>Na co se lidi ptají</h2></div>
           <div className="faq reveal">
             <details open>
               <summary>Co když řemeslník nedorazí?</summary>
-              <p>Vrátíme vám celou zálohu. Bez dohadování a bez formulářů — záloha je u nás, ne u řemeslníka, takže ji máte zpátky hned.</p>
+              <p>Vrátíme vám celou zálohu. Řemeslníkovi se totiž uvolní až poté, co práci skutečně odvede — do té doby je zadržená v platební bráně.</p>
             </details>
             <details>
               <summary>Kolik mě to stojí?</summary>
@@ -498,7 +483,7 @@ export default function Home() {
             </details>
             <details>
               <summary>Jak funguje záloha?</summary>
-              <p>Při rezervaci zaplatíte zálohu (třeba 200 Kč), kterou bezpečně držíme my. Po dokončení práce se záloha započítá do konečné ceny — nic neplatíte dvakrát.</p>
+              <p>Při rezervaci zaplatíte zálohu (třeba 200 Kč) přes zabezpečenou platební bránu. Po dokončení práce se započítá do konečné ceny — nic neplatíte dvakrát. Propojo je jen zprostředkovatel; smlouva o provedení práce vzniká přímo mezi vámi a řemeslníkem.</p>
             </details>
             <details>
               <summary>Musím se registrovat?</summary>
