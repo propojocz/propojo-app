@@ -78,8 +78,17 @@ export async function POST(request: Request) {
     }
 
     if (authData.user) {
-      // 2) Uložit VŠECHNA data včetně IČO (dřív se ico/company_name zahazovalo!)
-      const { error: profileError } = await supabase
+      // 2) Uložit VŠECHNA data včetně IČO.
+      //    POZOR: tenhle update MUSÍ běžet přes service role.
+      //    Anon/authenticated klient by narazil na ochranný trigger
+      //    protect_profile_columns, který chrání ico, is_provider,
+      //    company_name atd. — a hodnoty by zahodil (uložil by se
+      //    prázdný profil „jako uživatel bez IČO").
+      const admin = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      )
+      const { error: profileError } = await admin
         .from('profiles')
         .update({
           full_name,
