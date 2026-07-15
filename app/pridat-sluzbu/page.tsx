@@ -35,7 +35,7 @@ export default async function PridatSluzbuPage() {
   if (!isProvider) {
     return (
       <main className="min-h-screen bg-slate-50">
-        <div className="mx-auto max-w-2xl px-4 py-12 sm:px-6">
+        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
           <Link
             href="/marketplace"
             className="mb-8 inline-flex items-center gap-1.5 text-sm text-slate-500 transition-colors hover:text-slate-800"
@@ -67,7 +67,7 @@ export default async function PridatSluzbuPage() {
 
   return (
     <main className="min-h-screen bg-slate-50">
-      <div className="mx-auto max-w-2xl px-4 py-12 sm:px-6">
+      <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
         {/* Zpět */}
         <Link
           href="/marketplace"

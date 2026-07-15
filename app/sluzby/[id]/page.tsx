@@ -52,7 +52,7 @@ export default async function ServiceDetailPage({ params }: Props) {
 
   const { data: service, error } = await supabase
     .from('services')
-    .select(`*, profiles (id, full_name, avatar_url, rating, review_count, city, bio, phone, is_suspended)`)
+    .select(`*, profiles (id, full_name, display_name, company_name, ico, ico_verified, avatar_url, rating, review_count, city, bio, phone, is_suspended)`)
     .eq('id', params.id)
     .single() as { data: any; error: any }
 
@@ -64,6 +64,14 @@ export default async function ServiceDetailPage({ params }: Props) {
   const s = service
   const meta = (CATEGORY_META as Record<string, { label: string; emoji: string }>)[s.category] ?? DEFAULT_META
   const { data: { user } } = await supabase.auth.getUser()
+
+  // TŘI JMÉNA: marketingový název vidí zákazník, ověřená identita je dohledatelná na profilu.
+  const providerDisplayName =
+    s.profiles?.display_name || s.profiles?.company_name || s.profiles?.full_name || 'Poskytovatel'
+  const providerLegalName = s.profiles?.company_name || s.profiles?.full_name
+  const showLegalName = !!providerLegalName && providerLegalName !== providerDisplayName
+  const providerRating = Number(s.profiles?.rating ?? 0)
+  const providerReviews = Number(s.profiles?.review_count ?? 0)
 
   const { data: moreServices } = await supabase
     .from('services')
@@ -153,7 +161,7 @@ export default async function ServiceDetailPage({ params }: Props) {
     areaServed: { '@type': 'City', name: s.city },
     provider: {
       '@type': 'Person',
-      name: s.profiles.full_name,
+      name: providerDisplayName,
       ...(s.profiles.rating ? { aggregateRating: { '@type': 'AggregateRating', ratingValue: s.profiles.rating, reviewCount: s.profiles.review_count } } : {}),
     },
     url: `${APP_URL}/sluzby/${s.id}`,
@@ -244,7 +252,55 @@ export default async function ServiceDetailPage({ params }: Props) {
           </div>
 
           <div className="space-y-4">
-            {/* Volné termíny (Model A) – hned nahoře, ať je vidět jako první */}
+
+            {/* ── HLAVNÍ AKCE ──────────────────────────────────────────────
+                Nahoře, s cenou uvnitř. Zákazník se rozhoduje právě tady, takže
+                cena i tlačítko musí být pohromadě — ne rozházené po stránce.
+                Bílá karta se zelenou linkou vystoupí ze šedého pozadí, aniž by křičela. */}
+            <div className="rounded-2xl border-2 border-emerald-500 bg-white p-5 shadow-lg shadow-emerald-600/10">
+              <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-100 pb-4">
+                <div className="flex items-baseline gap-1">
+                  {isModelB ? (
+                    <span className="text-xl font-black text-slate-900">Nacenění na místě</span>
+                  ) : (
+                    <>
+                      <span className="text-2xl font-black text-slate-900">{mainPrice}</span>
+                      {price > 0 && <span className="text-sm text-slate-500">/{s.price_unit}</span>}
+                    </>
+                  )}
+                </div>
+                {isModelB
+                  ? quoteFee > 0 && (
+                      <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+                        výjezd {quoteFee.toLocaleString('cs-CZ')} Kč
+                      </span>
+                    )
+                  : deposit > 0 && (
+                      <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+                        záloha {deposit.toLocaleString('cs-CZ')} Kč
+                      </span>
+                    )}
+              </div>
+
+              <OrderButton
+                serviceId={s.id}
+                providerId={s.provider_id}
+                isLoggedIn={!!user}
+                priceAgreed={price}
+                paymentModel={s.payment_model}
+                locationType={s.location_type}
+              />
+
+              <p className="mt-3 text-center text-xs leading-relaxed text-slate-400">
+                {isModelB
+                  ? 'Nezávazné. Konečnou cenu potvrdíte až po prohlídce.'
+                  : deposit > 0
+                    ? 'Záloha se započítá do konečné ceny.'
+                    : 'Rezervace je nezávazná.'}
+              </p>
+            </div>
+
+            {/* Volné termíny (Model A) */}
             {!isModelB && freeSlots.length > 0 && (
               <SlotPicker
                 serviceId={s.id}
@@ -256,22 +312,45 @@ export default async function ServiceDetailPage({ params }: Props) {
 
             {/* Poskytovatel */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <Link href={`/profil/${s.provider_id}`} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-                <Avatar name={s.profiles.full_name} url={s.profiles.avatar_url} size={48} />
-                <div>
-                  <p className="font-bold text-slate-900">{s.profiles.full_name}</p>
-                  {s.profiles.rating && Number(s.profiles.rating) > 0 && (
+              <Link href={`/profil/${s.provider_id}`} className="flex items-center gap-3 transition-opacity hover:opacity-80">
+                <Avatar name={providerDisplayName} url={s.profiles.avatar_url} size={48} />
+                <div className="min-w-0">
+                  <p className="truncate font-bold text-slate-900">{providerDisplayName}</p>
+                  {providerRating > 0 ? (
                     <div className="flex items-center gap-1">
                       <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                      <span className="text-sm text-slate-600">{Number(s.profiles.rating).toFixed(1)} ({s.profiles.review_count} recenzí)</span>
+                      <span className="text-sm text-slate-600">
+                        {providerRating.toFixed(1)} ({providerReviews} {providerReviews < 5 ? 'recenze' : 'recenzí'})
+                      </span>
                     </div>
+                  ) : (
+                    <span className="text-xs text-slate-400">Zatím bez recenzí</span>
                   )}
                 </div>
               </Link>
+
+              {/* Ověřená identita — zákazník musí vědět, s kým uzavírá smlouvu.
+                  Propojo je jen zprostředkovatel; smlouva vzniká přímo s poskytovatelem. */}
+              {(showLegalName || s.profiles.ico) && (
+                <p className="mt-2.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 border-t border-slate-100 pt-2.5 text-xs text-slate-500">
+                  {s.profiles.ico_verified && <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />}
+                  {showLegalName && <span className="font-semibold text-slate-600">{providerLegalName}</span>}
+                  {showLegalName && s.profiles.ico && <span className="text-slate-300">·</span>}
+                  {s.profiles.ico && <span>IČO {s.profiles.ico}</span>}
+                </p>
+              )}
+
               {s.profiles.bio && <p className="mt-3 text-sm leading-relaxed text-slate-600 line-clamp-4">{s.profiles.bio}</p>}
               <div className="mt-3 flex items-center gap-1.5 text-sm text-slate-500">
                 <MapPin className="h-4 w-4 text-slate-400" />{s.profiles.city ?? s.city}
               </div>
+
+              <Link
+                href={`/profil/${s.provider_id}`}
+                className="mt-3 block text-center text-xs font-semibold text-emerald-600 hover:underline"
+              >
+                Zobrazit celý profil →
+              </Link>
             </div>
 
             {/* Jak to probíhá – Model A / B */}
@@ -285,7 +364,7 @@ export default async function ServiceDetailPage({ params }: Props) {
                     <span>
                       <strong>Nacenění na místě</strong>
                       {quoteFee > 0
-                        ? <> za <strong>{quoteFee.toLocaleString('cs-CZ')} Kč</strong>. Pokud nabídku přijmeš, poplatek se započítá do celkové ceny.</>
+                        ? <> za <strong>{quoteFee.toLocaleString('cs-CZ')} Kč</strong>. Pokud nabídku přijmete, poplatek se započítá do celkové ceny.</>
                         : <> zdarma. Řemeslník přijede, prohlédne práci a navrhne cenu.</>}
                     </span>
                   </li>
@@ -323,7 +402,10 @@ export default async function ServiceDetailPage({ params }: Props) {
                   )}
                   <li className="flex gap-2.5">
                     <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600" />
-                    <span>Záloha přes Propojo = jistota termínu. Když řemeslník nedorazí, vrátíme ti ji.</span>
+                    <span>
+                      Záloha jde přes zabezpečenou platební bránu a řemeslníkovi se uvolní až po
+                      provedení práce. Když nedorazí, vrátíme vám ji celou.
+                    </span>
                   </li>
                 </ul>
               )}
@@ -339,14 +421,6 @@ export default async function ServiceDetailPage({ params }: Props) {
                 <p className="mt-1 text-sm leading-relaxed text-slate-600">{cancellation.detail}</p>
               </div>
             )}
-
-            {/* CTA */}
-            <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-5">
-              <p className="mb-3 text-sm font-semibold text-emerald-800">
-                {isModelB ? 'Chceš nacenit tuto práci?' : 'Máš zájem o tuto službu?'}
-              </p>
-              <OrderButton serviceId={s.id} providerId={s.provider_id} isLoggedIn={!!user} priceAgreed={price} paymentModel={s.payment_model} locationType={s.location_type} />
-            </div>
 
             <p className="text-center text-xs text-slate-400">
               Přidáno {new Intl.DateTimeFormat('cs-CZ', { dateStyle: 'medium' }).format(new Date(s.created_at))}

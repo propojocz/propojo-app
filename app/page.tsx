@@ -293,8 +293,8 @@ export default function Home() {
             <span className="fdot o d6"></span>
           </div>
           <div className="hero-badge"><span className="dot"></span> Ověření živnostníci · Záloha = jistota</div>
-          <h1>Snadné propojení zákazníka<br /> <span className="accent">s poskytovateli.</span></h1>
-          <p className="sub">Ověření živnostníci z vašeho okolí. Vyberete termín, zaplatíte zálohu — a když řemeslník nedorazí, dostanete ji zpět.</p>
+          <h1> Nemusíte umět <br /> <span className="accent">všechno.</span></h1>
+          <p className="sub">Najděte, domluvte a rezervujte služby na jednom místě.</p>
 
           <div className="hero-search">
             <div className="hs-field" ref={queryBoxRef}>

@@ -51,8 +51,8 @@ export default function ZapomenuteHesloPage() {
           ) : (
             <>
               <div className="mb-6 flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100">
-                  <Mail className="h-5 w-5 text-indigo-600" />
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100">
+                  <Mail className="h-5 w-5 text-emerald-600" />
                 </div>
                 <div>
                   <h1 className="text-xl font-black text-slate-900">Zapomenuté heslo</h1>

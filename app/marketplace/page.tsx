@@ -84,7 +84,7 @@ async function ServiceList({
 
   let query = supabase
     .from('services')
-    .select(`*, profiles (id, full_name, avatar_url, rating, review_count, city, is_suspended, ico_verified, stripe_onboarding_done)`)
+    .select(`*, profiles (id, full_name, display_name, company_name, avatar_url, rating, review_count, city, is_suspended, ico_verified, stripe_onboarding_done)`)
     .eq('is_active', true)
 
   if (serviceIdsBySubcat) {

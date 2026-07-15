@@ -1,8 +1,19 @@
 // app/profil/[id]/page.tsx
+//
+// TŘI JMÉNA:
+//   display_name  … marketingový název („Salon Bella") — velký nadpis, to vidí zákazník první
+//   company_name  … OVĚŘENÁ obchodní firma z ARES       — vždy uvedena pod nadpisem
+//   full_name     … osobní jméno                        — záloha, když firma chybí
+//
+// PROČ JE OVĚŘENÁ IDENTITA VIDĚT: poskytovatel smí vystupovat pod marketingovým názvem,
+// ale zákazník musí mít možnost zjistit, S KÝM právně jedná. Kdyby to Propojo skrývalo,
+// pomáhalo by zakrýt totožnost podnikatele — a přestalo by být čistým zprostředkovatelem.
+// Proto je identita hned u odznaku „Ověřený živnostník" a je odkaz na ověření v ARES.
+
 import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { MapPin, BadgeCheck, Star, Eye, Zap, CheckCircle2, Clock, ChevronRight, Pencil } from 'lucide-react'
+import { MapPin, BadgeCheck, Star, Eye, Zap, CheckCircle2, Clock, ChevronRight, Pencil, ExternalLink } from 'lucide-react'
 import FavoriteButton from '@/components/ui/FavoriteButton'
 import { isFavorited } from '@/lib/actions/favorites'
 import ProfileViewTracker from '@/components/ui/ProfileViewTracker'
@@ -18,6 +29,8 @@ type ProviderProfile = {
   id: string
   full_name: string | null
   company_name: string | null
+  display_name: string | null
+  ico: string | null
   avatar_url: string | null
   city: string | null
   bio: string | null
@@ -73,10 +86,10 @@ export async function generateMetadata({ params }: Props) {
   const supabase = createClient()
   const { data } = await supabase
     .from('profiles')
-    .select('full_name, company_name')
+    .select('full_name, company_name, display_name')
     .eq('id', params.id)
-    .single() as { data: { full_name: string | null; company_name: string | null } | null }
-  const name = data?.company_name || data?.full_name || 'Poskytovatel'
+    .single() as { data: { full_name: string | null; company_name: string | null; display_name: string | null } | null }
+  const name = data?.display_name || data?.company_name || data?.full_name || 'Poskytovatel'
   return { title: `${name} | Propojo` }
 }
 
@@ -85,7 +98,7 @@ export default async function ProfilPage({ params }: Props) {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id, full_name, company_name, avatar_url, city, bio, is_provider, ico_verified, rating, review_count, view_count, gallery, is_suspended, created_at')
+    .select('id, full_name, company_name, display_name, ico, avatar_url, city, bio, is_provider, ico_verified, rating, review_count, view_count, gallery, is_suspended, created_at')
     .eq('id', params.id)
     .single() as { data: ProviderProfile | null }
 
@@ -93,7 +106,15 @@ export default async function ProfilPage({ params }: Props) {
 
   const { data: { user } } = await supabase.auth.getUser()
   const favorited = user ? await isFavorited(params.id) : false
-  const displayName = profile.company_name || profile.full_name || 'Poskytovatel'
+
+  // Marketingový název (co vidí zákazník jako první)
+  const displayName = profile.display_name || profile.company_name || profile.full_name || 'Poskytovatel'
+  // Ověřená právní identita (kdo za tím skutečně stojí)
+  const legalName = profile.company_name || profile.full_name
+  // Ukázat ji zvlášť, jen pokud se liší od marketingového názvu — jinak by se opakovala
+  const showLegalName = !!legalName && legalName !== displayName
+  const aresUrl = profile.ico ? `https://ares.gov.cz/ekonomicke-subjekty?ico=${profile.ico}` : null
+
   const isOwner = false // odpovídání se řeší v dashboardu (/dashboard/recenze), profil jen zobrazuje
   const viewerIsOwner = user?.id === profile.id // vlastník si prohlíží svůj profil
 
@@ -171,6 +192,30 @@ export default async function ProfilPage({ params }: Props) {
                 </span>
               )}
             </div>
+
+            {/* OVĚŘENÁ IDENTITA — kdo za profilem skutečně stojí.
+                Je hned u odznaku, ne schovaná dole. Zákazník musí vědět, s kým jedná. */}
+            {(showLegalName || profile.ico) && (
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
+                {showLegalName && <span className="font-semibold text-slate-600">{legalName}</span>}
+                {showLegalName && profile.ico && <span className="text-slate-300">·</span>}
+                {profile.ico && <span>IČO {profile.ico}</span>}
+                {aresUrl && (
+                  <>
+                    <span className="text-slate-300">·</span>
+                    <a
+                      href={aresUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-0.5 font-semibold text-emerald-600 hover:underline"
+                    >
+                      ověřit v ARES <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </>
+                )}
+              </p>
+            )}
+
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500">
               {reviewCount > 0 && (
                 <span className="inline-flex items-center gap-1.5">
@@ -200,7 +245,8 @@ export default async function ProfilPage({ params }: Props) {
       <div className="mt-5 flex flex-wrap gap-2">
         {profile.ico_verified && (
           <span className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">
-            <BadgeCheck className="h-4 w-4 text-emerald-600" /> IČO ověřeno v ARES
+            <BadgeCheck className="h-4 w-4 text-emerald-600" />
+            {profile.ico ? `IČO ${profile.ico} ověřeno v ARES` : 'IČO ověřeno v ARES'}
           </span>
         )}
         {responseLabel && (

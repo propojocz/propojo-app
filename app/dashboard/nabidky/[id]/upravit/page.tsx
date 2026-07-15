@@ -40,7 +40,8 @@ export default async function UpravitSluzbuPage({ params }: Props) {
 
   return (
     <main className="min-h-screen bg-slate-50">
-      <div className="mx-auto max-w-2xl px-4 py-12 sm:px-6">
+      {/* max-w-6xl (dřív 2xl) — aby se vedle formuláře vešel živý náhled karty */}
+      <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
         <Link
           href="/dashboard/nabidky"
           className="mb-8 inline-flex items-center gap-1.5 text-sm text-slate-500 transition-colors hover:text-slate-800"

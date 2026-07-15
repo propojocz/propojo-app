@@ -2,10 +2,17 @@
 // components/ui/OrderButton.tsx
 // Objednání služby. Adresu (město) řešíme JEN když se služba koná u zákazníka.
 // location_type služby: 'u_poskytovatele' | 'u_zakaznika' | 'oboji'
+//
+// POJMY (držet je oddělené, jinak se to plete):
+//   Objednávka = konkrétní zakázka u konkrétního živnostníka (tohle tlačítko)
+//   Poptávka   = veřejný inzerát na nástěnce /poptavky, když zákazník nikoho nenašel
+//
+// Tlačítko musí říkat, co se po kliknutí stane. Dřív tu bylo „domluvit cenu",
+// přestože se ve skutečnosti zakládá objednávka, kterou živnostník potvrzuje.
 
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle2, Loader2, MessageSquare, LogIn, MapPin, Home, Store } from 'lucide-react'
+import { CheckCircle2, Loader2, LogIn, MapPin, Home, Store, CalendarCheck, FileSearch } from 'lucide-react'
 import Link from 'next/link'
 import { createOrder } from '@/lib/actions/orders'
 
@@ -29,7 +36,10 @@ export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAg
   const [errorMsg, setErrorMsg] = useState('')
 
   const isModelB = paymentModel === 'B'
-  const ctaLabel = 'domluvit cenu'
+
+  // Text tlačítka podle toho, co se REÁLNĚ stane
+  const ctaLabel = isModelB ? 'Objednat nacenění' : 'Objednat službu'
+  const CtaIcon = isModelB ? FileSearch : CalendarCheck
 
   // Ptáme se na město jen když se služba koná u zákazníka
   const isChoice = locationType === 'oboji'
@@ -40,7 +50,7 @@ export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAg
     return (
       <Link href={`/prihlasit?next=/sluzby/${serviceId}`} className="btn-primary w-full">
         <LogIn className="h-4 w-4" />
-        Přihlásit a objednat
+        Přihlásit se a objednat
       </Link>
     )
   }
@@ -77,8 +87,15 @@ export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAg
         className="flex flex-col items-center gap-2 rounded-xl bg-emerald-50 p-4 text-center"
       >
         <CheckCircle2 className="h-8 w-8 text-emerald-500" />
-        <p className="font-bold text-emerald-800">Poptávka odeslána!</p>
-        <p className="text-xs text-emerald-700">Živnostník vás brzy zkontaktuje.</p>
+        <p className="font-bold text-emerald-800">Objednávka odeslána</p>
+        <p className="text-xs leading-relaxed text-emerald-700">
+          {isModelB
+            ? 'Živnostník se vám ozve a domluvíte se na termínu prohlídky.'
+            : 'Živnostník ji potvrdí a ozve se vám.'}
+        </p>
+        <Link href="/dashboard/objednavky" className="mt-1 text-xs font-bold text-emerald-700 underline">
+          Sledovat v Objednávkách
+        </Link>
       </motion.div>
     )
   }
@@ -103,7 +120,7 @@ export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAg
                     onClick={() => setPlace('u_poskytovatele')}
                     className={`flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${place === 'u_poskytovatele' ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                   >
-                    <Store className="h-4 w-4" /> U poskytovatele
+                    <Store className="h-4 w-4" /> U živnostníka
                   </button>
                   <button
                     type="button"
@@ -133,11 +150,11 @@ export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAg
               </div>
             )}
 
-            {/* Info když se jde za poskytovatelem */}
+            {/* Info když se jde za živnostníkem */}
             {!needsCity && (
               <div className="flex items-start gap-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
                 <Store className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-                <span>Služba probíhá na adrese poskytovatele. Adresu uvidíte po přijetí objednávky.</span>
+                <span>Služba probíhá na adrese živnostníka. Adresu uvidíte po přijetí objednávky.</span>
               </div>
             )}
 
@@ -160,32 +177,41 @@ export default function OrderButton({ serviceId, providerId, isLoggedIn, priceAg
       {state === 'idle' && (
         <button
           onClick={() => setState('form')}
-          className="btn-primary w-full"
+          className="btn-primary w-full py-3 text-base"
         >
-          <MessageSquare className="h-4 w-4" />
+          <CtaIcon className="h-4 w-4" />
           {ctaLabel}
         </button>
       )}
 
       {(state === 'form' || state === 'error') && (
-        <div className="flex gap-2">
-          <button
-            onClick={() => setState('idle')}
-            className="btn-secondary flex-1"
-          >
-            Zrušit
-          </button>
-          <button
-            onClick={handleOrder}
-            className="btn-primary flex-1"
-          >
-            Odeslat poptávku
-          </button>
-        </div>
+        <>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setState('idle')}
+              className="btn-secondary flex-1"
+            >
+              Zrušit
+            </button>
+            <button
+              onClick={handleOrder}
+              className="btn-primary flex-1"
+            >
+              Odeslat objednávku
+            </button>
+          </div>
+
+          {/* Právě tady vzniká závazek — proto tu musí být jasné, s kým.
+              Propojo je zprostředkovatel, ne strana smlouvy. */}
+          <p className="text-center text-[11px] leading-relaxed text-slate-400">
+            Objednávkou vzniká smlouva přímo mezi vámi a živnostníkem.
+            Propojo je pouze zprostředkovatel.
+          </p>
+        </>
       )}
 
       {state === 'loading' && (
-        <button disabled className="btn-primary w-full opacity-75">
+        <button disabled className="btn-primary w-full py-3 text-base opacity-75">
           <Loader2 className="h-4 w-4 animate-spin" />
           Odesílám…
         </button>

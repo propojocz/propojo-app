@@ -3,7 +3,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { Resend } from 'resend'
-import { newOrderEmail, orderStatusEmail } from '@/lib/email/templates'
+import { newOrderEmail, orderPlacedEmail, orderStatusEmail } from '@/lib/email/templates'
 import type { ActionResult, OrderStatus } from './types'
 import { createNotification } from '@/lib/actions/notifications'
 import { refundDeposit } from '@/lib/actions/payout'
@@ -26,6 +26,37 @@ async function getUserEmail(userId: string): Promise<string | null> {
   } catch {
     return null
   }
+}
+
+// ── Formátování pro e-maily ────────────────────────────────
+function fmtPrice(price?: number | null, unit?: string | null, isModelB?: boolean): string | undefined {
+  if (isModelB) return 'Nacenění na místě'
+  const p = Number(price ?? 0)
+  if (p <= 0) return 'Dohodou'
+  return unit ? `${p.toLocaleString('cs-CZ')} Kč/${unit}` : `${p.toLocaleString('cs-CZ')} Kč`
+}
+
+function fmtMoney(amount?: number | null): string | undefined {
+  const a = Number(amount ?? 0)
+  return a > 0 ? `${a.toLocaleString('cs-CZ')} Kč` : undefined
+}
+
+function fmtDate(iso?: string | null): string | undefined {
+  if (!iso) return undefined
+  try {
+    return new Date(iso).toLocaleString('cs-CZ', {
+      day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    })
+  } catch { return undefined }
+}
+
+// Krátký popis storno podmínek do e-mailu.
+// (Musí odpovídat tomu, co vidí zákazník u služby — kdyby se lišilo, je to matoucí.)
+const CANCELLATION_TEXT: Record<string, string> = {
+  zadna: 'Zrušit můžete kdykoli, záloha se vrací v plné výši.',
+  mirna: 'Při zrušení více než 24 hodin předem se záloha vrací v plné výši.',
+  standardni: 'Při zrušení více než 48 hodin předem se záloha vrací v plné výši.',
+  prisna: 'Při zrušení méně než 7 dní předem záloha propadá živnostníkovi.',
 }
 
 async function sendNotification(to: string, subject: string, html: string) {
@@ -103,7 +134,7 @@ export async function createOrder(values: {
       type: 'status_change',
       orderId: data.id,
       actorId: user.id,
-      title: `Nová poptávka od ${senderProfile?.full_name ?? 'zákazníka'}`,
+      title: `Nová objednávka od ${senderProfile?.full_name ?? 'zákazníka'}`,
       preview: svc?.title ?? null,
     })
   } catch (err) {
@@ -114,28 +145,55 @@ export async function createOrder(values: {
     const [
       { data: service },
       { data: clientProfile },
-      { data: providerProfile },
+      { data: providerRow },
       providerEmail,
     ] = await Promise.all([
-      supabase.from('services').select('title, price, price_unit, city').eq('id', values.service_id).single(),
+      supabase.from('services').select('title, price, price_unit, city, payment_model').eq('id', values.service_id).single(),
       supabase.from('profiles').select('full_name').eq('id', user.id).single(),
-      supabase.from('profiles').select('full_name').eq('id', values.provider_id).single(),
+      // Tři jména: marketingový název + ověřená identita z ARES
+      supabase.from('profiles').select('full_name, display_name, company_name, ico').eq('id', values.provider_id).single(),
       getUserEmail(values.provider_id),
     ])
 
-    if (service && clientProfile && providerEmail) {
-      const sv = service as any
+    const sv = service as any
+    const pr = providerRow as any
+    const clientName = (clientProfile as any)?.full_name ?? 'Zákazník'
+
+    const providerDisplayName = pr?.display_name || pr?.company_name || pr?.full_name || 'Živnostník'
+    const providerLegalName = pr?.company_name || pr?.full_name || null
+    const isModelB = sv?.payment_model === 'B'
+    const city = values.location_city ?? sv?.city ?? undefined
+
+    // a) ŽIVNOSTNÍKOVI — máte novou objednávku
+    if (sv && providerEmail) {
       const { subject, html } = newOrderEmail({
-        providerName: (providerProfile as any)?.full_name ?? 'Živnostník',
-        clientName: (clientProfile as any).full_name,
+        providerName: providerDisplayName,
+        clientName,
         serviceTitle: sv.title,
         message: values.message,
         price: sv.price,
         priceUnit: sv.price_unit,
-        city: sv.city,
+        city: city ?? '—',
         orderUrl: `${APP_URL}/dashboard/objednavky`,
       })
       await sendNotification(providerEmail, subject, html)
+    }
+
+    // b) ZÁKAZNÍKOVI — potvrzení, že objednávka odešla (dřív nedostal NIC).
+    //    Už tady uvádíme, s kým bude smlouva — ať to má v ruce od začátku.
+    if (sv && user.email) {
+      const { subject, html } = orderPlacedEmail({
+        clientName,
+        serviceTitle: sv.title,
+        providerDisplayName,
+        providerLegalName,
+        providerIco: pr?.ico ?? null,
+        priceText: fmtPrice(values.price_agreed ?? sv.price, sv.price_unit, isModelB),
+        city,
+        orderUrl: `${APP_URL}/dashboard/objednavky`,
+        isModelB,
+      })
+      await sendNotification(user.email, subject, html)
     }
   } catch (err) {
     console.error('[createOrder] e-mail:', err)
@@ -228,10 +286,12 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   // Notifikace zákazníkovi
   try {
     const STATUS_TEXT: Record<string, string> = {
-      prijato: 'Vaše poptávka byla přijata',
+      prijato: 'Vaše objednávka byla přijata',
       v_procesu: 'Práce na vaší objednávce byla zahájena',
-      ceka_potvrzeni: 'Poskytovatel označil zakázku jako splněnou – potvrďte prosím',
+      ceka_potvrzeni: 'Živnostník označil zakázku za hotovou – potvrďte prosím',
+      dokonceno: 'Objednávka je dokončená',
       zruseno: 'Vaše objednávka byla zrušena',
+      spor: 'U objednávky evidujeme spor',
     }
     if (ordCheck.customer_id !== user.id) {
       const { data: svc } = await supabase
@@ -249,11 +309,23 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
     console.error('[updateOrderStatus] notifikace:', err)
   }
 
-  // E-mail zákazníkovi
+  // ── E-MAIL ZÁKAZNÍKOVI ────────────────────────────────────────────
+  // U stavu 'prijato' je to PRÁVNĚ NEJDŮLEŽITĚJŠÍ e-mail celé aplikace:
+  // je to doklad o tom, že závazek vznikl — a S KÝM. Proto tam posíláme
+  // plnou ověřenou identitu živnostníka (jméno z ARES + IČO), ne jen
+  // marketingový název. Na kartě smí být „Salon Bella"; v e-mailu, kde
+  // zákazník drží v ruce závazek, musí vědět, kdo za tím stojí.
   try {
     const { data: order } = await supabase
       .from('orders')
-      .select('customer_id, services(title), profiles!orders_provider_id_fkey(full_name)')
+      .select(`
+        customer_id,
+        scheduled_at,
+        location_city,
+        total_price,
+        services(title, price, price_unit, payment_model, deposit_amount, quote_fee, cancellation_policy, city),
+        profiles!orders_provider_id_fkey(full_name, display_name, company_name, ico, phone)
+      `)
       .eq('id', orderId)
       .single() as { data: any }
 
@@ -264,12 +336,35 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
       ])
 
       if (clientEmail) {
+        const sv = order.services ?? {}
+        const pr = order.profiles ?? {}
+        const isModelB = sv.payment_model === 'B'
+
+        const providerDisplayName = pr.display_name || pr.company_name || pr.full_name || 'Živnostník'
+        const providerLegalName = pr.company_name || pr.full_name || null
+
+        // Záloha (Model A) nebo poplatek za nacenění (Model B)
+        const depositAmount = isModelB ? sv.quote_fee : sv.deposit_amount
+        const depositLabel = fmtMoney(depositAmount)
+
         const { subject, html } = orderStatusEmail({
           clientName: (clientProfile as any)?.full_name ?? 'Zákazník',
-          serviceTitle: order.services?.title ?? 'Služba',
-          providerName: order.profiles?.full_name ?? 'Živnostník',
+          serviceTitle: sv.title ?? 'Služba',
+          providerName: providerDisplayName,
           status,
-          orderUrl: `${APP_URL}/dashboard/objednavky`,
+          orderUrl: `${APP_URL}/dashboard/objednavky/${orderId}`,
+
+          // ── ověřená identita — jádro celé věci ──
+          providerLegalName,
+          providerIco: pr.ico ?? null,
+          providerPhone: pr.phone ?? null,
+
+          // ── detaily závazku ──
+          priceText: fmtPrice(order.total_price ?? sv.price, sv.price_unit, isModelB),
+          depositText: depositLabel ? `${depositLabel}${isModelB ? ' (za nacenění)' : ' (započítá se do ceny)'}` : undefined,
+          scheduledAt: fmtDate(order.scheduled_at),
+          city: order.location_city ?? sv.city ?? undefined,
+          cancellationText: sv.cancellation_policy ? CANCELLATION_TEXT[sv.cancellation_policy] : undefined,
         })
         await sendNotification(clientEmail, subject, html)
       }
