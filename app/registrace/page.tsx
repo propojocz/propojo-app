@@ -98,7 +98,7 @@ export default function RegistracePage() {
         <ul className="relative z-10 space-y-4">
           {[
             'Ověření poskytovatelé přes ARES',
-            'Rezervační záloha = jistota',
+            'Záloha zpět, když řemeslník nedorazí',
             'Bez provizí pro poskytovatele',
           ].map((t) => (
             <li key={t} className="flex items-center gap-3 text-[15px]">
@@ -216,14 +216,23 @@ export default function RegistracePage() {
 
               <div>
                 <label className="mb-1.5 block text-sm font-bold text-slate-800">Heslo znovu</label>
-                <input
-                  {...f('password_confirm')}
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="Zadejte heslo ještě jednou"
-                  className={`w-full rounded-xl border-[1.5px] px-4 py-3 text-[15px] outline-none transition focus:border-emerald-500 ${
-                    errors.password_confirm ? 'border-red-400' : 'border-slate-200'
-                  }`}
-                />
+                <div className="relative">
+                  <input
+                    {...f('password_confirm')}
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="Zadejte heslo ještě jednou"
+                    className={`w-full rounded-xl border-[1.5px] px-4 py-3 pr-10 text-[15px] outline-none transition focus:border-emerald-500 ${
+                      errors.password_confirm ? 'border-red-400' : 'border-slate-200'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
                 {errors.password_confirm && (
                   <p className="mt-1.5 text-sm text-red-600">{errors.password_confirm.message}</p>
                 )}

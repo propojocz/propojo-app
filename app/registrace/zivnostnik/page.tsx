@@ -228,7 +228,12 @@ export default function ZivnostnikRegistracePage() {
                   </div>
                   <div className="space-y-1.5">
                     <label className="form-label">Heslo znovu *</label>
-                    <input {...f('password_confirm')} type={showPassword ? 'text' : 'password'} placeholder="Zadejte heslo ještě jednou" className={`form-input ${errors.password_confirm ? 'form-input-error' : ''}`} />
+                    <div className="relative">
+                      <input {...f('password_confirm')} type={showPassword ? 'text' : 'password'} placeholder="Zadejte heslo ještě jednou" className={`form-input pr-10 ${errors.password_confirm ? 'form-input-error' : ''}`} />
+                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
                     {errors.password_confirm && <p className="form-error">{errors.password_confirm.message}</p>}
                   </div>
                   <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 text-xs text-slate-500">

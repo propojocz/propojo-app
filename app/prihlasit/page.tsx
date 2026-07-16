@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Eye, EyeOff, Loader2, AlertCircle, Check } from 'lucide-react'
+import { Eye, EyeOff, Loader2, AlertCircle, Check, CheckCircle2 } from 'lucide-react'
 import { login } from '@/lib/actions/auth'
 
 const schema = z.object({
@@ -19,6 +19,7 @@ function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const next = searchParams.get('next') ?? '/'
+  const potvrzeno = searchParams.get('potvrzeno') === '1'
   const [showPassword, setShowPassword] = useState(false)
   const [serverError, setServerError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -61,8 +62,8 @@ function LoginForm() {
         <ul className="relative z-10 space-y-4">
           {[
             'Ověření poskytovatelé přes ARES',
-            'Rezervační záloha = jistota',
-            'Bez skrytých poplatků',
+            'Záloha zpět, když řemeslník nedorazí',
+            'Žádné provize ze zakázek',
           ].map((t) => (
             <li key={t} className="flex items-center gap-3 text-[15px]">
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500/20">
@@ -83,7 +84,14 @@ function LoginForm() {
           
 
           <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Přihlášení</h1>
-          <p className="mb-8 mt-1.5 text-slate-500">Zadejte své údaje pro vstup do účtu.</p>
+          <p className="mb-6 mt-1.5 text-slate-500">Zadejte své údaje pro vstup do účtu.</p>
+
+          {potvrzeno && (
+            <div className="mb-6 flex items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+              <span><strong>E-mail potvrzen.</strong> Teď se můžete přihlásit.</span>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div>

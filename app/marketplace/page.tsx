@@ -132,13 +132,33 @@ async function ServiceList({
   }
 
   const { data: services } = await query.limit(60)
-  // Zobrazujeme jen poskytovatele, kteří prošli Stripe ověřením (KYC).
-  // Tím se zároveň brání zneužití cizího IČO — podvodník KYC neprojde.
-  let sorted = ((services as ServiceWithProvider[]) ?? []).filter(
-    (s) =>
-      (s.profiles as any)?.is_suspended !== true &&
-      (s.profiles as any)?.stripe_onboarding_done === true
+
+  // ── VIDITELNOST = AKTIVNÍ PŘEDPLATNÉ ──────────────────────────────────
+  // Nabídka je v marketplace vidět jen tehdy, když má poskytovatel aktivní
+  // (nebo zkušební) předplatné. To je ta byznysová brána — bez předplatného
+  // se profil ani karty nezobrazují. Napojení Stripe Connect (přijímání
+  // plateb) je samostatná věc a viditelnost neřídí.
+  const candidateProviderIds = Array.from(
+    new Set(((services as ServiceWithProvider[]) ?? []).map((s) => (s.profiles as any)?.id ?? s.provider_id))
   )
+
+  const activeSubscribers = new Set<string>()
+  if (candidateProviderIds.length > 0) {
+    const { data: subs } = await supabase
+      .from('subscriptions')
+      .select('user_id, status')
+      .in('user_id', candidateProviderIds)
+      .in('status', ['active', 'trialing'])
+    for (const row of (subs ?? []) as any[]) activeSubscribers.add(row.user_id)
+  }
+
+  let sorted = ((services as ServiceWithProvider[]) ?? []).filter((s) => {
+    const pid = (s.profiles as any)?.id ?? s.provider_id
+    return (
+      (s.profiles as any)?.is_suspended !== true &&
+      activeSubscribers.has(pid)
+    )
+  })
 
   if (minRating) {
     const min = Number(minRating)

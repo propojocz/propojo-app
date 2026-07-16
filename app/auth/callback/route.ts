@@ -71,7 +71,12 @@ export async function GET(request: Request) {
       if (data.user) {
         await maybeSendWelcome(data.user.id, data.user.email)
       }
-      return NextResponse.redirect(`${origin}${next}`)
+      // Odhlásíme session vzniklou z potvrzovacího odkazu. Bez toho by se mohlo stát,
+      // že po kliknutí na potvrzení skončíš přihlášený pod účtem, který byl v prohlížeči
+      // přihlášený předtím (přesně ten zmatek „potvrdil jsem A, ale jsem přihlášený jako B").
+      // Uživatel se pak čistě přihlásí sám.
+      await supabase.auth.signOut()
+      return NextResponse.redirect(`${origin}/prihlasit?potvrzeno=1`)
     }
   }
 
