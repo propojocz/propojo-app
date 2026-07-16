@@ -2,14 +2,17 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { PlusCircle, Eye, EyeOff, Trash2, Loader2, BarChart2, Pencil, CalendarPlus } from 'lucide-react'
+import { PlusCircle, Eye, EyeOff, Trash2, Loader2, BarChart2, Pencil, CalendarPlus, ArrowRight } from 'lucide-react'
 import { toggleServiceActive, deleteService } from '@/lib/actions/services'
+import { createClient } from '@/lib/supabase/client'
 import { CATEGORY_META } from '@/types/database'
 
 export default function NabidkyPage() {
   const [services, setServices] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [actionId, setActionId] = useState<string | null>(null)
+  // Má poskytovatel aktivní předplatné? Bez něj se nabídky v marketplace nezobrazují.
+  const [hasActiveSub, setHasActiveSub] = useState<boolean | null>(null)
 
   const fetchServices = async () => {
     setLoading(true)
@@ -20,6 +23,23 @@ export default function NabidkyPage() {
   }
 
   useEffect(() => { fetchServices() }, [])
+
+  // Zjisti, jestli má uživatel aktivní (nebo zkušební) předplatné
+  useEffect(() => {
+    const checkSub = async () => {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { setHasActiveSub(false); return }
+      const { data } = await supabase
+        .from('subscriptions')
+        .select('status')
+        .eq('user_id', user.id)
+        .in('status', ['active', 'trialing'])
+        .limit(1)
+      setHasActiveSub((data?.length ?? 0) > 0)
+    }
+    checkSub()
+  }, [])
 
   const handleToggle = async (id: string, current: boolean) => {
     setActionId(id)
@@ -69,6 +89,30 @@ export default function NabidkyPage() {
         </Link>
       </div>
 
+      {/* Upozornění: bez předplatného se nabídky nezobrazují zákazníkům */}
+      {hasActiveSub === false && services.length > 0 && (
+        <div className="flex flex-col gap-3 rounded-2xl border-2 border-amber-300 bg-amber-50/50 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100">
+              <EyeOff className="h-5 w-5 text-amber-600" />
+            </div>
+            <div>
+              <p className="font-bold text-slate-900">Vaše nabídky zatím nikdo nevidí</p>
+              <p className="text-sm leading-relaxed text-slate-600">
+                Nabídky máte připravené, ale <strong>v marketplace se zobrazí až po aktivaci předplatného</strong>.
+                První měsíc je zdarma.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/dashboard/predplatne"
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-amber-500 px-5 py-2.5 font-bold text-white transition hover:bg-amber-600"
+          >
+            Aktivovat předplatné <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="h-8 w-8 animate-spin text-emerald-400" />
@@ -93,9 +137,15 @@ export default function NabidkyPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <Link href={`/sluzby/${s.id}`} className="truncate font-bold text-slate-900 hover:text-emerald-700">{s.title}</Link>
-                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${s.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                      {s.is_active ? 'Aktivní' : 'Skrytá'}
-                    </span>
+                    {!s.is_active ? (
+                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">Skrytá</span>
+                    ) : hasActiveSub === false ? (
+                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700" title="Bez předplatného se nabídka nezobrazuje zákazníkům">
+                        Nezveřejněno
+                      </span>
+                    ) : (
+                      <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">Aktivní</span>
+                    )}
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
                     <p className="text-sm text-slate-500">{CATEGORY_META[s.category as keyof typeof CATEGORY_META]?.label ?? s.category} · {priceText(s)} · {s.city}</p>
