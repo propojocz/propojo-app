@@ -118,8 +118,16 @@ export async function POST(req: Request) {
   const sig = headers().get('stripe-signature')
   const secret = process.env.STRIPE_WEBHOOK_SECRET
 
-  if (!secret || !sig) {
-    console.error('[webhook] Chybí STRIPE_WEBHOOK_SECRET nebo podpis')
+  // Stripe při ukládání endpointu (a u „Send test") pošle ping BEZ podpisu.
+  // Takový request nemáme jak ověřit — ale musíme vrátit 2xx, jinak Stripe
+  // odmítne endpoint uložit („Received status code 403"). Skutečné události
+  // vždy podpis mají, takže tímhle nic nepropustíme.
+  if (!sig) {
+    return NextResponse.json({ received: true, note: 'ping without signature' })
+  }
+
+  if (!secret) {
+    console.error('[webhook] Chybí STRIPE_WEBHOOK_SECRET')
     return NextResponse.json({ error: 'Konfigurace webhooku chybí' }, { status: 400 })
   }
 
