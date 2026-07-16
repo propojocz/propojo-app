@@ -1,8 +1,6 @@
 // app/api/register-provider/route.ts
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { Resend } from 'resend'
-import { welcomeEmail } from '@/lib/email/templates'
 import { z } from 'zod'
 
 const schema = z.object({
@@ -105,23 +103,10 @@ export async function POST(request: Request) {
         console.error('[register-provider] uložení profilu selhalo:', profileError)
       }
 
-      // Welcome email
-      try {
-        const resend = new Resend(process.env.RESEND_API_KEY)
-        const { subject, html } = welcomeEmail({
-          name: full_name,
-          isProvider: true,
-          loginUrl: `${process.env.NEXT_PUBLIC_APP_URL}/prihlasit`,
-        })
-        await resend.emails.send({
-          from: 'Propojo <notifikace@propojo.cz>',
-          to: email,
-          subject,
-          html,
-        })
-      } catch (err) {
-        console.error('[register-provider] welcome email error:', err)
-      }
+      // POZOR: uvítací mail se NEposílá tady. Odesílá se až po POTVRZENÍ e-mailu
+      // v app/auth/callback/route.ts (s příznakem welcome_sent, aby přišel jen jednou).
+      // Kdyby se posílal už tady, dorazil by SOUČASNĚ s potvrzovacím mailem —
+      // ještě než uživatel vůbec potvrdil adresu.
     }
 
     return NextResponse.json({ success: true })
