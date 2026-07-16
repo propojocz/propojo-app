@@ -59,14 +59,25 @@ async function getProvider(db: ReturnType<typeof admin>, userId: string) {
 }
 
 // Z Stripe subscription objektu složí řádek pro naši tabulku
+// Období předplatného. V novějších verzích Stripe API (dahlia) jsou tato pole
+// na položce předplatného (items.data[0]), ne přímo na subscription. Bereme je
+// odtud, s fallbackem, ať to funguje napříč verzemi.
+function periodBounds(sub: Stripe.Subscription): { start: number | null; end: number | null } {
+  const item = sub.items?.data?.[0] as any
+  const anySub = sub as any
+  const start = item?.current_period_start ?? anySub.current_period_start ?? null
+  const end = item?.current_period_end ?? anySub.current_period_end ?? null
+  return { start, end }
+}
+
 function subRow(sub: Stripe.Subscription, userId: string, billing: string | null) {
-  const item = sub.items.data[0]
+  const { start, end } = periodBounds(sub)
   return {
     user_id: userId,
     status: sub.status, // 'trialing' | 'active' | 'past_due' | 'canceled' …
     billing_period: billing,
-    current_period_start: new Date(sub.current_period_start * 1000).toISOString(),
-    current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+    current_period_start: start ? new Date(start * 1000).toISOString() : null,
+    current_period_end: end ? new Date(end * 1000).toISOString() : null,
     trial_end: sub.trial_end ? new Date(sub.trial_end * 1000).toISOString() : null,
     stripe_subscription_id: sub.id,
     stripe_customer_id: typeof sub.customer === 'string' ? sub.customer : sub.customer.id,
@@ -177,9 +188,12 @@ export async function POST(req: Request) {
         if (p.email) {
           const { subject, html } = subscriptionCanceledEmail({
             providerName: p.name,
-            activeUntil: new Intl.DateTimeFormat('cs-CZ', { dateStyle: 'long' }).format(
-              new Date(sub.current_period_end * 1000)
-            ),
+            activeUntil: (() => {
+              const { end } = periodBounds(sub)
+              return end
+                ? new Intl.DateTimeFormat('cs-CZ', { dateStyle: 'long' }).format(new Date(end * 1000))
+                : '—'
+            })(),
             subscriptionUrl: `${APP_URL}/dashboard/predplatne`,
           })
           await sendMail(p.email, subject, html)
