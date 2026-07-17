@@ -1,6 +1,7 @@
 // app/marketplace/page.tsx
 import { Suspense } from 'react'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import type { ServiceWithProvider } from '@/types/database'
 import ServiceCard from '@/components/ui/ServiceCard'
 import ServiceListSkeleton from '@/components/ui/ServiceListSkeleton'
@@ -144,7 +145,16 @@ async function ServiceList({
 
   const activeSubscribers = new Set<string>()
   if (candidateProviderIds.length > 0) {
-    const { data: subs } = await supabase
+    // POZOR: číst přes SERVICE ROLE, ne přes klienta s přihlášením uživatele.
+    // Tabulka subscriptions má RLS „každý vidí jen svoje" — běžný klient by tu
+    // vrátil jen předplatné přihlášeného (a nepřihlášenému NIC), takže by každý
+    // v marketplace viděl jen vlastní nabídky. Jde jen o ověření, kdo má aktivní
+    // předplatné — žádná citlivá data se nikam nezobrazují.
+    const adminDb = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+    const { data: subs } = await adminDb
       .from('subscriptions')
       .select('user_id, status')
       .in('user_id', candidateProviderIds)
