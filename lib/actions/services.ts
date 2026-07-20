@@ -32,6 +32,11 @@ const serviceSchema = z.object({
 
   // Kde se služba vykonává
   location_type: z.enum(['u_poskytovatele','u_zakaznika','oboji'] as const).optional(),
+  // Adresa provozovny (karta = služba NEBO pobočka)
+  address: z.string().max(200).nullable().optional(),
+  address_lat: z.number().nullable().optional(),
+  address_lng: z.number().nullable().optional(),
+  address_public: z.boolean().optional(),
   // Dojezdová vzdálenost (relevantní jen když poskytovatel jezdí za zákazníkem)
   radius_km: z.number().int().min(1).max(300).nullable().optional(),
 
@@ -48,6 +53,9 @@ function normalize(data: z.infer<typeof serviceSchema>) {
   if (!d.location_type) d.location_type = 'u_zakaznika'
   // Radius dává smysl jen když poskytovatel jezdí za zákazníkem
   if (d.location_type === 'u_poskytovatele') d.radius_km = null
+  // Adresa provozovny dává smysl jen když zákazník chodí za poskytovatelem
+  if (d.location_type === 'u_zakaznika') { d.address = null; d.address_lat = null; d.address_lng = null }
+  if (d.address_public == null) d.address_public = true
   if (d.payment_model === 'B') {
     d.price = 0
     d.price_type = 'on_agreement'
@@ -142,10 +150,20 @@ export async function deleteService(id: string): Promise<ActionResult> {
     } as any
   }
 
+  // Nejdřív smazat ZÁVISLOSTI — služba má vazby v jiných tabulkách a databáze
+  // by tvrdé smazání odmítla (foreign key). Přesně proto dřív mazání „neprošlo
+  // ani v Supabase": delete spadl na vazbě a nic se nestalo.
+  // (Objednávky tu být nemůžou — ty jsme vyloučili výš.)
+  await supabase.from('service_subcategories').delete().eq('service_id', id)
+  // Volné termíny navázané na tuto službu (pokud tabulka/sloupec existuje,
+  // smažou se; případnou chybu ignorujeme — jen by znamenala, že vazba není).
+  await (supabase.from('availability_slots') as any).delete().eq('service_id', id)
+
   const { error } = await (supabase.from('services') as any).delete().eq('id', id).eq('provider_id', user.id)
   if (error) {
     console.error('DELETE services error:', error)
-    return { success: false, error: 'Nepodařilo se smazat nabídku. Zkuste to prosím znovu, nebo ji místo mazání skryjte.' }
+    // Ukážeme i technický detail — kdyby bránila ještě jiná vazba, ať víme která.
+    return { success: false, error: `Nepodařilo se smazat nabídku (${error.message ?? 'neznámá chyba'}). Můžete ji místo mazání skrýt.` }
   }
   revalidatePath('/'); revalidatePath('/marketplace')
   return { success: true, id }

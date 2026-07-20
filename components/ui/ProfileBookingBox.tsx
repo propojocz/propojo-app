@@ -6,7 +6,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { CalendarDays, Loader2, CheckCircle2, LogIn, Bell } from 'lucide-react'
+import { CalendarDays, Loader2, CheckCircle2, LogIn } from 'lucide-react'
 import { reserveSlot } from '@/lib/actions/slots'
 
 type Slot = { id: string; starts_at: string; ends_at: string; service_id: string; service_title: string }
@@ -54,11 +54,10 @@ export default function ProfileBookingBox({
 
       {slots.length === 0 ? (
         <>
+          {/* Hlídání termínů (waitlist) je Fáze 2 — tlačítko bylo jen vizuální slib
+              bez funkce, tak ho skrýváme, dokud waitlist nepostavíme. */}
           <p className="mt-2 text-sm text-slate-500">Zrovna tu nejsou volné termíny.</p>
-          <button className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">
-            <Bell className="h-4 w-4" /> Hlídat nové termíny
-          </button>
-          <p className="mt-2 text-center text-[11px] text-slate-400">Ozveme se, jakmile přidá volno.</p>
+          <p className="mt-1 text-[11px] text-slate-400">Zkuste se podívat později — poskytovatel termíny průběžně doplňuje.</p>
         </>
       ) : done ? (
         <div className="mt-4 flex flex-col items-center gap-2 py-4 text-center">
@@ -99,9 +98,6 @@ export default function ProfileBookingBox({
             </Link>
           )}
 
-          <button className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50">
-            <Bell className="h-3.5 w-3.5" /> Hlídat další termíny
-          </button>
         </>
       )}
     </div>

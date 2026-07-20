@@ -21,6 +21,7 @@ import ServiceCard from '@/components/ui/ServiceCard'
 import ImageUpload from '@/components/ui/ImageUpload'
 import GalleryUpload from '@/components/ui/GalleryUpload'
 import CancellationSlider from '@/components/ui/CancellationSlider'
+import AddressInput from '@/components/ui/AddressInput'
 import SearchAutocomplete from '@/components/ui/SearchAutocomplete'
 import type { CancellationKey } from '@/lib/cancellation'
 
@@ -54,6 +55,12 @@ const schema = z.object({
   location_type: z.enum(['u_poskytovatele','u_zakaznika','oboji']),
   // Dojezdová vzdálenost (relevantní jen když poskytovatel jezdí za zákazníkem)
   radius_km: z.number().int().min(1).max(300).nullable().optional(),
+
+  // Adresa provozovny (jen u_poskytovatele/oboji) — karta = služba NEBO pobočka
+  address: z.string().max(200).nullable().optional(),
+  address_lat: z.number().nullable().optional(),
+  address_lng: z.number().nullable().optional(),
+  address_public: z.boolean().optional(),
 
   // Storno politika
   cancellation_policy: z.enum(['zadna','mirna','standardni','prisna']),
@@ -123,6 +130,10 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
       quote_days: init.quote_days ?? null,
       location_type: (init.location_type as 'u_poskytovatele'|'u_zakaznika'|'oboji') ?? 'u_zakaznika',
       radius_km: init.radius_km ?? null,
+      address: init.address ?? null,
+      address_lat: init.address_lat ?? null,
+      address_lng: init.address_lng ?? null,
+      address_public: init.address_public ?? true,
       cancellation_policy: (init.cancellation_policy as CancellationKey) ?? 'zadna',
     } : {
       price_unit: 'hod',
@@ -137,6 +148,10 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
       quote_fee: null, price_per_km: null, free_km: null, quote_days: null,
       location_type: 'u_zakaznika',
       radius_km: null,
+      address: null,
+      address_lat: null,
+      address_lng: null,
+      address_public: true,
       cancellation_policy: 'zadna',
     },
   })
@@ -477,6 +492,49 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
           </p>
         </div>
 
+        {/* ============ 5b. ADRESA PROVOZOVNY ============ */}
+        {/* Karta = služba NEBO pobočka: nese vlastní přesnou adresu. Vyplňuje se
+            jen když zákazník chodí za poskytovatelem (u_poskytovatele / oboji). */}
+        <AnimatePresence>
+          {locationType !== 'u_zakaznika' && (
+            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-2 overflow-hidden">
+              <label className="form-label">Přesná adresa provozovny</label>
+              <AddressInput
+                defaultValue={watch('address')}
+                onPick={(a) => {
+                  setValue('address', a.address, { shouldValidate: true })
+                  setValue('address_lat', a.lat)
+                  setValue('address_lng', a.lng)
+                }}
+                onFreeText={(text) => {
+                  setValue('address', text || null)
+                  setValue('address_lat', null)
+                  setValue('address_lng', null)
+                }}
+              />
+              <p className="text-xs text-slate-400">
+                Vyberte adresu ze seznamu — zákazník pak uvidí špendlík na mapě a trefí k vám napoprvé.
+              </p>
+
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <input
+                  type="checkbox"
+                  checked={watch('address_public') ?? true}
+                  onChange={(e) => setValue('address_public', e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-slate-800">Zobrazit adresu veřejně</span>
+                  <span className="block text-xs leading-relaxed text-slate-500">
+                    Když vypnete, zákazníci uvidí jen město — přesnou adresu dostanou až po objednání.
+                    Hodí se, když pracujete z domova.
+                  </span>
+                </span>
+              </label>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* ============ 6. DOJEZDOVÁ VZDÁLENOST ============ */}
         <AnimatePresence>
           {locationType !== 'u_poskytovatele' && (
@@ -558,15 +616,27 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
                 ))}
               </div>
 
-              {/* Jednotka ceny — hned u typu ceny, patří logicky sem (netýká se Modelu B) */}
+              {/* Jednotka ceny — pilulky místo <select>: na mobilu se nativní select
+                  s appearance-none vykresloval nenápadně a šel přehlédnout. Tlačítka
+                  jsou vidět vždy a ladí se zbytkem formuláře. */}
               {priceType !== 'on_agreement' && (
                 <div className="space-y-1.5">
                   <label className="form-label">Jednotka ceny *</label>
-                  <div className="relative">
-                    <select {...f('price_unit')} className="form-input appearance-none pr-8">
-                      {PRICE_UNITS.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <div className="flex flex-wrap gap-1.5">
+                    {PRICE_UNITS.map(u => (
+                      <button
+                        key={u.value}
+                        type="button"
+                        onClick={() => setValue('price_unit', u.value as any)}
+                        className={`rounded-lg border px-3 py-2 text-sm font-bold transition-all ${
+                          priceUnit === u.value
+                            ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                            : 'border-slate-200 text-slate-500 hover:border-emerald-300 hover:text-slate-700'
+                        }`}
+                      >
+                        {u.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}
