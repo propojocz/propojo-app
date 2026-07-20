@@ -501,12 +501,12 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
               <label className="form-label">Přesná adresa provozovny</label>
               <AddressInput
                 defaultValue={watch('address')}
-                onPick={(a) => {
+                onPick={(a: { address: string; lat: number; lng: number }) => {
                   setValue('address', a.address, { shouldValidate: true })
                   setValue('address_lat', a.lat)
                   setValue('address_lng', a.lng)
                 }}
-                onFreeText={(text) => {
+                onFreeText={(text: string) => {
                   setValue('address', text || null)
                   setValue('address_lat', null)
                   setValue('address_lng', null)
