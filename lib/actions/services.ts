@@ -13,6 +13,8 @@ const serviceSchema = z.object({
   service_type: z.string().optional(),
   price: z.number().min(0).max(999999),
   price_unit: z.enum(['hod','kus','den','projekt','m2'] as const),
+  price_includes_material: z.boolean().optional(),
+  price_note: z.string().max(200).nullable().optional(),
   city: z.string().min(2).max(100),
   city_lat: z.number().nullable().optional(),
   city_lng: z.number().nullable().optional(),
@@ -56,8 +58,14 @@ function normalize(data: z.infer<typeof serviceSchema>) {
   // Adresa provozovny dává smysl jen když zákazník chodí za poskytovatelem
   if (d.location_type === 'u_zakaznika') { d.address = null; d.address_lat = null; d.address_lng = null }
   if (d.address_public == null) d.address_public = true
+  // Výchozí: materiál je v ceně (platí pro většinu služeb)
+  if (d.price_includes_material == null) d.price_includes_material = true
+
   if (d.payment_model === 'B') {
     d.price = 0
+    // U nacenění na místě nemá „co je v ceně" smysl — cena vzniká až po prohlídce
+    d.price_includes_material = true
+    d.price_note = null
     d.price_type = 'on_agreement'
     d.price_max = null
     d.deposit_amount = null
@@ -68,7 +76,7 @@ function normalize(data: z.infer<typeof serviceSchema>) {
     d.price_per_km = null
     d.free_km = null
     d.quote_days = null
-    if (d.price_type === 'on_agreement') { d.price = 0; d.price_max = null }
+    if (d.price_type === 'on_agreement') { d.price = 0; d.price_max = null; d.price_includes_material = true; d.price_note = null }
     else if (d.price_type === 'fixed') { d.price_max = null }
     if (d.deposit_amount != null && d.deposit_amount < 200) d.deposit_amount = 200
     if (d.deposit_amount == null) d.deposit_amount = 200

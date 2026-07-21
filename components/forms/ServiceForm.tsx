@@ -34,6 +34,9 @@ const schema = z.object({
   service_type: z.string().optional(),
   price: z.number({ invalid_type_error: 'Zadejte platnou cenu' }).min(0).max(999999),
   price_unit: z.enum(['hod','kus','den','projekt','m2']),
+  // Je v ceně materiál? A volitelné upřesnění ceny.
+  price_includes_material: z.boolean().optional(),
+  price_note: z.string().max(200).nullable().optional(),
   city: z.string().min(2, 'Zadejte město').max(100),
   city_lat: z.number().nullable().optional(),
   city_lng: z.number().nullable().optional(),
@@ -76,6 +79,8 @@ interface Props {
   mode: 'create' | 'edit'
   initialData?: Service
   onSuccess?: (id: string) => void
+  /** Má poskytovatel aktivní předplatné? Bez něj se nabídka po uložení nezveřejní. */
+  hasActiveSub?: boolean
 }
 
 const PRICE_UNITS = [
@@ -93,7 +98,7 @@ const DESCRIPTION_PLACEHOLDER = 'Např.: Této práci se věnuji už 6 let a má
 // pomocná: number | null z inputu
 const numOrNull = (v: string) => (v === '' || v == null ? null : Number(v))
 
-export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
+export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub = true }: Props) {
   const [categories, setCategories] = useState<Category[]>([])
   const [loadingCats, setLoadingCats] = useState(true)
   const [submitState, setSubmitState] = useState<'idle'|'loading'|'success'|'error'>('idle')
@@ -113,6 +118,8 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
       category: initialData.category,
       price: initialData.price ?? 0,
       price_unit: initialData.price_unit as any,
+      price_includes_material: init.price_includes_material ?? true,
+      price_note: init.price_note ?? null,
       city: initialData.city,
       city_lat: init.city_lat ?? null,
       city_lng: init.city_lng ?? null,
@@ -137,6 +144,8 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
       cancellation_policy: (init.cancellation_policy as CancellationKey) ?? 'zadna',
     } : {
       price_unit: 'hod',
+      price_includes_material: true,
+      price_note: null,
       subcategory_ids: [],
       city_lat: null,
       city_lng: null,
@@ -164,6 +173,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
   const cancellationPolicy = watch('cancellation_policy')
   const locationType = watch('location_type')
   const priceUnit = watch('price_unit')
+  const includesMaterial = watch('price_includes_material') ?? true
 
   // Načti kategorie z DB
   useEffect(() => {
@@ -488,7 +498,10 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
           />
           {errors.city && <p className="form-error">{errors.city.message}</p>}
           <p className="text-xs text-slate-400">
-            Vyberte obec ze seznamu (ne jen napište) — jinak nepůjde spočítat dojezdovou vzdálenost pro zákazníky.
+            Podle města vás zákazníci najdou ve vyhledávání a zobrazí se na kartě nabídky.
+            {locationType !== 'u_zakaznika'
+              ? ' Máte-li provozovnu, doplní se samo z adresy níže.'
+              : ' Vyberte obec ze seznamu (ne jen napište) — jinak nepůjde spočítat dojezdovou vzdálenost.'}
           </p>
         </div>
 
@@ -501,10 +514,16 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
               <label className="form-label">Přesná adresa provozovny</label>
               <AddressInput
                 defaultValue={watch('address')}
-                onPick={(a: { address: string; lat: number; lng: number }) => {
+                onPick={(a: { address: string; lat: number; lng: number; municipality: string }) => {
                   setValue('address', a.address, { shouldValidate: true })
                   setValue('address_lat', a.lat)
                   setValue('address_lng', a.lng)
+                  // Město působiště doplníme z adresy, ať ho nikdo nepíše dvakrát.
+                  // Přepisujeme jen prázdné pole — když si ho někdo vyplnil sám
+                  // (třeba jinou obec kvůli dojezdu), necháme mu ho být.
+                  if (!watch('city') && a.municipality) {
+                    setValue('city', a.municipality, { shouldValidate: true })
+                  }
                 }}
                 onFreeText={(text: string) => {
                   setValue('address', text || null)
@@ -661,6 +680,26 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
                 </div>
               )}
 
+              {/* Přepočet: cena za hodinu × délka. Bez tohoto by řemeslník mohl
+                  mít „500 Kč/hod" a délku 45 minut — zákazník na kartě uvidí
+                  hodinovou sazbu a nedojde mu, kolik reálně zaplatí. */}
+              {priceType === 'fixed' && priceUnit === 'hod' && Number(watch('price')) > 0 && Number(watch('duration_minutes')) > 0 && (
+                <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-relaxed text-slate-600">
+                  <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                  <span>
+                    Při sazbě <strong>{Number(watch('price')).toLocaleString('cs-CZ')} Kč/hod</strong> a délce{' '}
+                    <strong>{Number(watch('duration_minutes'))} min</strong> zaplatí zákazník přibližně{' '}
+                    <strong className="text-slate-900">
+                      {Math.round(Number(watch('price')) * Number(watch('duration_minutes')) / 60).toLocaleString('cs-CZ')} Kč
+                    </strong>
+                    {Number(watch('duration_minutes')) !== 60 && (
+                      <>. Účtujete-li vždy celou hodinu, zvolte jednotku <strong>„za úkon"</strong> a zadejte konečnou cenu — bude to srozumitelnější.</>
+                    )}
+                  </span>
+                </div>
+              )}
+
+
               {/* Cenové rozmezí */}
               {priceType === 'range' && (
                 <div className="grid grid-cols-2 gap-4">
@@ -687,6 +726,61 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
                 </div>
               )}
 
+              {/* Je v ceně materiál? Klíčové pro srovnatelnost nabídek —
+                  bez toho vypadá poctivý dráž než ten, kdo uvede jen práci. */}
+              {priceType !== 'on_agreement' && (
+                <div className="space-y-2">
+                  <label className="form-label">Co je v ceně? *</label>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {([
+                      { value: true,  title: 'Včetně materiálu', desc: 'Zákazník nic nedoplácí' },
+                      { value: false, title: 'Jen práce',        desc: 'Materiál účtuji zvlášť' },
+                    ] as const).map(opt => {
+                      const sel = includesMaterial === opt.value
+                      return (
+                        <button
+                          key={String(opt.value)}
+                          type="button"
+                          onClick={() => setValue('price_includes_material', opt.value)}
+                          className={`rounded-xl border-2 p-3 text-left transition-all ${
+                            sel ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-emerald-300'
+                          }`}
+                        >
+                          <p className="text-sm font-extrabold text-slate-900">{opt.title}</p>
+                          <p className="mt-0.5 text-xs text-slate-500">{opt.desc}</p>
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="form-label">
+                      Upřesnění ceny <span className="font-normal text-slate-400">(volitelné)</span>
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={200}
+                      placeholder={includesMaterial
+                        ? 'např. V ceně je i doprava do 15 km.'
+                        : 'např. Barvy a krycí fólie účtuji dle skutečné spotřeby.'}
+                      defaultValue={watch('price_note') ?? ''}
+                      onChange={e => setValue('price_note', e.target.value || null)}
+                      className="form-input"
+                    />
+                  </div>
+
+                  {!includesMaterial && (
+                    <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-800">
+                      <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                      <span>
+                        U nabídky se zákazníkovi zobrazí štítek <strong>„bez materiálu"</strong>, aby cenu
+                        nesrovnával s nabídkami, kde materiál zahrnutý je. Ušetří vám to dohady i špatná hodnocení.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Rezervační záloha */}
               <div className="space-y-1.5">
                 <label className="form-label">Rezervační záloha (Kč)</label>
@@ -709,7 +803,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-4 overflow-hidden">
               <div className="flex items-start gap-2 rounded-xl bg-blue-50 px-4 py-3 text-xs leading-relaxed text-slate-600">
                 <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
-                <span>Zákazník zaplatí za výjezd a vystavení cenové nabídky. Pokud nabídku přijme, poplatek se započítá do celkové ceny.</span>
+                <span>Zákazník zaplatí za výjezd a vystavení cenové nabídky. Pokud nabídku přijme, poplatek se započítá do celkové ceny. <strong>Tenhle model použijte vždy, když cenu nedokážete určit předem</strong> — vyhnete se sporům o doúčtování i špatným hodnocením.</span>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
@@ -791,9 +885,14 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
             </motion.div>
           )}
           {submitState === 'success' && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-              <CheckCircle2 className="h-4 w-4 shrink-0" />
-              {mode === 'create' ? 'Služba byla úspěšně přidána!' : 'Změny byly uloženy.'}
+            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className={`flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm ${hasActiveSub ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-300 bg-amber-50 text-amber-800'}`}>
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                {mode === 'create' ? 'Nabídka byla uložena.' : 'Změny byly uloženy.'}{' '}
+                {hasActiveSub
+                  ? 'Zákazníci ji uvidí v marketplace.'
+                  : <strong>Zveřejní se zákazníkům, jakmile aktivujete předplatné.</strong>}
+              </span>
             </motion.div>
           )}
         </AnimatePresence>
@@ -801,7 +900,7 @@ export default function ServiceForm({ mode, initialData, onSuccess }: Props) {
         <button type="submit" disabled={submitState === 'loading' || submitState === 'success'} className="btn-primary w-full">
           {submitState === 'loading' ? <><Loader2 className="h-4 w-4 animate-spin" /> Ukládám…</>
            : submitState === 'success' ? <><CheckCircle2 className="h-4 w-4" /> Uloženo</>
-           : mode === 'create' ? 'Zveřejnit službu' : 'Uložit změny'}
+           : mode === 'create' ? (hasActiveSub ? 'Zveřejnit nabídku' : 'Uložit nabídku') : 'Uložit změny'}
         </button>
       </motion.form>
     </div>

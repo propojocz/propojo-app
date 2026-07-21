@@ -2,7 +2,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { CheckCircle2, AlertTriangle, Landmark, ShieldCheck, ArrowLeft, Clock } from 'lucide-react'
+import { CheckCircle2, AlertTriangle, Landmark, ShieldCheck, ArrowLeft, Clock, Eye, ArrowRight } from 'lucide-react'
 import ConnectButton from '@/components/ui/ConnectButton'
 import { refreshConnectStatus } from '@/lib/actions/connect'
 
@@ -42,6 +42,17 @@ export default async function VyplatyPage({ searchParams }: Props) {
 
   const hasAccount = !!profile.stripe_account_id
   const fullyReady = payoutsEnabled && onboardingDone
+
+  // Má aktivní předplatné? Bez něj jsou nabídky neviditelné — a když sem přišel
+  // rovnou napojit účet (Krok 2), Stripe ho vrátí sem a Krok 1 by mu utekl.
+  const { data: sub } = await supabase
+    .from('subscriptions')
+    .select('status')
+    .eq('user_id', user.id)
+    .in('status', ['active', 'trialing'])
+    .limit(1)
+    .maybeSingle() as { data: { status: string } | null }
+  const hasActiveSub = !!sub
 
   return (
     <div className="space-y-5">
@@ -99,7 +110,47 @@ export default async function VyplatyPage({ searchParams }: Props) {
             <li className="flex gap-2.5"><AlertTriangle className="h-4 w-4 shrink-0 text-emerald-600" /> Propojo nemá přístup k vašim bankovním údajům</li>
           </ul>
 
+          <p className="mb-4 flex items-start gap-2 rounded-xl bg-slate-50 px-4 py-3 text-xs leading-relaxed text-slate-600">
+            <Landmark className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+            <span>Budete potřebovat svůj <strong>IBAN</strong> — najdete ho ve své bankovní aplikaci u čísla účtu.</span>
+          </p>
+
           <ConnectButton />
+        </div>
+      )}
+
+      {/* ── NAVAZUJÍCÍ KROK ─────────────────────────────────────
+          Kdo si napojil účet jako první, snadno přehlédne, že bez předplatného
+          ho stejně nikdo neuvidí. Stripe ho po onboardingu vrátí sem, ne na
+          stránku Předplatné — tak mu to připomeneme rovnou tady. */}
+      {fullyReady && !hasActiveSub && (
+        <div className="flex flex-col gap-3 rounded-2xl border-2 border-amber-300 bg-amber-50/50 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100">
+              <Eye className="h-5 w-5 text-amber-600" />
+            </div>
+            <div>
+              <p className="font-bold text-slate-900">Zbývá poslední krok</p>
+              <p className="text-sm leading-relaxed text-slate-600">
+                Platby přijímat můžete, ale <strong>vaše nabídky zákazníci zatím nevidí</strong>.
+                Zviditelní je předplatné — první měsíc zdarma.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/dashboard/predplatne"
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-amber-500 px-5 py-2.5 font-bold text-white transition hover:bg-amber-600"
+          >
+            Aktivovat předplatné <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      )}
+
+      {/* Vše hotovo */}
+      {fullyReady && hasActiveSub && (
+        <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          Máte hotovo — nabídky jsou viditelné a můžete přijímat platby.
         </div>
       )}
     </div>

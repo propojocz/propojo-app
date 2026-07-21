@@ -71,12 +71,29 @@ export async function GET(request: Request) {
       if (data.user) {
         await maybeSendWelcome(data.user.id, data.user.email)
       }
-      // Odhlásíme session vzniklou z potvrzovacího odkazu. Bez toho by se mohlo stát,
-      // že po kliknutí na potvrzení skončíš přihlášený pod účtem, který byl v prohlížeči
-      // přihlášený předtím (přesně ten zmatek „potvrdil jsem A, ale jsem přihlášený jako B").
-      // Uživatel se pak čistě přihlásí sám.
-      await supabase.auth.signOut()
-      return NextResponse.redirect(`${origin}/prihlasit?potvrzeno=1`)
+      // Session z potvrzovacího odkazu NECHÁVÁME — uživatel je tím rovnou přihlášený
+      // a nemusí zadávat heslo hned po potvrzení e-mailu. (Dřív jsme ho tu odhlašovali,
+      // což bylo zbytečné otravné: exchangeCodeForSession vytvoří session právě pro ten
+      // účet, který se potvrdil, takže se nikdo nemůže „přepnout" na cizí profil.)
+      //
+      // Kam poslat: poskytovatele do dashboardu, zákazníka do marketplace.
+      let target = next !== '/' ? next : '/marketplace'
+      if (next === '/') {
+        try {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('is_provider')
+            .eq('id', data.user!.id)
+            .single() as { data: { is_provider: boolean | null } | null }
+          if (prof?.is_provider === true) target = '/dashboard'
+        } catch {
+          // když se profil nepodaří načíst, zůstane marketplace
+        }
+      }
+
+      const url = new URL(target, origin)
+      url.searchParams.set('potvrzeno', '1')
+      return NextResponse.redirect(url.toString())
     }
   }
 

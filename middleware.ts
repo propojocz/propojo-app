@@ -2,7 +2,7 @@
 // Režim údržby: schová celý web návštěvníkům, tebe pustí přes tajný odkaz.
 //
 // JAK TĚ PUSTIT DOVNITŘ:
-//   Jednou navštiv:  https://propojo.cz/?klic=pusti-me-dovnitr
+//   Jednou navštiv:  https://www.propojo.cz/?klic=pusti-me-dovnitr
 //   Tím se ti uloží cookie a web pak vidíš normálně (i po zavření).
 //
 // JAK ZRUŠIT ÚDRŽBU (spuštění naživo):
@@ -17,10 +17,19 @@ const SECRET = 'pusti-me-dovnitr'     // tajné heslo v odkazu ?klic=...
 const COOKIE = 'propojo_pass'         // jméno cookie, co tě pustí
 // ───────────────────────────────────────────────────────────
 
-// Cesty, které musí projít VŽDY (i během údržby) – volají je stroje, ne lidé.
-// Stripe webhook sem MUSÍ, jinak Stripe dostane stránku údržby místo odpovědi.
+// Cesty, které musí projít VŽDY (i během údržby).
+//
+//  • /api/stripe/webhook — volá ho Stripe, ne člověk. Bez toho by dostal
+//    stránku údržby místo odpovědi a události by se hromadily.
+//
+//  • /auth/callback — sem míří odkaz z potvrzovacího e-mailu. Uživatel na něj
+//    klikne z e-mailové schránky, kde bypass cookie nemá (typicky jiný prohlížeč
+//    nebo anonymní okno). Když ho middleware odmítne, potvrzení e-mailu vůbec
+//    neproběhne: nepotvrdí se účet, nepošle se uvítací mail a člověk skončí na
+//    stránce údržby. Callback je bezpečný — bez platného kódu z e-mailu nic neudělá.
 const ALWAYS_ALLOW = [
   '/api/stripe/webhook',
+  '/auth/callback',
 ]
 
 export function middleware(req: NextRequest) {

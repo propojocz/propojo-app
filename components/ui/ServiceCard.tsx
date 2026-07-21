@@ -50,6 +50,11 @@ export default function ServiceCard({
   const quoteFee = Number(service.quote_fee ?? 0)
   const isModelB = service.payment_model === 'B'
 
+  // Je v ceně materiál? Bez tohoto štítku vypadá poctivý poskytovatel
+  // (cena včetně materiálu) dráž než ten, kdo uvádí jen práci.
+  const materialExtra =
+    !isModelB && price > 0 && (service as any).price_includes_material === false
+
   let priceMain: string, priceSub: string | null
   if (isModelB) {
     priceMain = 'Nacenění na místě'
@@ -145,9 +150,19 @@ export default function ServiceCard({
         </div>
 
         <div className="mt-auto flex items-end justify-between gap-2 border-t border-slate-100 pt-3">
-          <div>
+          <div className="min-w-0">
             <div className={`font-semibold text-slate-900 ${isModelB ? 'text-sm' : 'text-lg'}`}>{priceMain}</div>
-            {priceSub && <div className="text-xs text-slate-400">{priceSub}</div>}
+            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+              {priceSub && <span className="text-xs text-slate-400">{priceSub}</span>}
+              {materialExtra && (
+                <span
+                  className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700"
+                  title="Cena je za práci, materiál se účtuje zvlášť"
+                >
+                  bez materiálu
+                </span>
+              )}
+            </div>
           </div>
           <Link href={detailHref} className="whitespace-nowrap rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600">
             Zobrazit

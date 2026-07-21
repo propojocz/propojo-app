@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { CATEGORY_META } from '@/types/database'
 import Image from 'next/image'
 import Link from 'next/link'
-import { MapPin, Star, ArrowLeft, Clock, Wallet, FileSearch, Truck, CalendarClock, ShieldCheck, CalendarX } from 'lucide-react'
+import { MapPin, Star, ArrowLeft, Clock, Wallet, FileSearch, Truck, CalendarClock, ShieldCheck, CalendarX, Package } from 'lucide-react'
 import OrderButton from '@/components/ui/OrderButton'
 import Avatar from '@/components/ui/Avatar'
 import { getCancellation } from '@/lib/cancellation'
@@ -19,7 +19,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const supabase = createClient()
   const { data } = await supabase
     .from('services')
-    .select('title, description, city, price, price_unit, category, payment_model')
+    .select('title, description, city, price, price_unit, category, payment_model, price_includes_material')
     .eq('id', params.id)
     .single() as { data: any }
   if (!data) return { title: 'Služba nenalezena' }
@@ -31,7 +31,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       : (data.price ?? 0) > 0
         ? `${Number(data.price).toLocaleString('cs-CZ')} Kč/${data.price_unit}`
         : 'Cena dohodou'
-  const desc = `${(data.description ?? '').slice(0, 140)}… ${priceText} · ${data.city}`
+  const materialTag = data.payment_model !== 'B' && data.price_includes_material === false ? ' (bez materiálu)' : ''
+  const desc = `${(data.description ?? '').slice(0, 140)}… ${priceText}${materialTag} · ${data.city}`
 
   return {
     title: `${data.title}`,
@@ -128,6 +129,10 @@ export default async function ServiceDetailPage({ params }: Props) {
   const showCancellation = !isModelB && cancellation.key !== 'zadna'
 
   // Hlavní cenový text (Model A)
+  // Je v ceně materiál? Zákazník to musí vědět PŘED objednáním, ne až z faktury.
+  const materialExtra = !isModelB && price > 0 && s.price_includes_material === false
+  const priceNote = (s.price_note ?? '').trim()
+
   let mainPrice = 'Cena dohodou'
   if (!isModelB) {
     if (s.price_type === 'range' && price > 0 && priceMax > 0) {
@@ -192,13 +197,18 @@ export default async function ServiceDetailPage({ params }: Props) {
             <div>
               <h1 className="mb-3 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">{s.title}</h1>
               <div className="flex flex-wrap items-center gap-4">
-                <div className="flex items-baseline gap-1">
+                <div className="flex flex-wrap items-baseline gap-x-1 gap-y-1">
                   {isModelB ? (
                     <span className="text-2xl font-black text-emerald-600">Nacenění na místě</span>
                   ) : (
                     <>
                       <span className="text-3xl font-black text-emerald-600">{mainPrice}</span>
                       {price > 0 && <span className="text-slate-500">/{s.price_unit}</span>}
+                      {materialExtra && (
+                        <span className="ml-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-bold text-amber-700">
+                          bez materiálu
+                        </span>
+                      )}
                     </>
                   )}
                 </div>
@@ -259,13 +269,18 @@ export default async function ServiceDetailPage({ params }: Props) {
                 Bílá karta se zelenou linkou vystoupí ze šedého pozadí, aniž by křičela. */}
             <div className="rounded-2xl border-2 border-emerald-500 bg-white p-5 shadow-lg shadow-emerald-600/10">
               <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-100 pb-4">
-                <div className="flex items-baseline gap-1">
+                <div className="flex flex-wrap items-baseline gap-x-1 gap-y-1">
                   {isModelB ? (
                     <span className="text-xl font-black text-slate-900">Nacenění na místě</span>
                   ) : (
                     <>
                       <span className="text-2xl font-black text-slate-900">{mainPrice}</span>
                       {price > 0 && <span className="text-sm text-slate-500">/{s.price_unit}</span>}
+                      {materialExtra && (
+                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">
+                          bez materiálu
+                        </span>
+                      )}
                     </>
                   )}
                 </div>
@@ -386,6 +401,17 @@ export default async function ServiceDetailPage({ params }: Props) {
                 </ul>
               ) : (
                 <ul className="space-y-3 text-sm text-slate-700">
+                  {price > 0 && (
+                    <li className="flex gap-2.5">
+                      <Package className={`h-4 w-4 shrink-0 ${materialExtra ? 'text-amber-600' : 'text-emerald-600'}`} />
+                      <span>
+                        {materialExtra
+                          ? <>Uvedená cena je <strong>za práci</strong>. Materiál se účtuje zvlášť podle skutečné spotřeby.</>
+                          : <>V ceně je <strong>i materiál</strong> — nic se nedoplácí.</>}
+                        {priceNote && <> {priceNote}</>}
+                      </span>
+                    </li>
+                  )}
                   {deposit > 0 && (
                     <li className="flex gap-2.5">
                       <Wallet className="h-4 w-4 shrink-0 text-emerald-600" />

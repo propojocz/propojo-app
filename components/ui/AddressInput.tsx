@@ -20,6 +20,11 @@ type Suggestion = {
   lng: number
 }
 
+/** Z „Vsetín, okres Vsetín" vytáhne „Vsetín" — použijeme k doplnění města působiště. */
+function municipalityOf(location: string): string {
+  return (location ?? '').split(',')[0].trim()
+}
+
 export default function AddressInput({
   defaultValue,
   onPick,
@@ -27,8 +32,8 @@ export default function AddressInput({
   placeholder = 'Začněte psát adresu a vyberte ze seznamu…',
 }: {
   defaultValue?: string | null
-  /** Uživatel vybral adresu ze seznamu → máme text i souřadnice */
-  onPick: (a: { address: string; lat: number; lng: number }) => void
+  /** Uživatel vybral adresu ze seznamu → máme text, souřadnice i obec */
+  onPick: (a: { address: string; lat: number; lng: number; municipality: string }) => void
   /** Uživatel psal volný text (nevybral) → adresa bez souřadnic */
   onFreeText: (text: string) => void
   placeholder?: string
@@ -88,7 +93,7 @@ export default function AddressInput({
     const full = s.location ? `${s.name}, ${s.location}` : s.name
     setValue(full)
     setOpen(false)
-    onPick({ address: full, lat: s.lat, lng: s.lng })
+    onPick({ address: full, lat: s.lat, lng: s.lng, municipality: municipalityOf(s.location) })
   }
 
   return (
