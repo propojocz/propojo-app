@@ -1,38 +1,53 @@
 // app/sluzby/[id]/page.tsx
+// Detail KARTY (poskytovatel/pobočka) v modelu „karta + ceník".
+// Nahoře identita: název, podtitul, galerie, poskytovatel, adresa + mapa.
+// Pod tím CENÍK úkonů (service_items) — každý s cenou, délkou, zálohou a tlačítkem.
+// Objednávkový tok konkrétního úkonu se dozapojí v kroku 5.
+
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { CATEGORY_META } from '@/types/database'
+import type { ServiceItem } from '@/types/database'
 import Image from 'next/image'
 import Link from 'next/link'
-import { MapPin, Star, ArrowLeft, Clock, Wallet, FileSearch, Truck, CalendarClock, ShieldCheck, CalendarX, Package } from 'lucide-react'
-import OrderButton from '@/components/ui/OrderButton'
+import { MapPin, Star, ArrowLeft, ShieldCheck, ListChecks } from 'lucide-react'
 import Avatar from '@/components/ui/Avatar'
-import { getCancellation } from '@/lib/cancellation'
+import PriceListPublic from '@/components/ui/PriceListPublic'
+import ServiceMap from '@/components/ui/ServiceMap'
+import ServiceGallery from '@/components/ui/ServiceGallery'
 import type { Metadata } from 'next'
-import SlotPicker from '@/components/ui/SlotPicker'
 
 interface Props { params: { id: string } }
 
 const DEFAULT_META = { label: 'Služba', emoji: '🔧' }
 
+// Nejnižší cena zveřejněného úkonu — pro „od X Kč" v metadatech a hlavičce.
+function cheapestActive(items: ServiceItem[]): ServiceItem | null {
+  return items
+    .filter(i => i.is_active && i.payment_model !== 'B' && i.price != null && i.price > 0)
+    .sort((a, b) => (a.price ?? 0) - (b.price ?? 0))[0] ?? null
+}
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const supabase = createClient()
   const { data } = await supabase
     .from('services')
-    .select('title, description, city, price, price_unit, category, payment_model, price_includes_material')
+    .select('title, subtitle, description, city, category')
     .eq('id', params.id)
     .single() as { data: any }
-  if (!data) return { title: 'Služba nenalezena' }
+  if (!data) return { title: 'Karta nenalezena' }
+
+  const { data: items } = await supabase
+    .from('service_items')
+    .select('*')
+    .eq('service_id', params.id) as { data: ServiceItem[] | null }
 
   const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://propojo.cz'
-  const priceText =
-    data.payment_model === 'B'
-      ? 'Nacenění na místě'
-      : (data.price ?? 0) > 0
-        ? `${Number(data.price).toLocaleString('cs-CZ')} Kč/${data.price_unit}`
-        : 'Cena dohodou'
-  const materialTag = data.payment_model !== 'B' && data.price_includes_material === false ? ' (bez materiálu)' : ''
-  const desc = `${(data.description ?? '').slice(0, 140)}… ${priceText}${materialTag} · ${data.city}`
+  const cheapest = cheapestActive(items ?? [])
+  const priceText = cheapest
+    ? `od ${Number(cheapest.price).toLocaleString('cs-CZ')} Kč`
+    : 'Ceník na kartě'
+  const desc = `${(data.subtitle ? data.subtitle + '. ' : '')}${(data.description ?? '').slice(0, 130)}… ${priceText} · ${data.city}`
 
   return {
     title: `${data.title}`,
@@ -58,15 +73,41 @@ export default async function ServiceDetailPage({ params }: Props) {
     .single() as { data: any; error: any }
 
   if (error || !service) notFound()
-
-  // Pozastavený poskytovatel → služba není dostupná
   if (service.profiles?.is_suspended === true) notFound()
 
   const s = service
   const meta = (CATEGORY_META as Record<string, { label: string; emoji: string }>)[s.category] ?? DEFAULT_META
   const { data: { user } } = await supabase.auth.getUser()
 
-  // TŘI JMÉNA: marketingový název vidí zákazník, ověřená identita je dohledatelná na profilu.
+  // Ceník úkonů této karty
+  const { data: itemsRaw } = await supabase
+    .from('service_items')
+    .select('*')
+    .eq('service_id', s.id)
+    .order('sort_order', { ascending: true }) as { data: ServiceItem[] | null }
+  const items = itemsRaw ?? []
+  const cheapest = cheapestActive(items)
+
+  // Volná budoucí okna, ve kterých se tato karta nabízí (slot_services → availability_slots).
+  // Modal z nich zákazníkovi nabídne termíny (filtruje podle délky úkonu na klientu).
+  const { data: slotLinks } = await supabase
+    .from('slot_services')
+    .select('slot_id')
+    .eq('service_id', s.id) as { data: { slot_id: string }[] | null }
+  const slotIds = Array.from(new Set((slotLinks ?? []).map((l) => l.slot_id)))
+  let freeSlots: { id: string; starts_at: string; ends_at: string }[] = []
+  if (slotIds.length > 0) {
+    const { data: slotRows } = await supabase
+      .from('availability_slots')
+      .select('id, starts_at, ends_at')
+      .in('id', slotIds)
+      .eq('status', 'volno')
+      .gte('starts_at', new Date().toISOString())
+      .order('starts_at', { ascending: true }) as { data: { id: string; starts_at: string; ends_at: string }[] | null }
+    freeSlots = slotRows ?? []
+  }
+
+  // Tři jména
   const providerDisplayName =
     s.profiles?.display_name || s.profiles?.company_name || s.profiles?.full_name || 'Poskytovatel'
   const providerLegalName = s.profiles?.company_name || s.profiles?.full_name
@@ -74,101 +115,49 @@ export default async function ServiceDetailPage({ params }: Props) {
   const providerRating = Number(s.profiles?.rating ?? 0)
   const providerReviews = Number(s.profiles?.review_count ?? 0)
 
-  const { data: moreServices } = await supabase
-    .from('services')
-    .select('id, title, price, price_unit, category, payment_model, quote_fee')
-    .eq('provider_id', s.provider_id)
-    .eq('is_active', true)
-    .neq('id', s.id)
-    .limit(4)
-
-  // Název kategorie (z DB podle slugu) – pro štítek na detailu
+  // Název kategorie z DB
   const { data: catRow } = await supabase
-    .from('categories')
-    .select('name')
-    .eq('slug', s.category)
-    .single() as { data: { name: string } | null }
+    .from('categories').select('name').eq('slug', s.category).single() as { data: { name: string } | null }
   const categoryName = catRow?.name ?? meta.label
 
-  // Podkategorie této služby (přes propojovací tabulku)
+  // Podkategorie
   const { data: subcatLinks } = await supabase
-    .from('service_subcategories')
-    .select('subcategories(name)')
-    .eq('service_id', s.id)
+    .from('service_subcategories').select('subcategories(name)').eq('service_id', s.id)
   const subcatNames = (subcatLinks ?? [])
     .map((r: any) => r.subcategories?.name)
     .filter(Boolean) as string[]
 
-  // Volné budoucí termíny této služby (jen Model A)
-  let freeSlots: { id: string; starts_at: string; ends_at: string }[] = []
-  if (s.payment_model !== 'B') {
-    const { data: slotLinks } = await supabase
-      .from('slot_services')
-      .select('availability_slots(id, starts_at, ends_at, status)')
-      .eq('service_id', s.id)
-    freeSlots = (slotLinks ?? [])
-      .map((l: any) => l.availability_slots)
-      .filter((sl: any) => sl && sl.status === 'volno' && new Date(sl.starts_at) > new Date())
-      .sort((a: any, b: any) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime())
-      .slice(0, 8)
-  }
+  // Galerie: titulní foto první, pak gallery pole
+  const galleryPhotos: string[] = [
+    ...(s.image_url ? [s.image_url] : []),
+    ...((s.gallery as string[] | null) ?? []),
+  ]
 
-  // ── Cenové údaje ──────────────────────────────────────────
-  const isModelB = s.payment_model === 'B'
-  const price = Number(s.price ?? 0)
-  const priceMax = Number(s.price_max ?? 0)
-  const deposit = Number(s.deposit_amount ?? 0)
-  const quoteFee = Number(s.quote_fee ?? 0)
-  const pricePerKm = Number(s.price_per_km ?? 0)
-  const freeKm = Number(s.free_km ?? 0)
-  const quoteDays = Number(s.quote_days ?? 0)
-  const duration = Number(s.duration_minutes ?? 0)
-
-  // Storno politika (jen Model A, jen když není 'zadna')
-  const cancellation = getCancellation(s.cancellation_policy)
-  const showCancellation = !isModelB && cancellation.key !== 'zadna'
-
-  // Hlavní cenový text (Model A)
-  // Je v ceně materiál? Zákazník to musí vědět PŘED objednáním, ne až z faktury.
-  const materialExtra = !isModelB && price > 0 && s.price_includes_material === false
-  const priceNote = (s.price_note ?? '').trim()
-
-  let mainPrice = 'Cena dohodou'
-  if (!isModelB) {
-    if (s.price_type === 'range' && price > 0 && priceMax > 0) {
-      mainPrice = `${price.toLocaleString('cs-CZ')}–${priceMax.toLocaleString('cs-CZ')} Kč`
-    } else if (price > 0) {
-      mainPrice = `${price.toLocaleString('cs-CZ')} Kč`
-    }
-  }
-
-  const formatDuration = (min: number) => {
-    if (min <= 0) return null
-    if (min < 60) return `${min} min`
-    const h = Math.floor(min / 60)
-    const m = min % 60
-    return m ? `${h} h ${m} min` : `${h} h`
-  }
+  // Adresa + mapa (jen když je provozovna, adresa veřejná a máme souřadnice)
+  const hasEstablishment = s.location_type === 'u_poskytovatele' || s.location_type === 'oboji'
+  const addressPublic = s.address_public !== false
+  const showAddress = hasEstablishment && addressPublic && !!s.address
+  const showMap = showAddress && s.address_lat != null && s.address_lng != null
 
   // JSON-LD
   const jsonLd = {
     '@context': 'https://schema.org',
-    '@type': 'Service',
-    name: s.title,
+    '@type': 'LocalBusiness',
+    name: providerDisplayName,
     description: s.description,
-    ...(price > 0 ? {
-      offers: {
+    ...(cheapest ? {
+      makesOffer: {
         '@type': 'Offer',
-        price: price,
-        priceCurrency: 'CZK',
+        priceSpecification: {
+          '@type': 'PriceSpecification',
+          price: cheapest.price,
+          priceCurrency: 'CZK',
+        },
       },
     } : {}),
     areaServed: { '@type': 'City', name: s.city },
-    provider: {
-      '@type': 'Person',
-      name: providerDisplayName,
-      ...(s.profiles.rating ? { aggregateRating: { '@type': 'AggregateRating', ratingValue: s.profiles.rating, reviewCount: s.profiles.review_count } } : {}),
-    },
+    ...(showAddress ? { address: { '@type': 'PostalAddress', streetAddress: s.address, addressLocality: s.city } } : {}),
+    ...(s.profiles.rating ? { aggregateRating: { '@type': 'AggregateRating', ratingValue: s.profiles.rating, reviewCount: s.profiles.review_count } } : {}),
     url: `${APP_URL}/sluzby/${s.id}`,
   }
 
@@ -182,36 +171,32 @@ export default async function ServiceDetailPage({ params }: Props) {
         </Link>
 
         <div className="grid gap-8 lg:grid-cols-3">
+          {/* ── LEVÝ SLOUPEC: identita + galerie + ceník ── */}
           <div className="space-y-6 lg:col-span-2">
-            <div className="relative h-64 overflow-hidden rounded-2xl bg-slate-100 sm:h-80">
-              {s.image_url ? (
-                <Image src={s.image_url} alt={s.title} fill className="object-cover" sizes="(max-width: 1024px) 100vw, 66vw" priority />
-              ) : (
-                <div className="flex h-full items-center justify-center bg-gradient-to-br from-emerald-50 to-blue-50"><span className="text-8xl">{meta.emoji}</span></div>
-              )}
-              <div className="absolute left-4 top-4">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-sm font-semibold text-slate-700 backdrop-blur-sm">{meta.emoji} {meta.label}</span>
-              </div>
-            </div>
 
-            <div>
-              <h1 className="mb-3 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">{s.title}</h1>
-              <div className="flex flex-wrap items-center gap-4">
-                <div className="flex flex-wrap items-baseline gap-x-1 gap-y-1">
-                  {isModelB ? (
-                    <span className="text-2xl font-black text-emerald-600">Nacenění na místě</span>
-                  ) : (
-                    <>
-                      <span className="text-3xl font-black text-emerald-600">{mainPrice}</span>
-                      {price > 0 && <span className="text-slate-500">/{s.price_unit}</span>}
-                      {materialExtra && (
-                        <span className="ml-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-bold text-amber-700">
-                          bez materiálu
-                        </span>
-                      )}
-                    </>
-                  )}
+            {/* Galerie (prolistovatelná) nebo fallback dlaždice */}
+            {galleryPhotos.length > 0 ? (
+              <ServiceGallery photos={galleryPhotos} title={s.title} />
+            ) : (
+              <div className="relative flex h-64 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-50 to-blue-50 sm:h-80">
+                <span className="text-8xl">{meta.emoji}</span>
+                <div className="absolute left-4 top-4">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-sm font-semibold text-slate-700 backdrop-blur-sm">{meta.emoji} {meta.label}</span>
                 </div>
+              </div>
+            )}
+
+            {/* Název + podtitul */}
+            <div>
+              <h1 className="text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">{s.title}</h1>
+              {s.subtitle && <p className="mt-1 text-lg text-slate-500">{s.subtitle}</p>}
+
+              <div className="mt-3 flex flex-wrap items-center gap-4">
+                {cheapest && (
+                  <span className="text-2xl font-black text-emerald-600">
+                    od {Number(cheapest.price).toLocaleString('cs-CZ')} Kč
+                  </span>
+                )}
                 <div className="flex items-center gap-1.5 text-sm text-slate-500">
                   <MapPin className="h-4 w-4 text-slate-400" />{s.city}
                 </div>
@@ -230,100 +215,39 @@ export default async function ServiceDetailPage({ params }: Props) {
               </div>
             </div>
 
+            {/* Popis */}
             <div className="rounded-xl border border-slate-200 bg-white p-6">
               <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">O nabídce</h2>
-              <p className="whitespace-pre-line text-slate-700 leading-relaxed">{s.description}</p>
+              <p className="whitespace-pre-line leading-relaxed text-slate-700">{s.description}</p>
             </div>
 
-            {moreServices && moreServices.length > 0 && (
-              <div>
-                <h2 className="mb-4 text-lg font-bold text-slate-900">Další služby od tohoto živnostníka</h2>
-                <div className="grid grid-cols-2 gap-3">
-                  {moreServices.map((ms: any) => {
-                    const msMeta = (CATEGORY_META as Record<string, { label: string; emoji: string }>)[ms.category] ?? DEFAULT_META
-                    const msPrice = ms.payment_model === 'B'
-                      ? 'Nacenění na místě'
-                      : (ms.price ?? 0) > 0
-                        ? `${Number(ms.price).toLocaleString('cs-CZ')} Kč/${ms.price_unit}`
-                        : 'Cena dohodou'
-                    return (
-                      <Link key={ms.id} href={`/sluzby/${ms.id}`} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 transition-all hover:border-emerald-200 hover:bg-emerald-50">
-                        <span className="text-xl">{msMeta.emoji}</span>
-                        <div className="min-w-0">
-                          <p className="truncate text-xs font-semibold text-slate-800">{ms.title}</p>
-                          <p className="text-xs text-slate-500">{msPrice}</p>
-                        </div>
-                      </Link>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-4">
-
-            {/* ── HLAVNÍ AKCE ──────────────────────────────────────────────
-                Nahoře, s cenou uvnitř. Zákazník se rozhoduje právě tady, takže
-                cena i tlačítko musí být pohromadě — ne rozházené po stránce.
-                Bílá karta se zelenou linkou vystoupí ze šedého pozadí, aniž by křičela. */}
-            <div className="rounded-2xl border-2 border-emerald-500 bg-white p-5 shadow-lg shadow-emerald-600/10">
-              <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-100 pb-4">
-                <div className="flex flex-wrap items-baseline gap-x-1 gap-y-1">
-                  {isModelB ? (
-                    <span className="text-xl font-black text-slate-900">Nacenění na místě</span>
-                  ) : (
-                    <>
-                      <span className="text-2xl font-black text-slate-900">{mainPrice}</span>
-                      {price > 0 && <span className="text-sm text-slate-500">/{s.price_unit}</span>}
-                      {materialExtra && (
-                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">
-                          bez materiálu
-                        </span>
-                      )}
-                    </>
-                  )}
-                </div>
-                {isModelB
-                  ? quoteFee > 0 && (
-                      <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
-                        výjezd {quoteFee.toLocaleString('cs-CZ')} Kč
-                      </span>
-                    )
-                  : deposit > 0 && (
-                      <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
-                        záloha {deposit.toLocaleString('cs-CZ')} Kč
-                      </span>
-                    )}
-              </div>
-
-              <OrderButton
+            {/* ── CENÍK ── */}
+            <div>
+              <h2 className="mb-3 flex items-center gap-2 text-lg font-bold text-slate-900">
+                <ListChecks className="h-5 w-5 text-emerald-600" /> Ceník úkonů
+              </h2>
+              <PriceListPublic
+                items={items}
                 serviceId={s.id}
                 providerId={s.provider_id}
                 isLoggedIn={!!user}
-                priceAgreed={price}
-                paymentModel={s.payment_model}
                 locationType={s.location_type}
+                slots={freeSlots}
+                quoteTerms={{
+                  quote_fee: s.quote_fee,
+                  price_per_km: s.price_per_km,
+                  free_km: s.free_km,
+                  quote_days: s.quote_days,
+                }}
               />
-
-              <p className="mt-3 text-center text-xs leading-relaxed text-slate-400">
-                {isModelB
-                  ? 'Nezávazné. Konečnou cenu potvrdíte až po prohlídce.'
-                  : deposit > 0
-                    ? 'Záloha se započítá do konečné ceny.'
-                    : 'Rezervace je nezávazná.'}
+              <p className="mt-3 text-xs leading-relaxed text-slate-400">
+                Vyberte konkrétní úkon a objednejte se na termín, který vám vyhovuje. Záloha se započítá do konečné ceny.
               </p>
             </div>
+          </div>
 
-            {/* Volné termíny (Model A) */}
-            {!isModelB && freeSlots.length > 0 && (
-              <SlotPicker
-                serviceId={s.id}
-                slots={freeSlots}
-                isLoggedIn={!!user}
-                locationType={s.location_type}
-              />
-            )}
+          {/* ── PRAVÝ SLOUPEC: poskytovatel + adresa/mapa ── */}
+          <div className="space-y-4">
 
             {/* Poskytovatel */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -344,8 +268,6 @@ export default async function ServiceDetailPage({ params }: Props) {
                 </div>
               </Link>
 
-              {/* Ověřená identita — zákazník musí vědět, s kým uzavírá smlouvu.
-                  Propojo je jen zprostředkovatel; smlouva vzniká přímo s poskytovatelem. */}
               {(showLegalName || s.profiles.ico) && (
                 <p className="mt-2.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 border-t border-slate-100 pt-2.5 text-xs text-slate-500">
                   {s.profiles.ico_verified && <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />}
@@ -368,83 +290,25 @@ export default async function ServiceDetailPage({ params }: Props) {
               </Link>
             </div>
 
-            {/* Jak to probíhá – Model A / B */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h3 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">Jak to probíhá</h3>
-
-              {isModelB ? (
-                <ul className="space-y-3 text-sm text-slate-700">
-                  <li className="flex gap-2.5">
-                    <FileSearch className="h-4 w-4 shrink-0 text-emerald-600" />
-                    <span>
-                      <strong>Nacenění na místě</strong>
-                      {quoteFee > 0
-                        ? <> za <strong>{quoteFee.toLocaleString('cs-CZ')} Kč</strong>. Pokud nabídku přijmete, poplatek se započítá do celkové ceny.</>
-                        : <> zdarma. Řemeslník přijede, prohlédne práci a navrhne cenu.</>}
-                    </span>
-                  </li>
-                  {(freeKm > 0 || pricePerKm > 0) && (
-                    <li className="flex gap-2.5">
-                      <Truck className="h-4 w-4 shrink-0 text-emerald-600" />
-                      <span>
-                        {freeKm > 0 ? <>Doprava zdarma do <strong>{freeKm} km</strong>.</> : null}
-                        {pricePerKm > 0 ? <> Nad rámec <strong>{pricePerKm.toLocaleString('cs-CZ')} Kč/km</strong>.</> : null}
-                      </span>
-                    </li>
-                  )}
-                  {quoteDays > 0 && (
-                    <li className="flex gap-2.5">
-                      <CalendarClock className="h-4 w-4 shrink-0 text-emerald-600" />
-                      <span>Nabídku dodá do <strong>{quoteDays} dnů</strong>.</span>
-                    </li>
-                  )}
-                </ul>
-              ) : (
-                <ul className="space-y-3 text-sm text-slate-700">
-                  {price > 0 && (
-                    <li className="flex gap-2.5">
-                      <Package className={`h-4 w-4 shrink-0 ${materialExtra ? 'text-amber-600' : 'text-emerald-600'}`} />
-                      <span>
-                        {materialExtra
-                          ? <>Uvedená cena je <strong>za práci</strong>. Materiál se účtuje zvlášť podle skutečné spotřeby.</>
-                          : <>V ceně je <strong>i materiál</strong> — nic se nedoplácí.</>}
-                        {priceNote && <> {priceNote}</>}
-                      </span>
-                    </li>
-                  )}
-                  {deposit > 0 && (
-                    <li className="flex gap-2.5">
-                      <Wallet className="h-4 w-4 shrink-0 text-emerald-600" />
-                      <span>
-                        Rezervační záloha <strong>{deposit.toLocaleString('cs-CZ')} Kč</strong> — <strong>započítá se</strong> do konečné ceny.
-                      </span>
-                    </li>
-                  )}
-                  {formatDuration(duration) && (
-                    <li className="flex gap-2.5">
-                      <Clock className="h-4 w-4 shrink-0 text-emerald-600" />
-                      <span>Délka služby přibližně <strong>{formatDuration(duration)}</strong>.</span>
-                    </li>
-                  )}
-                  <li className="flex gap-2.5">
-                    <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600" />
-                    <span>
-                      Záloha jde přes zabezpečenou platební bránu a řemeslníkovi se uvolní až po
-                      provedení práce. Když nedorazí, vrátíme vám ji celou.
-                    </span>
-                  </li>
-                </ul>
-              )}
-            </div>
-
-            {/* Storno podmínky (Model A se zvolenou politikou) */}
-            {showCancellation && (
+            {/* Adresa + mapa */}
+            {showAddress && (
               <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <h3 className="mb-2 flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-slate-500">
-                  <CalendarX className="h-4 w-4 text-slate-400" /> Storno podmínky
+                  <MapPin className="h-4 w-4 text-slate-400" /> Kde nás najdete
                 </h3>
-                <p className="text-sm font-bold text-slate-800">{cancellation.label} — {cancellation.short}</p>
-                <p className="mt-1 text-sm leading-relaxed text-slate-600">{cancellation.detail}</p>
+                <p className="mb-3 text-sm text-slate-700">{s.address}</p>
+                {showMap && (
+                  <ServiceMap lat={Number(s.address_lat)} lng={Number(s.address_lng)} label={s.title} />
+                )}
+              </div>
+            )}
+
+            {/* Když je provozovna, ale adresa skrytá */}
+            {hasEstablishment && !addressPublic && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-sm">
+                <p className="flex items-center gap-2">
+                  <MapPin className="h-4 w-4 text-slate-400" /> {s.city} — přesnou adresu dostanete po objednání.
+                </p>
               </div>
             )}
 

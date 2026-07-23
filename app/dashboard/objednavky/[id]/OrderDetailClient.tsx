@@ -9,6 +9,8 @@ import { createDepositCheckout } from '@/lib/actions/deposit'
 import ConfirmCompletionButton from '@/components/ui/ConfirmCompletionButton'
 import ChatThread from '@/components/ui/ChatThread'
 import Avatar from '@/components/ui/Avatar'
+import AddressInput from '@/components/ui/AddressInput'
+import ServiceMap from '@/components/ui/ServiceMap'
 
 type ServiceLite = {
   id: string
@@ -37,6 +39,8 @@ type OrderRow = {
   deposit_amount: number | null
   location_city: string | null
   location_address: string | null
+  location_lat: number | null
+  location_lng: number | null
   service_location: string | null
   scheduled_at: string | null
   services: ServiceLite | null
@@ -112,7 +116,12 @@ export default function OrderDetailClient({
   const [payError, setPayError] = useState('')
   const [cancelBusy, setCancelBusy] = useState(false)
   const [cancelErr, setCancelErr] = useState('')
+  // Adresa: text + souřadnice (souřadnice máme jen když zákazník vybral z našeptávače).
   const [addressInput, setAddressInput] = useState(order.location_address ?? '')
+  const [addrCoords, setAddrCoords] = useState<{ lat: number | null; lng: number | null }>({
+    lat: order.location_lat ?? null,
+    lng: order.location_lng ?? null,
+  })
   const [addrBusy, setAddrBusy] = useState(false)
   const [addrErr, setAddrErr] = useState('')
   const [addrSaved, setAddrSaved] = useState(!!order.location_address)
@@ -148,7 +157,7 @@ export default function OrderDetailClient({
     }
     setAddrBusy(true)
     setAddrErr('')
-    const res = await setOrderAddress(order.id, addressInput)
+    const res = await setOrderAddress(order.id, addressInput, addrCoords)
     if (res.success) {
       setAddrSaved(true)
     } else {
@@ -309,6 +318,13 @@ export default function OrderDetailClient({
             </div>
           )}
 
+          {/* Mapa pro POSKYTOVATELE — kam dojet, když zákazník vybral adresu z našeptávače */}
+          {isProvider && atCustomer && order.location_lat != null && order.location_lng != null && order.status !== 'zruseno' && order.status !== 'cekajici' && (
+            <div className="mt-4">
+              <ServiceMap lat={order.location_lat} lng={order.location_lng} label={order.location_address ?? 'Adresa zákazníka'} />
+            </div>
+          )}
+
           {order.description && (
             <div className="mt-4">
               <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Poznámka od zákazníka</h3>
@@ -380,20 +396,28 @@ export default function OrderDetailClient({
                 ? 'Adresa je vyplněná. Můžete ji ještě upravit, dokud nezaplatíte.'
                 : `Objednávka byla přijata. Doplňte přesnou adresu${hasDeposit ? ', kam má řemeslník dorazit — pak budete moci zaplatit.' : ', kam má řemeslník dorazit.'}`}
             </p>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <input
-                value={addressInput}
-                onChange={(e) => { setAddressInput(e.target.value); setAddrSaved(false) }}
-                placeholder="Ulice a číslo, město"
-                className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-                maxLength={200}
+            <div className="space-y-2">
+              <AddressInput
+                defaultValue={addressInput}
+                placeholder="Začněte psát adresu a vyberte ze seznamu…"
+                onPick={(a) => {
+                  setAddressInput(a.address)
+                  setAddrCoords({ lat: a.lat, lng: a.lng })
+                  setAddrSaved(false)
+                }}
+                onFreeText={(t) => {
+                  setAddressInput(t)
+                  // Ruční text bez výběru → nemáme souřadnice.
+                  setAddrCoords({ lat: null, lng: null })
+                  setAddrSaved(false)
+                }}
               />
               <button
                 onClick={handleSaveAddress}
                 disabled={addrBusy}
-                className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-60 sm:w-auto"
               >
-                {addrBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : (hasAddress ? 'Upravit' : 'Uložit adresu')}
+                {addrBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : (hasAddress ? 'Upravit adresu' : 'Uložit adresu')}
               </button>
             </div>
             {order.location_city && (

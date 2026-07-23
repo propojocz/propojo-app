@@ -1,8 +1,13 @@
 // app/marketplace/page.tsx
+// Model „karta + ceník": výsledkem hledání je KARTA, ale hledání, cena a řazení
+// čtou z ceníku (service_items). Karta ukazuje „od X Kč" a počet úkonů — proto
+// se ke každé nalezené kartě dotáhnou její zveřejněné úkony a z nich se spočítá
+// minimální cena (řazení/filtr ceny běží v kódu, ne v DB — u desítek karet stačí).
+
 import { Suspense } from 'react'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
-import type { ServiceWithProvider } from '@/types/database'
+import type { ServiceWithProvider, ServiceItem } from '@/types/database'
 import ServiceCard from '@/components/ui/ServiceCard'
 import ServiceListSkeleton from '@/components/ui/ServiceListSkeleton'
 import FilterBar from '@/components/ui/FilterBar'
@@ -56,6 +61,7 @@ async function getSubcategories(categorySlug?: string) {
   return (data as { id: string; name: string }[]) ?? []
 }
 
+// Karty, jejichž podkategorie odpovídají textu (fulltext přes názvy podkategorií).
 async function serviceIdsBySubcatText(q: string): Promise<string[]> {
   const supabase = createClient()
   const { data: subs } = await supabase.from('subcategories').select('id').ilike('name', `%${q}%`)
@@ -63,6 +69,15 @@ async function serviceIdsBySubcatText(q: string): Promise<string[]> {
   if (subIds.length === 0) return []
   const { data: links } = await supabase.from('service_subcategories').select('service_id').in('subcategory_id', subIds)
   return Array.from(new Set((links ?? []).map((l: any) => l.service_id)))
+}
+
+// Karty, které mají ZVEŘEJNĚNÝ úkon odpovídající textu (zákazník hledá „střih",
+// což je název úkonu v ceníku, ne název karty).
+async function serviceIdsByItemText(q: string): Promise<string[]> {
+  const supabase = createClient()
+  const { data: hits } = await supabase
+    .from('service_items').select('service_id').eq('is_active', true).ilike('name', `%${q}%`)
+  return Array.from(new Set((hits ?? []).map((r: any) => r.service_id)))
 }
 
 async function ServiceList({
@@ -106,7 +121,7 @@ async function ServiceList({
     const { data: provRows } = await supabase.from('profiles').select('id').ilike('city', `%${city}%`)
     const provIds = (provRows ?? []).map((p: any) => p.id)
     if (provIds.length > 0) {
-      const idList = provIds.map((id) => `"${id}"`).join(',')
+      const idList = provIds.map((id: string) => `"${id}"`).join(',')
       query = query.or(`city.ilike.%${city}%,provider_id.in.(${idList})`)
     } else {
       query = query.ilike('city', `%${city}%`)
@@ -114,42 +129,34 @@ async function ServiceList({
   }
 
   if (q) {
-    const subcatServiceIds = await serviceIdsBySubcatText(q)
-    if (subcatServiceIds.length > 0) {
-      const idList = subcatServiceIds.map((id) => `"${id}"`).join(',')
-      query = query.or(`title.ilike.%${q}%,description.ilike.%${q}%,id.in.(${idList})`)
+    // Hledáme kartu podle: názvu karty, popisu, názvu podkategorie A názvu ÚKONU.
+    const [subcatServiceIds, itemServiceIds] = await Promise.all([
+      serviceIdsBySubcatText(q),
+      serviceIdsByItemText(q),
+    ])
+    const extraIds = Array.from(new Set([...subcatServiceIds, ...itemServiceIds]))
+    if (extraIds.length > 0) {
+      const idList = extraIds.map((id) => `"${id}"`).join(',')
+      query = query.or(`title.ilike.%${q}%,subtitle.ilike.%${q}%,description.ilike.%${q}%,id.in.(${idList})`)
     } else {
-      query = query.or(`title.ilike.%${q}%,description.ilike.%${q}%`)
+      query = query.or(`title.ilike.%${q}%,subtitle.ilike.%${q}%,description.ilike.%${q}%`)
     }
   }
 
-  if (priceMin) query = query.gte('price', Number(priceMin))
-  if (priceMax) query = query.lte('price', Number(priceMax))
-
-  switch (sort) {
-    case 'nejlevnejsi': query = query.order('price', { ascending: true }); break
-    case 'nejdrazsi': query = query.order('price', { ascending: false }); break
-    default: query = query.order('created_at', { ascending: false })
-  }
+  // Cenu už NEfiltrujeme/neřadíme v SQL (services.price je legacy). Řešíme níž v kódu
+  // nad minimální cenou z úkonů. V SQL řadíme jen podle data, cenu doženeme po dotažení úkonů.
+  query = query.order('created_at', { ascending: false })
 
   const { data: services } = await query.limit(60)
 
   // ── VIDITELNOST = AKTIVNÍ PŘEDPLATNÉ ──────────────────────────────────
-  // Nabídka je v marketplace vidět jen tehdy, když má poskytovatel aktivní
-  // (nebo zkušební) předplatné. To je ta byznysová brána — bez předplatného
-  // se profil ani karty nezobrazují. Napojení Stripe Connect (přijímání
-  // plateb) je samostatná věc a viditelnost neřídí.
   const candidateProviderIds = Array.from(
     new Set(((services as ServiceWithProvider[]) ?? []).map((s) => (s.profiles as any)?.id ?? s.provider_id))
   )
 
   const activeSubscribers = new Set<string>()
   if (candidateProviderIds.length > 0) {
-    // POZOR: číst přes SERVICE ROLE, ne přes klienta s přihlášením uživatele.
-    // Tabulka subscriptions má RLS „každý vidí jen svoje" — běžný klient by tu
-    // vrátil jen předplatné přihlášeného (a nepřihlášenému NIC), takže by každý
-    // v marketplace viděl jen vlastní nabídky. Jde jen o ověření, kdo má aktivní
-    // předplatné — žádná citlivá data se nikam nezobrazují.
+    // POZOR: číst přes SERVICE ROLE (subscriptions má RLS „každý vidí jen svoje").
     const adminDb = createAdminClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -174,14 +181,8 @@ async function ServiceList({
     const min = Number(minRating)
     sorted = sorted.filter((s) => Number(s.profiles?.rating ?? 0) >= min)
   }
-  if (sort === 'hodnoceni') {
-    sorted = [...sorted].sort((a, b) => Number(b.profiles?.rating ?? 0) - Number(a.profiles?.rating ?? 0))
-  }
 
-  // ── Filtr "Jen v mém dosahu" — vzdušná vzdálenost mezi hledaným městem a městem služby ──
-  // Vztahuje se jen na služby, kde poskytovatel jezdí za zákazníkem (u_zakaznika/oboji)
-  // a má vyplněný radius i souřadnice města. Fixní provozovny (u_poskytovatele) sem nepatří —
-  // tam nejde o to, jak daleko je poskytovatel ochotný jet.
+  // ── Filtr "Jen v mém dosahu" ──
   if (dosah === '1' && city) {
     const { data: cityRow } = await supabase
       .from('obce').select('latitude, longitude').ilike('obec', city).limit(1).maybeSingle() as
@@ -197,13 +198,65 @@ async function ServiceList({
     }
   }
 
+  // ── CENÍK: ke každé kartě dotáhneme zveřejněné úkony a spočítáme min cenu + počet ──
+  const idsForItems = sorted.map((s) => s.id)
+  const itemsByService: Record<string, ServiceItem[]> = {}
+  if (idsForItems.length > 0) {
+    const { data: itemRows } = await supabase
+      .from('service_items')
+      .select('*')
+      .in('service_id', idsForItems)
+      .eq('is_active', true)
+    for (const it of (itemRows ?? []) as ServiceItem[]) {
+      ;(itemsByService[it.service_id] ??= []).push(it)
+    }
+  }
+
+  // Min cena z úkonů (jen model A s kladnou cenou). Karty bez ceněného úkonu → null (dohodou/nacenění).
+  const minPriceOf = (sid: string): number | null => {
+    const list = (itemsByService[sid] ?? []).filter(
+      (i) => i.payment_model !== 'B' && i.price != null && i.price > 0
+    )
+    if (list.length === 0) return null
+    return Math.min(...list.map((i) => Number(i.price)))
+  }
+  const itemCountOf = (sid: string): number => (itemsByService[sid] ?? []).length
+
+  // Filtr ceny podle min ceny úkonů. Karty bez ceny (dohodou/nacenění) projdou,
+  // jen když uživatel cenový filtr nepoužil — jinak by zmizely neprávem.
+  const hasPriceFilter = !!priceMin || !!priceMax
+  if (hasPriceFilter) {
+    const lo = priceMin ? Number(priceMin) : 0
+    const hi = priceMax ? Number(priceMax) : Infinity
+    sorted = sorted.filter((s) => {
+      const mp = minPriceOf(s.id)
+      if (mp == null) return false
+      return mp >= lo && mp <= hi
+    })
+  }
+
+  // Řazení
+  if (sort === 'nejlevnejsi' || sort === 'nejdrazsi') {
+    const dir = sort === 'nejlevnejsi' ? 1 : -1
+    sorted = [...sorted].sort((a, b) => {
+      const pa = minPriceOf(a.id)
+      const pb = minPriceOf(b.id)
+      // Karty bez ceny řadíme vždy na konec, ať nemíchají žebříček.
+      if (pa == null && pb == null) return 0
+      if (pa == null) return 1
+      if (pb == null) return -1
+      return (pa - pb) * dir
+    })
+  } else if (sort === 'hodnoceni') {
+    sorted = [...sorted].sort((a, b) => Number(b.profiles?.rating ?? 0) - Number(a.profiles?.rating ?? 0))
+  }
+
   if (sorted.length === 0) {
     const params = new URLSearchParams()
     const hledane = q || category
     if (hledane) params.set('category', hledane)
     if (city) params.set('city', city)
-const poptavkaHref = `/poptavky/nova${params.toString() ? `?${params.toString()}` : ''}`
-    // Skutečný název kategorie z DB (např. „Doučování"), ne slug z URL („doucovani").
+    const poptavkaHref = `/poptavky/nova${params.toString() ? `?${params.toString()}` : ''}`
     const categorySlug = params.get('category')
     let hledanyObor: string | undefined
     if (categorySlug) {
@@ -218,7 +271,6 @@ const poptavkaHref = `/poptavky/nova${params.toString() ? `?${params.toString()}
 
     return (
       <div className="space-y-4">
-        {/* Zákazník — nechte nám poptávku */}
         <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white py-14 text-center">
           <h3 className="mb-2 text-xl font-bold text-slate-800">Zatím tu nikoho nemáme</h3>
           <p className="mb-6 max-w-sm text-sm leading-relaxed text-slate-500">
@@ -233,7 +285,6 @@ const poptavkaHref = `/poptavky/nova${params.toString() ? `?${params.toString()}
           </Link>
         </div>
 
-        {/* Řemeslník — konkrétní pozvánka podle toho, co zákazník hledal */}
         <ProviderInvite category={hledanyObor} city={hledaneMesto} />
       </div>
     )
@@ -291,6 +342,9 @@ const poptavkaHref = `/poptavky/nova${params.toString() ? `?${params.toString()}
               hasFreeSlot={freeSlotProviders.has(pid)}
               isFavorited={favSet.has(pid)}
               isLoggedIn={!!user}
+              minItemPrice={minPriceOf(service.id)}
+              itemCount={itemCountOf(service.id)}
+              gallery={(service as any).gallery ?? []}
             />
           )
         })}

@@ -1,6 +1,9 @@
 // types/database.ts
-// Vygenerováno ze Supabase (npx supabase gen types) + ruční pomocné typy na konci.
-// Při změně schématu znovu: npx supabase gen types typescript --project-id svtrlztjlxxjrbncukmp
+// Ručně udržované typy odpovídající schématu Supabase (projekt svtrlztjlxxjrbncukmp).
+// Poslední úprava: přestavba na model „karta + ceník" — přidána tabulka service_items,
+// doplněny chybějící sloupce v services (gallery, adresa, location_type, radius_km,
+// city_lat/lng, price_includes_material, price_note, subtitle, phone)
+// a orders.service_item_id.
 
 export type Json =
   | string
@@ -114,6 +117,7 @@ export type Database = {
           id: string
           provider_id: string
           service_id: string | null
+          service_item_id: string | null
           status: string
           total_price: number | null
           updated_at: string
@@ -125,6 +129,7 @@ export type Database = {
           id?: string
           provider_id: string
           service_id?: string | null
+          service_item_id?: string | null
           status?: string
           total_price?: number | null
           updated_at?: string
@@ -136,6 +141,7 @@ export type Database = {
           id?: string
           provider_id?: string
           service_id?: string | null
+          service_item_id?: string | null
           status?: string
           total_price?: number | null
           updated_at?: string
@@ -227,6 +233,7 @@ export type Database = {
           city: string | null
           company_name: string | null
           created_at: string
+          display_name: string | null
           full_name: string
           ico: string | null
           ico_verified: boolean | null
@@ -243,6 +250,7 @@ export type Database = {
           city?: string | null
           company_name?: string | null
           created_at?: string
+          display_name?: string | null
           full_name: string
           ico?: string | null
           ico_verified?: boolean | null
@@ -259,6 +267,7 @@ export type Database = {
           city?: string | null
           company_name?: string | null
           created_at?: string
+          display_name?: string | null
           full_name?: string
           ico?: string | null
           ico_verified?: boolean | null
@@ -334,6 +343,66 @@ export type Database = {
         }
         Relationships: []
       }
+      service_items: {
+        Row: {
+          created_at: string
+          deposit_amount: number | null
+          duration_minutes: number | null
+          id: string
+          is_active: boolean
+          name: string
+          payment_model: string
+          price: number | null
+          price_includes_material: boolean
+          price_max: number | null
+          price_note: string | null
+          price_type: string
+          price_unit: string
+          service_id: string
+          service_type_id: string | null
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          deposit_amount?: number | null
+          duration_minutes?: number | null
+          id?: string
+          is_active?: boolean
+          name: string
+          payment_model?: string
+          price?: number | null
+          price_includes_material?: boolean
+          price_max?: number | null
+          price_note?: string | null
+          price_type?: string
+          price_unit?: string
+          service_id: string
+          service_type_id?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          deposit_amount?: number | null
+          duration_minutes?: number | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          payment_model?: string
+          price?: number | null
+          price_includes_material?: boolean
+          price_max?: number | null
+          price_note?: string | null
+          price_type?: string
+          price_unit?: string
+          service_id?: string
+          service_type_id?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       service_subcategories: {
         Row: {
           created_at: string
@@ -372,82 +441,121 @@ export type Database = {
       }
       services: {
         Row: {
+          address: string | null
+          address_lat: number | null
+          address_lng: number | null
+          address_public: boolean | null
           cancellation_policy: string
           category: string
           city: string
+          city_lat: number | null
+          city_lng: number | null
           created_at: string
           deposit_amount: number | null
           description: string
           duration_minutes: number | null
           free_km: number | null
+          gallery: string[] | null
           id: string
           image_url: string | null
           is_active: boolean
+          location_type: string | null
           payment_model: string
+          phone: string | null
           price: number | null
+          price_includes_material: boolean | null
           price_max: number | null
+          price_note: string | null
           price_per_km: number | null
           price_type: string
           price_unit: string
           provider_id: string
           quote_days: number | null
           quote_fee: number | null
+          radius_km: number | null
           service_type: string | null
           subcategory_id: string | null
+          subtitle: string | null
           title: string
           updated_at: string
           view_count: number | null
         }
         Insert: {
+          address?: string | null
+          address_lat?: number | null
+          address_lng?: number | null
+          address_public?: boolean | null
           cancellation_policy?: string
           category: string
           city: string
+          city_lat?: number | null
+          city_lng?: number | null
           created_at?: string
           deposit_amount?: number | null
           description: string
           duration_minutes?: number | null
           free_km?: number | null
+          gallery?: string[] | null
           id?: string
           image_url?: string | null
           is_active?: boolean
+          location_type?: string | null
           payment_model?: string
+          phone?: string | null
           price?: number | null
+          price_includes_material?: boolean | null
           price_max?: number | null
+          price_note?: string | null
           price_per_km?: number | null
           price_type?: string
           price_unit?: string
           provider_id: string
           quote_days?: number | null
           quote_fee?: number | null
+          radius_km?: number | null
           service_type?: string | null
           subcategory_id?: string | null
+          subtitle?: string | null
           title: string
           updated_at?: string
           view_count?: number | null
         }
         Update: {
+          address?: string | null
+          address_lat?: number | null
+          address_lng?: number | null
+          address_public?: boolean | null
           cancellation_policy?: string
           category?: string
           city?: string
+          city_lat?: number | null
+          city_lng?: number | null
           created_at?: string
           deposit_amount?: number | null
           description?: string
           duration_minutes?: number | null
           free_km?: number | null
+          gallery?: string[] | null
           id?: string
           image_url?: string | null
           is_active?: boolean
+          location_type?: string | null
           payment_model?: string
+          phone?: string | null
           price?: number | null
+          price_includes_material?: boolean | null
           price_max?: number | null
+          price_note?: string | null
           price_per_km?: number | null
           price_type?: string
           price_unit?: string
           provider_id?: string
           quote_days?: number | null
           quote_fee?: number | null
+          radius_km?: number | null
           service_type?: string | null
           subcategory_id?: string | null
+          subtitle?: string | null
           title?: string
           updated_at?: string
           view_count?: number | null
@@ -533,6 +641,7 @@ export type Database = {
         Returns: undefined
       }
       make_slug: { Args: { txt: string }; Returns: string }
+      touch_updated_at: { Args: Record<string, never>; Returns: unknown }
       unaccent_simple: { Args: { txt: string }; Returns: string }
     }
     Enums: {
@@ -550,6 +659,7 @@ export type Database = {
 
 export type Profile = Database['public']['Tables']['profiles']['Row']
 export type Service = Database['public']['Tables']['services']['Row']
+export type ServiceItem = Database['public']['Tables']['service_items']['Row']
 export type Order = Database['public']['Tables']['orders']['Row']
 export type Category = Database['public']['Tables']['categories']['Row']
 export type Subcategory = Database['public']['Tables']['subcategories']['Row']
@@ -559,6 +669,7 @@ export type Subscription = Database['public']['Tables']['subscriptions']['Row']
 export type Message = Database['public']['Tables']['messages']['Row']
 
 export type ServiceInsert = Database['public']['Tables']['services']['Insert']
+export type ServiceItemInsert = Database['public']['Tables']['service_items']['Insert']
 export type ProfileInsert = Database['public']['Tables']['profiles']['Insert']
 export type OrderInsert = Database['public']['Tables']['orders']['Insert']
 
@@ -573,9 +684,44 @@ export type OrderStatus =
 // Kategorie – v DB je to volný text (slug)
 export type ServiceCategory = string
 
-// Rozšířený typ: služba + profil poskytovatele (joined dotaz)
+// Číselníky používané ve formulářích
+export type PaymentModel = 'A' | 'B'
+export type PriceType = 'fixed' | 'range' | 'on_agreement'
+export type PriceUnit = 'ukon' | 'hod' | 'kus' | 'den' | 'projekt' | 'm2' | 'bm'
+export type LocationType = 'u_poskytovatele' | 'u_zakaznika' | 'oboji'
+
+// Popisky jednotek ceny — jediné místo, odkud je brát v UI.
+export const PRICE_UNIT_LABELS: Record<PriceUnit, string> = {
+  ukon: 'za úkon',
+  hod: 'za hodinu',
+  den: 'za den',
+  kus: 'za kus',
+  projekt: 'za projekt',
+  m2: 'za m²',
+  bm: 'za běžný metr',
+}
+
+// Profil poskytovatele tak, jak ho potřebují karty a detail nabídky.
+export type ProviderSummary = {
+  id: string
+  full_name: string
+  display_name: string | null
+  company_name: string | null
+  avatar_url: string | null
+  rating: number | null
+  review_count: number | null
+  city: string | null
+  ico_verified: boolean | null
+}
+
+// Rozšířený typ: karta + profil poskytovatele (joined dotaz)
 export type ServiceWithProvider = Service & {
-  profiles: Pick<Profile, 'id' | 'full_name' | 'avatar_url' | 'rating' | 'review_count' | 'city'>
+  profiles: ProviderSummary
+}
+
+// Karta i s ceníkem úkonů — používá detail karty a marketplace.
+export type ServiceWithItems = ServiceWithProvider & {
+  service_items: ServiceItem[]
 }
 
 // Fallback metadata kategorií pro UI (emoji/label).

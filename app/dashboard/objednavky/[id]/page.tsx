@@ -35,6 +35,8 @@ type OrderRow = {
   deposit_amount: number | null
   location_city: string | null
   location_address: string | null
+   location_lat: number | null
+  location_lng: number | null
   service_location: string | null
   scheduled_at: string | null
   services: ServiceLite | null
