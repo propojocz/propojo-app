@@ -348,6 +348,7 @@ export type Database = {
           created_at: string
           deposit_amount: number | null
           duration_minutes: number | null
+          free_km: number | null
           id: string
           is_active: boolean
           name: string
@@ -356,8 +357,11 @@ export type Database = {
           price_includes_material: boolean
           price_max: number | null
           price_note: string | null
+          price_per_km: number | null
           price_type: string
           price_unit: string
+          quote_days: number | null
+          quote_fee: number | null
           service_id: string
           service_type_id: string | null
           sort_order: number
@@ -367,6 +371,7 @@ export type Database = {
           created_at?: string
           deposit_amount?: number | null
           duration_minutes?: number | null
+          free_km?: number | null
           id?: string
           is_active?: boolean
           name: string
@@ -375,8 +380,11 @@ export type Database = {
           price_includes_material?: boolean
           price_max?: number | null
           price_note?: string | null
+          price_per_km?: number | null
           price_type?: string
           price_unit?: string
+          quote_days?: number | null
+          quote_fee?: number | null
           service_id: string
           service_type_id?: string | null
           sort_order?: number
@@ -386,6 +394,7 @@ export type Database = {
           created_at?: string
           deposit_amount?: number | null
           duration_minutes?: number | null
+          free_km?: number | null
           id?: string
           is_active?: boolean
           name?: string
@@ -394,8 +403,11 @@ export type Database = {
           price_includes_material?: boolean
           price_max?: number | null
           price_note?: string | null
+          price_per_km?: number | null
           price_type?: string
           price_unit?: string
+          quote_days?: number | null
+          quote_fee?: number | null
           service_id?: string
           service_type_id?: string | null
           sort_order?: number

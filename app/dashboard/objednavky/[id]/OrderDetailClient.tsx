@@ -138,7 +138,13 @@ export default function OrderDetailClient({
     : null
 
   const isModelB = service?.payment_model === 'B'
-  const depositAmount = isModelB ? Number(service?.quote_fee ?? 0) : Number(service?.deposit_amount ?? 0)
+  // Částka zálohy: přednost má hodnota uložená PŘÍMO NA OBJEDNÁVCE (bere se
+  // z úkonu při vytvoření) — karta je jen fallback pro staré objednávky.
+  // Poskytovatel tak vždy vidí, kolik zákazník skutečně platí, a na místě
+  // se vyrovnají jen o zbytek.
+  const depositAmount = Number(
+    order.deposit_amount ?? (isModelB ? service?.quote_fee : service?.deposit_amount) ?? 0
+  )
   const isCustomer = !isProvider
   const payLabel = isModelB ? 'poplatek za výjezd' : 'rezervační zálohu'
   const paidTitle = isModelB ? 'Poplatek za výjezd uhrazen' : 'Rezervační záloha uhrazena'

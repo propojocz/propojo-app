@@ -14,7 +14,7 @@
 
 import { useState, useEffect, type MouseEvent } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle2, Loader2, MapPin, Home, Store, X, Clock, Wallet, CalendarDays, Truck } from 'lucide-react'
+import { CheckCircle2, Loader2, MapPin, Store, X, Clock, Wallet, CalendarDays, Truck } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createOrder } from '@/lib/actions/orders'
@@ -49,7 +49,22 @@ interface Props {
   slots?: SlotOption[]
   /** Podmínky výjezdu z karty — zobrazí se u úkonu s naceněním (model B). */
   quoteTerms?: QuoteTerms
+  /** Odkud poskytovatel vyjíždí a jak daleko — pro kontrolu dosahu. */
+  providerGeo?: { lat: number | null; lng: number | null; radiusKm: number | null }
   onClose: () => void
+}
+
+// Vzdálenost dvou bodů na zemi (km). Vlastní kopie, ať se dá počítat i v prohlížeči
+// a zákazník dostal odpověď hned, ne až po odeslání.
+function distanceKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371
+  const dLat = ((bLat - aLat) * Math.PI) / 180
+  const dLng = ((bLng - aLng) * Math.PI) / 180
+  const x =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((aLat * Math.PI) / 180) * Math.cos((bLat * Math.PI) / 180) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2)
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x))
 }
 
 const UNITS_WITH_DURATION: PriceUnit[] = ['ukon', 'hod']
@@ -68,7 +83,7 @@ function windowMinutes(s: SlotOption): number {
 }
 
 export default function OrderItemModal({
-  item, serviceId, providerId, isLoggedIn, locationType = 'u_zakaznika', slots = [], quoteTerms, onClose,
+  item, serviceId, providerId, isLoggedIn, locationType = 'u_zakaznika', slots = [], quoteTerms, providerGeo, onClose,
 }: Props) {
   const router = useRouter()
   const [state, setState] = useState<'form' | 'loading' | 'success' | 'error'>('form')
@@ -76,13 +91,14 @@ export default function OrderItemModal({
   const [city, setCity] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null)
-  const [place, setPlace] = useState<'u_zakaznika' | 'u_poskytovatele'>(
-    locationType === 'u_poskytovatele' ? 'u_poskytovatele' : 'u_zakaznika'
-  )
+  // Souřadnice vybrané obce — bez nich dosah spočítat nejde.
+  const [cityGeo, setCityGeo] = useState<{ lat: number; lng: number } | null>(null)
 
   const isModelB = item.payment_model === 'B'
-  const isChoice = locationType === 'oboji'
-  const atCustomer = isChoice ? place === 'u_zakaznika' : locationType === 'u_zakaznika'
+  // Místo výkonu určuje KARTA, ne zákazník. Kdo jezdí za zákazníky i přijímá
+  // v provozovně, má na to dvě karty — jinak by zákazník rozhodoval o tom,
+  // co si poskytovatel nastavil.
+  const atCustomer = locationType !== 'u_poskytovatele'
   const needsCity = atCustomer
 
   const unit = PRICE_UNIT_LABELS[(item.price_unit as keyof typeof PRICE_UNIT_LABELS)] ?? ''
@@ -105,6 +121,19 @@ export default function OrderItemModal({
         .filter((s) => !item.duration_minutes || windowMinutes(s) >= item.duration_minutes)
         .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime())
   const hasSlots = fitSlots.length > 0
+
+  // ── Dosah poskytovatele ──────────────────────────────────────
+  // Masér z Valmezu nemá jezdit do Prahy. U REZERVACE TERMÍNU objednávku
+  // rovnou nepustíme (přijímá se automaticky, poskytovatel nemá šanci
+  // zasáhnout). U POPTÁVKY jen upozorníme — tam rozhoduje on sám a může
+  // výjimku udělat.
+  const radius = providerGeo?.radiusKm ?? null
+  const distance =
+    atCustomer && cityGeo && providerGeo?.lat != null && providerGeo?.lng != null
+      ? distanceKm(providerGeo.lat, providerGeo.lng, cityGeo.lat, cityGeo.lng)
+      : null
+  const outOfRange = distance != null && radius != null && distance > radius
+  const blockedByRange = outOfRange && hasSlots && !!selectedSlot
 
   // Předvyplnění města z profilu.
   useEffect(() => {
@@ -139,6 +168,11 @@ export default function OrderItemModal({
     if (needsCity && !city.trim()) {
       setState('error')
       setErrorMsg('Zadejte prosím město nebo obec, kde se má služba provést.')
+      return
+    }
+    if (blockedByRange) {
+      setState('error')
+      setErrorMsg('Tato obec je mimo dosah poskytovatele — termín rezervovat nelze.')
       return
     }
     setState('loading'); setErrorMsg('')
@@ -177,8 +211,9 @@ export default function OrderItemModal({
     else { setState('error'); setErrorMsg(result.error) }
   }
 
-  // Když jsou termíny, k odeslání je potřeba jeden vybrat.
-  const submitDisabled = state === 'loading' || (hasSlots && !selectedSlot)
+  // Když jsou termíny, k odeslání je potřeba jeden vybrat. A rezervaci mimo
+  // dosah nepustíme vůbec — poskytovatel by dostal potvrzený termín, kam nedojede.
+  const submitDisabled = state === 'loading' || (hasSlots && !selectedSlot) || blockedByRange
 
   return (
     <AnimatePresence>
@@ -322,29 +357,6 @@ export default function OrderItemModal({
                 </div>
               )}
 
-              {/* U 'oboji': volba místa */}
-              {isChoice && (
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-slate-600">Kde chcete službu využít?</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setPlace('u_poskytovatele')}
-                      className={`flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${place === 'u_poskytovatele' ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                    >
-                      <Store className="h-4 w-4" /> U živnostníka
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPlace('u_zakaznika')}
-                      className={`flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${place === 'u_zakaznika' ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                    >
-                      <Home className="h-4 w-4" /> U mě
-                    </button>
-                  </div>
-                </div>
-              )}
-
               {/* Město — jen když se koná u zákazníka. Našeptávač obcí. */}
               {needsCity ? (
                 <div>
@@ -355,15 +367,45 @@ export default function OrderItemModal({
                     mode="obce"
                     defaultValue={city}
                     placeholder="Začněte psát a vyberte obec…"
-                    onPickObec={(picked) => setCity(picked.obec)}
-                    onFreeText={(text) => setCity(text)}
+                    onPickObec={(picked) => {
+                      setCity(picked.obec)
+                      setCityGeo({ lat: picked.latitude, lng: picked.longitude })
+                    }}
+                    onFreeText={(text) => { setCity(text); setCityGeo(null) }}
                   />
-                  <p className="mt-1 text-[11px] text-slate-400">Stačí obec — přesnou adresu doplníte až po přijetí objednávky.</p>
+                  {outOfRange ? (
+                    <div className={`mt-2 flex items-start gap-2 rounded-xl border px-3 py-2.5 text-xs leading-relaxed ${
+                      blockedByRange
+                        ? 'border-red-200 bg-red-50 text-red-700'
+                        : 'border-amber-200 bg-amber-50 text-amber-800'
+                    }`}>
+                      <Truck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span>
+                        {blockedByRange ? (
+                          <>
+                            <strong>Mimo dosah.</strong> Poskytovatel jezdí do {radius} km,
+                            vaše obec je asi {Math.round(distance as number)} km daleko.
+                            Termín takhle rezervovat nejde — zkuste někoho blíž.
+                          </>
+                        ) : (
+                          <>
+                            <strong>Pozor, je to daleko.</strong> Poskytovatel obvykle jezdí do {radius} km,
+                            vaše obec je asi {Math.round(distance as number)} km. Poptávku poslat můžete,
+                            ale počítejte s tím, že ji nemusí přijmout.
+                          </>
+                        )}
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-[11px] text-slate-400">Stačí obec — přesnou adresu doplníte až po přijetí objednávky.</p>
+                  )}
                 </div>
               ) : (
                 <div className="flex items-start gap-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
                   <Store className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-                  <span>Služba probíhá na adrese živnostníka. Adresu uvidíte po přijetí objednávky.</span>
+                  <span>
+                    Přijdete za živnostníkem — adresu najdete na jeho kartě{hasSlots ? ' a v potvrzení termínu' : ' a v potvrzení objednávky'}.
+                  </span>
                 </div>
               )}
 

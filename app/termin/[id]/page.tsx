@@ -27,6 +27,7 @@ type SlotRow = {
   starts_at: string
   ends_at: string
   status: string
+  pending_confirm?: boolean | null
 }
 
 const fmtDayLong = (iso: string) =>
@@ -71,7 +72,7 @@ export default async function TerminPage({ params }: Props) {
 
   const { data: slot } = await supabase
     .from('availability_slots')
-    .select('id, provider_id, starts_at, ends_at, status')
+    .select('id, provider_id, starts_at, ends_at, status, pending_confirm')
     .eq('id', params.id)
     .single() as { data: SlotRow | null }
 
@@ -89,7 +90,7 @@ export default async function TerminPage({ params }: Props) {
 
   const { data: services } = await supabase
     .from('services')
-    .select(`id, title, subtitle, city, image_url, location_type, quote_fee, price_per_km, free_km, quote_days, is_active,
+    .select(`id, title, subtitle, city, image_url, location_type, quote_fee, price_per_km, free_km, quote_days, is_active, city_lat, city_lng, radius_km,
              profiles (id, full_name, display_name, company_name, avatar_url, rating, review_count, is_suspended)`)
     .in('id', serviceIds)
     .eq('is_active', true) as { data: any[] | null }
@@ -116,7 +117,9 @@ export default async function TerminPage({ params }: Props) {
 
   const minutes = windowMinutes(slot.starts_at, slot.ends_at)
   const isPast = new Date(slot.starts_at) < new Date()
-  const isTaken = slot.status !== 'volno'
+  // Zbytek okna čekající na rozhodnutí poskytovatele se veřejně tváří jako
+  // obsazený — nabídne se, teprve až ho poskytovatel zveřejní.
+  const isTaken = slot.status !== 'volno' || (slot as any).pending_confirm === true
   const gone = isPast || isTaken
 
   // Úkony, které se do okna vejdou (jen zveřejněné, model A — nacenění se nerezervuje na čas)
@@ -138,6 +141,7 @@ export default async function TerminPage({ params }: Props) {
     title: string
     locationType: string | null
     quoteTerms: { quote_fee: number | null; price_per_km: number | null; free_km: number | null; quote_days: number | null }
+    providerGeo: { lat: number | null; lng: number | null; radiusKm: number | null }
   }> = {}
   for (const s of activeServices) {
     serviceMap[s.id] = {
@@ -148,6 +152,11 @@ export default async function TerminPage({ params }: Props) {
         price_per_km: s.price_per_km,
         free_km: s.free_km,
         quote_days: s.quote_days,
+      },
+      providerGeo: {
+        lat: s.city_lat ?? null,
+        lng: s.city_lng ?? null,
+        radiusKm: s.radius_km ?? null,
       },
     }
   }

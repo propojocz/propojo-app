@@ -21,6 +21,8 @@ interface Props {
   slots?: SlotOption[]
   /** Podmínky výjezdu z karty — modal je ukáže u úkonů s naceněním (model B). */
   quoteTerms?: QuoteTerms
+  /** Odkud poskytovatel vyjíždí a jak daleko — modal podle toho hlídá dosah. */
+  providerGeo?: { lat: number | null; lng: number | null; radiusKm: number | null }
 }
 
 function formatDuration(min: number | null): string | null {
@@ -44,7 +46,7 @@ function priceText(it: ServiceItem): { main: string; sub: string | null } {
   return { main: 'Cena dohodou', sub: null }
 }
 
-export default function PriceListPublic({ items, serviceId, providerId, isLoggedIn = false, locationType = 'u_zakaznika', slots = [], quoteTerms }: Props) {
+export default function PriceListPublic({ items, serviceId, providerId, isLoggedIn = false, locationType = 'u_zakaznika', slots = [], quoteTerms, providerGeo }: Props) {
   const [openId, setOpenId] = useState<string | null>(null)
   const [orderItem, setOrderItem] = useState<ServiceItem | null>(null)
 
@@ -147,6 +149,7 @@ export default function PriceListPublic({ items, serviceId, providerId, isLogged
           locationType={locationType}
           slots={slots}
           quoteTerms={quoteTerms}
+          providerGeo={providerGeo}
           onClose={() => setOrderItem(null)}
         />
       )}

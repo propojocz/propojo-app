@@ -1,23 +1,45 @@
 'use client'
 // app/dashboard/terminy/TerminyClient.tsx
-// Poskytovatel: přidá volné okno (den, od-do) a zaškrtne služby, které se do něj vejdou.
-// Zákazník pak okno uvidí u zaškrtnutých služeb a rezervuje (další část Fáze 1).
+// Poskytovatel: přidá volné okno (den, od-do) a zaškrtne KARTY, jejichž ceník
+// se do okna nabídne. Zákazník pak v ceníku vybere konkrétní úkon, který se
+// do okna vejde délkou.
+//
+// Po vytvoření okna se hned na místě otevře „Komu dát vědět?" — rozeslání
+// stálým zákazníkům, oblíbeným a čekajícím + sdílecí odkaz do story.
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CalendarDays, Clock, Plus, Trash2, Loader2, Info, CheckCircle2 } from 'lucide-react'
-import { createSlot, deleteSlot } from '@/lib/actions/slots'
+import { CalendarDays, Clock, Plus, Trash2, Loader2, Info, CheckCircle2, ListChecks, UserPlus, XCircle } from 'lucide-react'
+import { createSlot, deleteSlot, confirmRemainder, dismissRemainder } from '@/lib/actions/slots'
+import SlotNotifyPanel from '@/components/ui/SlotNotifyPanel'
+import ShareSlotButton from '@/components/ui/ShareSlotButton'
 
-type ServiceLite = { id: string; title: string; duration_minutes: number | null }
+type ServiceLite = {
+  id: string
+  title: string
+  /** Kolik zveřejněných úkonů s pevnou cenou karta má (délka patří úkonu, ne kartě). */
+  itemCount: number
+  /** Nejkratší úkon v minutách — poskytovatel podle něj pozná, jak krátké okno má smysl. */
+  shortestMinutes: number | null
+}
+
 type SlotRow = {
   id: string
   starts_at: string
   ends_at: string
   status: string
+  /** Zbytek okna po rezervaci — čeká, až poskytovatel řekne, jestli ho nabídnout dál. */
+  pending_confirm?: boolean | null
   slot_services: { service_id: string; services: { title: string } | null }[]
 }
 
-export default function TerminyClient({ services, slots, preselectedServiceId }: { services: ServiceLite[]; slots: SlotRow[]; preselectedServiceId?: string }) {
+export default function TerminyClient({
+  services, slots, preselectedServiceId,
+}: {
+  services: ServiceLite[]
+  slots: SlotRow[]
+  preselectedServiceId?: string
+}) {
   const router = useRouter()
   const [date, setDate] = useState('')
   const [from, setFrom] = useState('')
@@ -29,31 +51,58 @@ export default function TerminyClient({ services, slots, preselectedServiceId }:
   const [busy, setBusy] = useState(false)
   const [delId, setDelId] = useState<string | null>(null)
   const [err, setErr] = useState('')
-  const [ok, setOk] = useState(false)
+  // Právě vytvořené okno — otevře panel „Komu dát vědět?"
+  const [createdSlot, setCreatedSlot] = useState<{ id: string; label: string } | null>(null)
+  // Zbytek okna, o kterém se právě rozhoduje
+  const [remBusy, setRemBusy] = useState<string | null>(null)
 
   const toggle = (id: string) =>
     setChecked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
 
+  // Zbytky po rezervaci čekající na rozhodnutí řešíme zvlášť nahoře.
+  const pendingSlots = slots.filter((s) => s.pending_confirm === true && s.status === 'volno')
+  const normalSlots = slots.filter((s) => !(s.pending_confirm === true && s.status === 'volno'))
+
+  const fmtDay = (iso: string) =>
+    new Intl.DateTimeFormat('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' }).format(new Date(iso))
+  const fmtTime = (iso: string) =>
+    new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
+
   const submit = async () => {
     setErr('')
-    setOk(false)
+    setCreatedSlot(null)
     if (!date || !from || !to) { setErr('Vyplňte den a čas od–do.'); return }
-    if (checked.length === 0) { setErr('Zaškrtněte alespoň jednu službu, která se do okna vejde.'); return }
+    if (checked.length === 0) { setErr('Zaškrtněte alespoň jednu kartu, jejíž ceník se do okna nabídne.'); return }
     setBusy(true)
+
+    const startsAt = new Date(`${date}T${from}:00`)
+    const endsAt = new Date(`${date}T${to}:00`)
+
     const res = await createSlot({
-      starts_at: new Date(`${date}T${from}:00`).toISOString(),
-      ends_at: new Date(`${date}T${to}:00`).toISOString(),
+      starts_at: startsAt.toISOString(),
+      ends_at: endsAt.toISOString(),
       service_ids: checked,
     })
-    if (res.success) {
-      setOk(true)
+
+    if (res.success && res.id) {
+      const label = `${fmtDay(startsAt.toISOString())} ${fmtTime(startsAt.toISOString())}–${fmtTime(endsAt.toISOString())}`
+      setCreatedSlot({ id: res.id, label })
       setDate(''); setFrom(''); setTo(''); setChecked([])
       router.refresh()
-      setTimeout(() => setOk(false), 3000)
-    } else {
+    } else if (!res.success) {
       setErr(res.error)
     }
     setBusy(false)
+  }
+
+  const decideRemainder = async (id: string, accept: boolean, label: string) => {
+    setRemBusy(id)
+    const res = accept ? await confirmRemainder(id) : await dismissRemainder(id)
+    setRemBusy(null)
+    if (!res.success) { alert(res.error); return }
+    router.refresh()
+    // Po zveřejnění rovnou nabídneme rozeslání — je to last-minute, každá minuta hraje.
+    if (accept) setCreatedSlot({ id, label })
   }
 
   const remove = async (id: string) => {
@@ -61,29 +110,83 @@ export default function TerminyClient({ services, slots, preselectedServiceId }:
     setDelId(id)
     const res = await deleteSlot(id)
     if (!res.success) alert(res.error)
+    if (createdSlot?.id === id) setCreatedSlot(null)
     router.refresh()
     setDelId(null)
   }
-
-  const fmtDay = (iso: string) =>
-    new Intl.DateTimeFormat('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' }).format(new Date(iso))
-  const fmtTime = (iso: string) =>
-    new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-black text-slate-900">Moje termíny</h1>
         <p className="mt-0.5 text-sm text-slate-500">
-          Máte volno? Přidejte okno a zákazníci si ho rovnou rezervují.
+          Vypadl vám klient? Přidejte volné okno a dejte o něm vědět — zákazníci si ho rovnou rezervují.
         </p>
       </div>
 
       {preselectedName && (
         <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
-          Přidáváte termín pro <strong>„{preselectedName}"</strong> — je už zaškrtnutá níže. Klidně přidejte i další příbuznou službu, pokud se vejde do stejného okna.
+          Přidáváte termín pro <strong>„{preselectedName}"</strong> — je už zaškrtnutá níže.
         </div>
+      )}
+
+      {/* ── Zbytky po rezervaci: vleze se ještě někdo? ── */}
+      {pendingSlots.length > 0 && (
+        <div className="space-y-2">
+          {pendingSlots.map((slot) => {
+            const mins = Math.round(
+              (new Date(slot.ends_at).getTime() - new Date(slot.starts_at).getTime()) / 60000
+            )
+            const label = `${fmtDay(slot.starts_at)} ${fmtTime(slot.starts_at)}–${fmtTime(slot.ends_at)}`
+            const busy = remBusy === slot.id
+            return (
+              <div key={slot.id} className="rounded-2xl border-2 border-amber-300 bg-amber-50/70 p-5">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100">
+                    <UserPlus className="h-5 w-5 text-amber-600" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-black text-slate-900">Vleze se k vám ještě někdo?</p>
+                    <p className="mt-0.5 text-sm leading-relaxed text-slate-600">
+                      Po rezervaci vám zbývá <strong>{mins} minut</strong> — {label}.
+                      Dokud nerozhodnete, tento čas nikdo nevidí.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => decideRemainder(slot.id, true, label)}
+                    disabled={busy}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 font-bold text-white transition hover:bg-emerald-600 disabled:opacity-60"
+                  >
+                    {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                    Ano, nabídnout dál
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => decideRemainder(slot.id, false, label)}
+                    disabled={busy}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 font-bold text-slate-600 transition hover:border-red-300 hover:text-red-600 disabled:opacity-60"
+                  >
+                    <XCircle className="h-4 w-4" /> Ne, mám dost
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* ── Právě vytvořené okno: komu dát vědět ── */}
+      {createdSlot && (
+        <SlotNotifyPanel
+          slotId={createdSlot.id}
+          label={createdSlot.label}
+          onClose={() => setCreatedSlot(null)}
+        />
       )}
 
       {/* ── Přidat okno ── */}
@@ -96,8 +199,8 @@ export default function TerminyClient({ services, slots, preselectedServiceId }:
           <div className="flex items-start gap-2 rounded-xl bg-blue-50 px-4 py-3 text-sm text-slate-600">
             <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
             <span>
-              Termíny fungují u služeb s rezervační zálohou. Zatím žádnou aktivní nemáte —
-              přidejte službu a vraťte se sem.
+              Termíny fungují u úkonů s pevnou cenou a zálohou. Zatím žádný takový v ceníku nemáte —
+              přidejte úkon do ceníku některé karty a vraťte se sem.
             </span>
           </div>
         ) : (
@@ -128,8 +231,11 @@ export default function TerminyClient({ services, slots, preselectedServiceId }:
             </div>
 
             <div>
-              <p className="mb-2 text-xs font-semibold text-slate-600">
-                Co se do okna vejde? <span className="font-normal text-slate-400">(zaškrtněte jednu i více)</span>
+              <p className="mb-1 text-xs font-semibold text-slate-600">
+                Kterou kartu do okna nabídnout? <span className="font-normal text-slate-400">(i více)</span>
+              </p>
+              <p className="mb-2 text-xs text-slate-400">
+                Zákazník si pak v ceníku vybere konkrétní úkon — nabídnou se mu jen ty, které se do okna délkou vejdou.
               </p>
               <div className="flex flex-wrap gap-2">
                 {services.map((s) => {
@@ -145,7 +251,11 @@ export default function TerminyClient({ services, slots, preselectedServiceId }:
                         {isOn && <span className="text-[9px] leading-none">✓</span>}
                       </span>
                       {s.title}
-                      {s.duration_minutes ? <span className="text-xs text-slate-400">· {s.duration_minutes} min</span> : null}
+                      <span className="inline-flex items-center gap-0.5 text-xs text-slate-400">
+                        <ListChecks className="h-3 w-3" />
+                        {s.itemCount}
+                        {s.shortestMinutes ? ` · od ${s.shortestMinutes} min` : ''}
+                      </span>
                     </button>
                   )
                 })}
@@ -153,11 +263,6 @@ export default function TerminyClient({ services, slots, preselectedServiceId }:
             </div>
 
             {err && <p className="text-sm text-red-600">{err}</p>}
-            {ok && (
-              <p className="flex items-center gap-1.5 text-sm text-emerald-600">
-                <CheckCircle2 className="h-4 w-4" /> Okno přidáno. Zákazníci ho uvidí u vybraných služeb.
-              </p>
-            )}
 
             <button onClick={submit} disabled={busy} className="btn-primary w-full justify-center disabled:opacity-60">
               {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Ukládám…</> : <><Plus className="h-4 w-4" /> Přidat okno</>}
@@ -171,19 +276,20 @@ export default function TerminyClient({ services, slots, preselectedServiceId }:
         <div className="border-b border-slate-100 px-6 py-4">
           <h2 className="font-black text-slate-900">Nadcházející okna</h2>
         </div>
-        {slots.length === 0 ? (
+        {normalSlots.length === 0 ? (
           <p className="px-6 py-10 text-center text-sm text-slate-400">
             Zatím žádná okna. Přidejte první nahoře.
           </p>
         ) : (
           <ul className="divide-y divide-slate-100">
-            {slots.map((slot) => {
+            {normalSlots.map((slot) => {
               const names = (slot.slot_services ?? [])
                 .map((l) => l.services?.title)
                 .filter(Boolean) as string[]
               const taken = slot.status === 'zabrano'
+              const label = `${fmtDay(slot.starts_at)} ${fmtTime(slot.starts_at)}–${fmtTime(slot.ends_at)}`
               return (
-                <li key={slot.id} className="flex items-center gap-4 px-6 py-4">
+                <li key={slot.id} className="flex flex-wrap items-center gap-3 px-6 py-4 sm:flex-nowrap sm:gap-4">
                   <div className="flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-xl bg-slate-100 text-xs font-bold text-slate-700">
                     <span>{fmtDay(slot.starts_at)}</span>
                   </div>
@@ -196,12 +302,23 @@ export default function TerminyClient({ services, slots, preselectedServiceId }:
                     </p>
                     <p className="truncate text-sm text-slate-500">{names.join(' · ') || '—'}</p>
                   </div>
+
                   {!taken && (
-                    <button onClick={() => remove(slot.id)} disabled={delId === slot.id}
-                      className="rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                      title="Smazat okno">
-                      {delId === slot.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                    </button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <ShareSlotButton slotId={slot.id} label={label} variant="compact" />
+                      <button
+                        type="button"
+                        onClick={() => setCreatedSlot({ id: slot.id, label })}
+                        className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-emerald-300 hover:text-emerald-700"
+                      >
+                        Nabídnout zákazníkům
+                      </button>
+                      <button onClick={() => remove(slot.id)} disabled={delId === slot.id}
+                        className="rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                        title="Smazat okno">
+                        {delId === slot.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      </button>
+                    </div>
                   )}
                 </li>
               )

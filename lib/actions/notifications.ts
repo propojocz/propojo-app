@@ -2,6 +2,7 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { sendPush } from '@/lib/actions/push'
 
 // Admin klient (obchází RLS) — používá se jen na serveru pro zápis oznámení.
 function getAdminClient() {
@@ -46,6 +47,22 @@ export async function createNotification(params: {
     if (error) console.error('[createNotification]', error)
   } catch (err) {
     console.error('[createNotification] neočekávaná chyba:', err)
+  }
+
+  // Push do telefonu / prohlížeče. Jede vedle zápisu do zvonečku, ve vlastním
+  // try/catch — když push selže, oznámení v aplikaci zůstane v pořádku.
+  try {
+    await sendPush({
+      userId: params.userId,
+      title: params.title,
+      body: params.preview ?? undefined,
+      url: params.orderId
+        ? `/dashboard/objednavky/${params.orderId}`
+        : '/dashboard/objednavky',
+      tag: params.orderId ?? undefined,
+    })
+  } catch (err) {
+    console.error('[createNotification] push:', err)
   }
 }
 

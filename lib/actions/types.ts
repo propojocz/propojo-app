@@ -71,6 +71,11 @@ export type ServiceItemFormValues = {
   price_note?: string | null
   is_active?: boolean
   sort_order?: number
+  // Podmínky výjezdu — jen u modelu B (nacenění na místě)
+  quote_fee?: number | null
+  price_per_km?: number | null
+  free_km?: number | null
+  quote_days?: number | null
 }
 
 export type ActionResult =

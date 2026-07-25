@@ -1,16 +1,19 @@
 'use client'
 // components/ui/ServiceItemEditor.tsx
 // Editor JEDNÉ položky ceníku (úkonu). Řízená komponenta — nezná databázi.
-// Dostane počáteční hodnoty a service_types nabídnuté z podkategorií karty,
-// vrátí hotové hodnoty přes onSave. Ukládání do DB řeší volající.
 //
-// Model A/B je zde NA ÚROVNI POLOŽKY (odsouhlaseno): jedna karta může mít
-// „Zaměření 1 500 Kč" (A) i „Výjezd a nacenění" (B) zároveň.
+// Model A/B je na úrovni POLOŽKY: jedna karta může mít „Zaměření 1 500 Kč" (A)
+// i „Výjezd a nacenění" (B) zároveň.
+//
+// Podmínky výjezdu (poplatek za nacenění, Kč/km, doprava zdarma, do kolika dnů)
+// patří sem — k úkonu, ne ke kartě. Dřív byly na kartě a vedle toho tady byla
+// volba „Nejdřív nacenění", takže na jedné obrazovce stálo dvakrát totéž.
 
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Info, Loader2, X } from 'lucide-react'
+import { Info, Loader2, X, Truck } from 'lucide-react'
 import { PRICE_UNIT_LABELS } from '@/types/database'
+import InfoTip from '@/components/ui/InfoTip'
 import type { PaymentModel, PriceType, PriceUnit } from '@/types/database'
 
 // Typy služeb nabídnuté z podkategorií karty (pro našeptávač názvu).
@@ -34,6 +37,11 @@ export interface ServiceItemValues {
   price_includes_material: boolean
   price_note: string | null
   is_active: boolean
+  // Podmínky výjezdu — jen model B
+  quote_fee: number | null
+  price_per_km: number | null
+  free_km: number | null
+  quote_days: number | null
 }
 
 interface Props {
@@ -59,6 +67,10 @@ const EMPTY: ServiceItemValues = {
   price_includes_material: true,
   price_note: null,
   is_active: true,
+  quote_fee: null,
+  price_per_km: null,
+  free_km: null,
+  quote_days: null,
 }
 
 const numOrNull = (v: string): number | null => (v === '' || v == null ? null : Number(v))
@@ -117,6 +129,11 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
       if (out.deposit_amount != null && out.deposit_amount < 200) out.deposit_amount = 200
       if (out.deposit_amount == null) out.deposit_amount = 200
       out.price_note = out.price_note?.trim() || null
+      // Výjezdové podmínky patří jen k naceňovacímu úkonu.
+      out.quote_fee = null
+      out.price_per_km = null
+      out.free_km = null
+      out.quote_days = null
     }
     onSave(out)
   }
@@ -173,7 +190,16 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
 
         {/* Model A/B — na úrovni položky */}
         <div className="space-y-2">
-          <label className="form-label">Jak se za tento úkon platí? *</label>
+          <label className="form-label flex items-center justify-between gap-1">
+            <span>Jak se za tento úkon platí? *</span>
+            <InfoTip>
+              <strong>Pevná cena</strong> — víte předem, kolik to stojí. Zákazník si rezervuje
+              termín a zaplatí zálohu.<br />
+              <strong>Nacenění</strong> — cenu nelze určit dopředu. Přijedete se podívat,
+              teprve pak dáte nabídku. Používejte vždy, když si cenou nejste jistí — ušetří
+              to spory o doúčtování.
+            </InfoTip>
+          </label>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <button
               type="button"
@@ -188,7 +214,7 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
                 </span>
                 <span className="text-sm font-extrabold text-slate-900">Pevná cena a záloha</span>
               </div>
-              <p className="pl-5.5 text-xs leading-relaxed text-slate-500">Zákazník rezervuje termín a zaplatí zálohu.</p>
+              <p className="text-xs leading-relaxed text-slate-500">Zákazník rezervuje termín a zaplatí zálohu.</p>
             </button>
 
             <button
@@ -204,7 +230,7 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
                 </span>
                 <span className="text-sm font-extrabold text-slate-900">Nejdřív nacenění</span>
               </div>
-              <p className="pl-5.5 text-xs leading-relaxed text-slate-500">Přijedete se podívat, cenu určíte na místě.</p>
+              <p className="text-xs leading-relaxed text-slate-500">Přijedete se podívat, cenu určíte na místě.</p>
             </button>
           </div>
         </div>
@@ -235,7 +261,15 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
             {/* Jednotka ceny */}
             {!isOnAgreement && (
               <div className="space-y-1.5">
-                <label className="form-label">Jednotka ceny *</label>
+                <label className="form-label flex items-center justify-between gap-1">
+                  <span>Jednotka ceny *</span>
+                  <InfoTip>
+                    <strong>Za úkon</strong> = pevná částka za celý výkon (střih, manikúra).
+                    <strong> Za hodinu</strong> = sazba krát čas.
+                    U dlouhých prací (za den, za m²) se délka v kalendáři nepoužívá — termíny
+                    na ně nemá smysl vypisovat.
+                  </InfoTip>
+                </label>
                 <div className="flex flex-wrap gap-1.5">
                   {PRICE_UNITS.map(u => (
                     <button
@@ -266,7 +300,14 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
                     className="form-input bg-white" />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="form-label">Délka (min) *</label>
+                  <label className="form-label flex items-center justify-between gap-1">
+                    <span>Délka (min) *</span>
+                    <InfoTip>
+                      Jak dlouho úkon trvá. Podle toho poznáme, <strong>do kterých volných oken se vejde</strong> —
+                      a když je úkon kratší než okno, zabere jen svůj čas.
+                      <strong> Zbytek okna zůstane volný</strong> pro dalšího zákazníka.
+                    </InfoTip>
+                  </label>
                   <input type="number" min={0} placeholder="45"
                     value={v.duration_minutes ?? ''}
                     onChange={e => set('duration_minutes', numOrNull(e.target.value))}
@@ -325,7 +366,14 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
             {/* Materiál v ceně */}
             {!isOnAgreement && (
               <div className="space-y-2">
-                <label className="form-label">Co je v ceně?</label>
+                <label className="form-label flex items-center justify-between gap-1">
+                  <span>Co je v ceně?</span>
+                  <InfoTip>
+                    Když účtujete materiál zvlášť, zákazník uvidí u ceny štítek
+                    <strong> „bez materiálu"</strong>. Bez něj by vaši cenu srovnával s nabídkou,
+                    kde materiál zahrnutý je — a vypadali byste dráž, než jste.
+                  </InfoTip>
+                </label>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {([
                     { value: true,  title: 'Včetně materiálu', desc: 'Zákazník nic nedoplácí' },
@@ -352,7 +400,14 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
 
             {/* Záloha */}
             <div className="space-y-1.5">
-              <label className="form-label">Rezervační záloha (Kč)</label>
+              <label className="form-label flex items-center justify-between gap-1">
+                <span>Rezervační záloha (Kč)</span>
+                <InfoTip>
+                  Kolik zákazník zaplatí předem, aby si termín zamluvil. Drží se přes Propojo
+                  a <strong>uvolní se vám po provedení práce</strong>. Zákazníkovi se započítá
+                  do konečné ceny — neplatí navíc.
+                </InfoTip>
+              </label>
               <input type="number" min={200} placeholder="200"
                 value={v.deposit_amount ?? ''}
                 onChange={e => set('deposit_amount', numOrNull(e.target.value))}
@@ -371,23 +426,79 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
           </>
         )}
 
-        {/* ── Model B: jen délka a poznámka ── */}
+        {/* ── Model B: délka + podmínky výjezdu ── */}
         {isB && (
           <>
             <div className="flex items-start gap-2 rounded-xl bg-blue-50 px-4 py-3 text-xs leading-relaxed text-slate-600">
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
-              <span>U tohoto úkonu určíte cenu až po prohlídce. Podmínky výjezdu (poplatek, doprava) se berou z nastavení karty.</span>
+              <span>U tohoto úkonu určíte cenu až po prohlídce. Níže nastavte, co stojí samotný výjezd a nacenění.</span>
             </div>
+
             <div className="space-y-1.5">
-              <label className="form-label">Orientační délka prohlídky (min) *</label>
+              <label className="form-label flex items-center justify-between gap-1">
+                <span>Orientační délka prohlídky (min) *</span>
+                <InfoTip>
+                  Kolik času si na prohlídku vyhradíte. Slouží jen pro váš kalendář —
+                  zákazník tuhle hodnotu nevidí jako závazek.
+                </InfoTip>
+              </label>
               <input type="number" min={0} placeholder="60"
                 value={v.duration_minutes ?? ''}
                 onChange={e => set('duration_minutes', numOrNull(e.target.value))}
                 className="form-input bg-white" />
             </div>
+
+            {/* Podmínky výjezdu */}
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="mb-1 flex items-center gap-2">
+                <Truck className="h-4 w-4 text-slate-400" />
+                <p className="text-sm font-extrabold text-slate-800">Za kolik vyjedete</p>
+              </div>
+              <p className="mb-4 text-xs leading-relaxed text-slate-500">
+                Zákazník tyhle podmínky uvidí, než vás poptá. Necháte-li prázdné, máte výjezd zdarma.
+              </p>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="form-label">Poplatek za nacenění (Kč)</label>
+                  <input type="number" min={0} placeholder="500"
+                    value={v.quote_fee ?? ''}
+                    onChange={e => set('quote_fee', numOrNull(e.target.value))}
+                    className="form-input" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="form-label">Nabídku dodám do (dnů)</label>
+                  <input type="number" min={0} max={365} placeholder="3"
+                    value={v.quote_days ?? ''}
+                    onChange={e => set('quote_days', numOrNull(e.target.value))}
+                    className="form-input" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="form-label">Doprava zdarma do (km)</label>
+                  <input type="number" min={0} placeholder="10"
+                    value={v.free_km ?? ''}
+                    onChange={e => set('free_km', numOrNull(e.target.value))}
+                    className="form-input" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="form-label">Nad rámec (Kč/km)</label>
+                  <input type="number" min={0} placeholder="12"
+                    value={v.price_per_km ?? ''}
+                    onChange={e => set('price_per_km', numOrNull(e.target.value))}
+                    className="form-input" />
+                </div>
+              </div>
+
+              {Number(v.quote_fee) > 0 && (
+                <p className="mt-3 text-xs leading-relaxed text-slate-500">
+                  Přijme-li zákazník vaši nabídku, poplatek {Number(v.quote_fee).toLocaleString('cs-CZ')} Kč se započítá do celkové ceny.
+                </p>
+              )}
+            </div>
+
             <div className="space-y-1.5">
               <label className="form-label">Poznámka <span className="font-normal text-slate-400">(volitelné)</span></label>
-              <input type="text" maxLength={200} placeholder="např. Zaměření zdarma, nacenění do 3 dnů"
+              <input type="text" maxLength={200} placeholder="např. Zaměření zdarma v okolí Vsetína"
                 value={v.price_note ?? ''}
                 onChange={e => set('price_note', e.target.value || null)}
                 className="form-input bg-white" />

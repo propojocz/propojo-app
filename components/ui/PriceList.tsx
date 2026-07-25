@@ -48,6 +48,10 @@ function itemToValues(it: ServiceItem): ServiceItemValues {
     price_includes_material: it.price_includes_material ?? true,
     price_note: it.price_note,
     is_active: it.is_active,
+    quote_fee: (it as any).quote_fee ?? null,
+    price_per_km: (it as any).price_per_km ?? null,
+    free_km: (it as any).free_km ?? null,
+    quote_days: (it as any).quote_days ?? null,
   }
 }
 

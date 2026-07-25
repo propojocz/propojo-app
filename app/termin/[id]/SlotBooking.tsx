@@ -13,6 +13,7 @@ interface ServiceInfo {
   title: string
   locationType: string | null
   quoteTerms: QuoteTerms
+  providerGeo?: { lat: number | null; lng: number | null; radiusKm: number | null }
 }
 
 interface Props {
@@ -97,6 +98,7 @@ export default function SlotBooking({ items, slot, providerId, serviceMap, isLog
           locationType={active.locationType}
           slots={[slot]}
           quoteTerms={active.quoteTerms}
+          providerGeo={active.providerGeo}
           onClose={() => setOrderItem(null)}
         />
       )}

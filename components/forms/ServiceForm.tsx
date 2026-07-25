@@ -17,7 +17,7 @@ import { z } from 'zod'
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle2, AlertCircle, Loader2, ChevronRight, Store, Home, Shuffle, Lightbulb, Eye, ListChecks, Truck, Info } from 'lucide-react'
+import { CheckCircle2, AlertCircle, Loader2, ChevronRight, Store, Home, Lightbulb, Eye, ListChecks } from 'lucide-react'
 import { createService, updateService } from '@/lib/actions/services'
 import type { Service, ServiceItem } from '@/types/database'
 import { createClient } from '@/lib/supabase/client'
@@ -27,6 +27,7 @@ import GalleryUpload from '@/components/ui/GalleryUpload'
 import AddressInput from '@/components/ui/AddressInput'
 import SearchAutocomplete from '@/components/ui/SearchAutocomplete'
 import PriceList from '@/components/ui/PriceList'
+import InfoTip from '@/components/ui/InfoTip'
 import type { ServiceTypeOption } from '@/components/ui/ServiceItemEditor'
 
 const schema = z.object({
@@ -45,17 +46,11 @@ const schema = z.object({
   gallery: z.array(z.string()).optional(),
 
   // Kde se služba vykonává
-  location_type: z.enum(['u_poskytovatele', 'u_zakaznika', 'oboji']),
+  location_type: z.enum(['u_poskytovatele', 'u_zakaznika']),
   radius_km: z.number().int().min(1).max(300).nullable().optional(),
 
-  // Výjezd a nacenění (model B) — patří ke KARTĚ, ne k úkonu: poskytovatel má
-  // jednu sazbu za cestu, ať jede nacenit cokoli. Váže se na radius_km výše.
-  quote_fee: z.number().min(0).max(999999).nullable().optional(),
-  price_per_km: z.number().min(0).max(99999).nullable().optional(),
-  free_km: z.number().int().min(0).max(100000).nullable().optional(),
-  quote_days: z.number().int().min(0).max(365).nullable().optional(),
 
-  // Adresa provozovny (jen u_poskytovatele/oboji)
+  // Adresa provozovny (jen u_poskytovatele)
   address: z.string().max(200).nullable().optional(),
   address_lat: z.number().nullable().optional(),
   address_lng: z.number().nullable().optional(),
@@ -106,12 +101,10 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
       image_url: initialData.image_url ?? '',
       gallery: init.gallery ?? [],
       subcategory_ids: (init.subcategory_ids ?? (init.subcategory_id ? [init.subcategory_id] : [])),
-      location_type: (init.location_type as 'u_poskytovatele' | 'u_zakaznika' | 'oboji') ?? 'u_zakaznika',
+      // Karty se starym 'oboji' preklapime na vyjezd: poskytovatel bez adresy
+      // je horsi chyba nez adresa navic.
+      location_type: (init.location_type === 'u_poskytovatele' ? 'u_poskytovatele' : 'u_zakaznika') as 'u_poskytovatele' | 'u_zakaznika',
       radius_km: init.radius_km ?? null,
-      quote_fee: init.quote_fee ?? null,
-      price_per_km: init.price_per_km ?? null,
-      free_km: init.free_km ?? null,
-      quote_days: init.quote_days ?? null,
       address: init.address ?? null,
       address_lat: init.address_lat ?? null,
       address_lng: init.address_lng ?? null,
@@ -125,10 +118,6 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
       gallery: [],
       location_type: 'u_zakaznika',
       radius_km: null,
-      quote_fee: null,
-      price_per_km: null,
-      free_km: null,
-      quote_days: null,
       address: null,
       address_lat: null,
       address_lng: null,
@@ -262,7 +251,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
   } as any
 
   const preview = (
-    <div className="xl:sticky xl:top-20">
+    <div className="xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto xl:pb-2">
       <p className="mb-2.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
         <Eye className="h-3.5 w-3.5" /> Náhled — takhle vás uvidí zákazníci
       </p>
@@ -288,15 +277,15 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
   )
 
   return (
-    <div className="grid gap-8 xl:grid-cols-[1fr_340px]">
-      <div className="xl:order-2">{preview}</div>
+    <div className="grid min-w-0 gap-8 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="min-w-0 xl:order-2">{preview}</div>
 
       <motion.form
         onSubmit={handleSubmit(onSubmit as any)}
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
-        className="space-y-6 xl:order-1"
+        className="min-w-0 space-y-6 xl:order-1"
       >
         {/* Tip */}
         <div className="flex items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
@@ -382,7 +371,12 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
                 {activeCat && (
                   <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
                     <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-                      <ChevronRight className="h-3 w-3" /> Podkategorie (vyberte i více — podle nich se v ceníku nabídnou úkony)
+                      <ChevronRight className="h-3 w-3" /> Podkategorie (vyberte i více)
+                      <InfoTip align="left">
+                        Podle vybraných podkategorií se vám <strong>v ceníku nabídnou konkrétní
+                        úkony</strong> z našeho katalogu — nemusíte je vypisovat ručně.
+                        Vyberte vše, co reálně děláte.
+                      </InfoTip>
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {activeCat.subcategories.map(sub => {
@@ -426,13 +420,19 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
 
         {/* 5. KDE VYKONÁVÁTE */}
         <div className="space-y-3">
-          <label className="form-label">Kde vykonáváte svou službu? *</label>
+          <label className="form-label flex items-center justify-between gap-1">
+            <span>Kde vykonáváte svou službu? *</span>
+            <InfoTip>
+              Platí pro celou kartu. Děláte obojí, tedy máte salon a zároveň jezdíte za zákazníky?
+              <strong> Založte si dvě karty</strong>, každou s vlastním ceníkem. Zákazník pak hned
+              ví, co si objednává, a vy nemusíte u každé objednávky řešit, kam se jede.
+            </InfoTip>
+          </label>
           <p className="-mt-1 text-xs text-slate-400">Podle toho poznáme, jestli po zákazníkovi chtít adresu.</p>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {([
               { value: 'u_poskytovatele', icon: Store, title: 'Zákazník přijde za mnou', desc: 'Mám provozovnu (salon, dílna)' },
               { value: 'u_zakaznika', icon: Home, title: 'Jezdím za zákazníkem', desc: 'Dorazím na jeho adresu' },
-              { value: 'oboji', icon: Shuffle, title: 'Obojí', desc: 'Podle domluvy se zákazníkem' },
             ] as const).map(opt => {
               const Icon = opt.icon
               const isSel = locationType === opt.value
@@ -529,7 +529,14 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
         <AnimatePresence>
           {locationType !== 'u_poskytovatele' && (
             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-1.5 overflow-hidden">
-              <label className="form-label">Dojezdová vzdálenost (km)</label>
+              <label className="form-label flex items-center justify-between gap-1">
+                <span>Dojezdová vzdálenost (km)</span>
+                <InfoTip>
+                  Jak daleko od svého města ještě dojedete. Zákazník si podle toho vyfiltruje,
+                  jestli je jeho adresa ve vašem dosahu. <strong>Cenu za cestu</strong> nastavíte
+                  níže u konkrétního úkonu s naceněním.
+                </InfoTip>
+              </label>
               <input
                 type="number" min={1} max={300} placeholder="20"
                 defaultValue={watch('radius_km') ?? ''}
@@ -539,90 +546,6 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
               <p className="text-xs text-slate-400">
                 Jak daleko od zadaného města jste ochotní dojet. Zákazníci si podle toho vyfiltrují, jestli je váš dosah pokrývá.
               </p>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* 7b. VÝJEZD A NACENĚNÍ — navazuje na dojezd výše (kam jezdím → kolik za to).
-             Volitelné: týká se jen poskytovatelů, kteří nabízejí úkony typu
-             „přijedu, prohlédnu, nacením" (model B v ceníku). */}
-        <AnimatePresence>
-          {locationType !== 'u_poskytovatele' && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden"
-            >
-              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                <div className="mb-1 flex items-center gap-2">
-                  <Truck className="h-4 w-4 text-slate-400" />
-                  <p className="text-sm font-extrabold text-slate-800">
-                    Výjezd a nacenění <span className="font-normal text-slate-400">(volitelné)</span>
-                  </p>
-                </div>
-                <p className="mb-4 text-xs leading-relaxed text-slate-500">
-                  Vyplňte, jen pokud budete mít v ceníku úkon typu <strong>„přijedu a nacením na místě"</strong> —
-                  třeba zaměření nebo prohlídku před rekonstrukcí. Necháte-li prázdné, máte výjezd zdarma.
-                </p>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="form-label">Poplatek za nacenění (Kč)</label>
-                    <input
-                      type="number" min={0} placeholder="500"
-                      defaultValue={watch('quote_fee') ?? ''}
-                      onChange={e => setValue('quote_fee', (e.target.value === '' ? null : Number(e.target.value)) as any)}
-                      className="form-input"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="form-label">Nabídku dodám do (dnů)</label>
-                    <input
-                      type="number" min={0} max={365} placeholder="3"
-                      defaultValue={watch('quote_days') ?? ''}
-                      onChange={e => setValue('quote_days', (e.target.value === '' ? null : Number(e.target.value)) as any)}
-                      className="form-input"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="form-label">Doprava zdarma do (km)</label>
-                    <input
-                      type="number" min={0} placeholder="10"
-                      defaultValue={watch('free_km') ?? ''}
-                      onChange={e => setValue('free_km', (e.target.value === '' ? null : Number(e.target.value)) as any)}
-                      className="form-input"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="form-label">Nad rámec (Kč/km)</label>
-                    <input
-                      type="number" min={0} placeholder="12"
-                      defaultValue={watch('price_per_km') ?? ''}
-                      onChange={e => setValue('price_per_km', (e.target.value === '' ? null : Number(e.target.value)) as any)}
-                      className="form-input"
-                    />
-                  </div>
-                </div>
-
-                {/* Živý přepočet — ať poskytovatel hned vidí, co jeho čísla znamenají
-                    pro zákazníka na hranici dojezdu. Bez toho se sazba za km špatně odhaduje. */}
-                {Number(watch('price_per_km')) > 0 && Number(watch('radius_km')) > 0 && (
-                  <div className="mt-3 flex items-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs leading-relaxed text-slate-600">
-                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
-                    <span>
-                      Zákazník na hranici vašeho dojezdu ({Number(watch('radius_km'))} km) zaplatí za cestu{' '}
-                      <strong className="text-slate-900">
-                        {Math.max(0, Number(watch('radius_km')) - Number(watch('free_km') ?? 0)) * Number(watch('price_per_km')) > 0
-                          ? `${(Math.max(0, Number(watch('radius_km')) - Number(watch('free_km') ?? 0)) * Number(watch('price_per_km'))).toLocaleString('cs-CZ')} Kč`
-                          : 'nic'}
-                      </strong>
-                      {Number(watch('quote_fee')) > 0 && (
-                        <> a k tomu <strong className="text-slate-900">{Number(watch('quote_fee')).toLocaleString('cs-CZ')} Kč</strong> za nacenění</>
-                      )}
-                      . Přijme-li nabídku, započítá se to do celkové ceny.
-                    </span>
-                  </div>
-                )}
-              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -648,7 +571,14 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
           </div>
 
           <div className="space-y-1.5">
-            <label className="form-label">Ukázky práce <span className="font-normal text-slate-400">(volitelné)</span></label>
+            <label className="form-label flex items-center justify-between gap-1">
+              <span>Ukázky práce <span className="font-normal text-slate-400">(volitelné)</span></span>
+              <InfoTip>
+                Prvních pět fotek si zákazník <strong>prolistuje přímo v marketplace</strong>,
+                aniž by kartu otevřel. Dejte na začátek ty nejlepší — rozhodují o tom,
+                jestli klikne dál.
+              </InfoTip>
+            </label>
             <p className="text-xs text-slate-400">
               Prvních 5 fotek si zákazník prolistuje přímo na kartě v marketplace, zbytek uvidí po otevření profilu.
             </p>

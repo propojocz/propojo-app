@@ -141,6 +141,10 @@ export async function createOrder(values: {
       customer_id: user.id,
       description: values.message ?? null,
       total_price: orderPrice,
+      // Zálohu z úkonu uložíme rovnou na objednávku — poskytovatel pak na
+      // detailu vidí přesnou částku, kterou zákazník platí, a na místě se
+      // vyrovnají jen o zbytek.
+      deposit_amount: item ? (itemIsModelB ? null : (item.deposit_amount ?? null)) : null,
       location_city: values.location_city ?? null,
       service_location: values.service_location ?? null,
       status: 'cekajici',
@@ -162,12 +166,24 @@ export async function createOrder(values: {
     // V notifikaci upřednostníme název úkonu (to si zákazník objednal), fallback název karty.
     const orderedName = item?.name || svc?.title || null
 
+    // a) POSKYTOVATELI — přišla nová objednávka.
     await createNotification({
       userId: values.provider_id,
       type: 'status_change',
       orderId: data.id,
       actorId: user.id,
       title: `Nová objednávka od ${senderProfile?.full_name ?? 'zákazníka'}`,
+      preview: orderedName,
+    })
+
+    // b) ZÁKAZNÍKOVI — in-app potvrzení, že objednávka odešla (kromě e-mailu).
+    // Actor = poskytovatel, na kterého teď zákazník čeká (z něj se vezme avatar/odkaz).
+    await createNotification({
+      userId: user.id,
+      type: 'status_change',
+      orderId: data.id,
+      actorId: values.provider_id,
+      title: 'Objednávka odeslána',
       preview: orderedName,
     })
   } catch (err) {

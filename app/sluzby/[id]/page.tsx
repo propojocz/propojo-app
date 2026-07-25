@@ -102,6 +102,8 @@ export default async function ServiceDetailPage({ params }: Props) {
       .select('id, starts_at, ends_at')
       .in('id', slotIds)
       .eq('status', 'volno')
+      // Zbytky po rezervaci čekají na rozhodnutí poskytovatele — nenabízíme je.
+      .eq('pending_confirm', false)
       .gte('starts_at', new Date().toISOString())
       .order('starts_at', { ascending: true }) as { data: { id: string; starts_at: string; ends_at: string }[] | null }
     freeSlots = slotRows ?? []
@@ -238,6 +240,11 @@ export default async function ServiceDetailPage({ params }: Props) {
                   price_per_km: s.price_per_km,
                   free_km: s.free_km,
                   quote_days: s.quote_days,
+                }}
+                providerGeo={{
+                  lat: (s as any).city_lat ?? null,
+                  lng: (s as any).city_lng ?? null,
+                  radiusKm: (s as any).radius_km ?? null,
                 }}
               />
               <p className="mt-3 text-xs leading-relaxed text-slate-400">

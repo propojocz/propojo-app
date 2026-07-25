@@ -27,6 +27,11 @@ const itemSchema = z.object({
   price_note: z.string().max(200).nullable().optional(),
   is_active: z.boolean().optional(),
   sort_order: z.number().int().min(0).max(100000).optional(),
+  // Podmínky výjezdu — patří k ÚKONU s naceněním (model B), ne ke kartě.
+  quote_fee: z.number().min(0).max(999999).nullable().optional(),
+  price_per_km: z.number().min(0).max(99999).nullable().optional(),
+  free_km: z.number().int().min(0).max(100000).nullable().optional(),
+  quote_days: z.number().int().min(0).max(365).nullable().optional(),
 })
 
 type ItemParsed = z.infer<typeof itemSchema>
@@ -47,6 +52,12 @@ function normalizeItem(d: ItemParsed): ItemParsed {
     out.price_includes_material = true
     out.price_note = out.price_note?.trim() || null
   } else {
+    // U pevné ceny výjezdové podmínky nedávají smysl — nulujeme,
+    // ať v ceníku nezůstanou po přepnutí modelu.
+    out.quote_fee = null
+    out.price_per_km = null
+    out.free_km = null
+    out.quote_days = null
     if (out.price_type === 'on_agreement') {
       out.price = null
       out.price_max = null

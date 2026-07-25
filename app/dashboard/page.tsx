@@ -1,11 +1,14 @@
 // app/dashboard/page.tsx
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { Package, ShoppingBag, TrendingUp, Star, ArrowRight, PlusCircle, Search, ChevronRight, Heart } from 'lucide-react'
+import { Package, ShoppingBag, TrendingUp, Star, ArrowRight, PlusCircle, Search, ChevronRight, Heart, CalendarDays } from 'lucide-react'
 import { CATEGORY_META } from '@/types/database'
 import type { Profile } from '@/types/database'
 import Avatar from '@/components/ui/Avatar'
+import FreeSlotReminder, { NoFreeSlotHint, type ReminderSlot } from '@/components/ui/FreeSlotReminder'
+import PushPrompt from '@/components/ui/PushPrompt'
 
 export const metadata = { title: 'Dashboard | Propojo' }
 
@@ -31,6 +34,7 @@ export default async function DashboardPage() {
       { count: totalOrdersCount },
       { data: recentServices },
       { data: recentOrders },
+      { data: freeSlots },
     ] = await Promise.all([
       supabase.from('services').select('id', { count: 'exact', head: true }).eq('provider_id', user.id),
       supabase.from('services').select('id', { count: 'exact', head: true }).eq('provider_id', user.id).eq('is_active', true),
@@ -38,7 +42,56 @@ export default async function DashboardPage() {
       supabase.from('orders').select('id', { count: 'exact', head: true }).eq('provider_id', user.id),
       supabase.from('services').select('id, title, category, price, price_unit, is_active').eq('provider_id', user.id).order('created_at', { ascending: false }).limit(5),
       supabase.from('orders').select('id, status, created_at, services(title), profiles!orders_customer_id_fkey(full_name)').eq('provider_id', user.id).order('created_at', { ascending: false }).limit(5),
+      // Volná okna, o kterých ještě nikdo neví — hlavní featura Propojo,
+      // proto patří na dashboard, ne do podmenu.
+      supabase
+        .from('availability_slots')
+        .select('id, starts_at, ends_at, slot_services(services(title))')
+        .eq('provider_id', user.id)
+        .eq('status', 'volno')
+        .eq('pending_confirm', false)
+        .gte('starts_at', new Date().toISOString())
+        .order('starts_at', { ascending: true })
+        .limit(10),
     ])
+
+    // Které z těch oken už mají rozeslané upozornění? Čte se přes service role —
+    // slot_notifications má RLS „vidím jen svoje", takže poskytovatel by přes
+    // běžného klienta neviděl nic a připomínka by se ukazovala pořád dokola.
+    const slotRows = (freeSlots ?? []) as any[]
+    let reminder: ReminderSlot | null = null
+
+    if (slotRows.length > 0) {
+      const adminDb = createAdminClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      )
+      const { data: notified } = await adminDb
+        .from('slot_notifications')
+        .select('slot_id')
+        .in('slot_id', slotRows.map((s) => s.id))
+
+      const notifiedSet = new Set((notified ?? []).map((n: any) => n.slot_id))
+      const silent = slotRows.filter((s) => !notifiedSet.has(s.id))
+
+      if (silent.length > 0) {
+        const s = silent[0]
+        const den = new Intl.DateTimeFormat('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' }).format(new Date(s.starts_at))
+        const od = new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(s.starts_at))
+        const doC = new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(s.ends_at))
+        const names = (s.slot_services ?? [])
+          .map((l: any) => l.services?.title)
+          .filter(Boolean)
+          .join(' · ')
+
+        reminder = {
+          id: s.id,
+          label: `${den} · ${od}–${doC}`,
+          services: names,
+          moreCount: silent.length - 1,
+        }
+      }
+    }
 
     const statusColors: Record<string, string> = {
       cekajici: 'bg-amber-100 text-amber-700',
@@ -58,10 +111,21 @@ export default async function DashboardPage() {
             <h1 className="text-2xl font-black text-slate-900">Dobrý den, {profile?.full_name?.split(' ')[0]} 👋</h1>
             <p className="mt-0.5 text-sm text-slate-500">{new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}</p>
           </div>
-          <Link href="/pridat-sluzbu" className="btn-primary hidden sm:inline-flex">
-            <PlusCircle className="h-4 w-4" /> Nová nabídka
-          </Link>
+          <div className="hidden shrink-0 gap-2 sm:flex">
+            <Link href="/dashboard/terminy" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700">
+              <CalendarDays className="h-4 w-4" /> Volný termín
+            </Link>
+            <Link href="/pridat-sluzbu" className="btn-primary">
+              <PlusCircle className="h-4 w-4" /> Nová nabídka
+            </Link>
+          </div>
         </div>
+
+        {/* Volný termín, o kterém nikdo neví — nejvýš, hned na očích */}
+        {reminder ? <FreeSlotReminder slot={reminder} /> : (servicesCount ?? 0) > 0 && <NoFreeSlotHint />}
+
+        {/* Upozornění do telefonu — schová se samo, když je prohlížeč nepodporuje */}
+        <PushPrompt />
 
         {/* Stats */}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -197,6 +261,9 @@ export default async function DashboardPage() {
         <h1 className="text-2xl font-black text-slate-900">Dobrý den, {profile?.full_name?.split(' ')[0]} 👋</h1>
         <p className="mt-0.5 text-sm text-slate-500">{new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}</p>
       </div>
+
+      {/* Upozornění do telefonu — schová se samo, když je prohlížeč nepodporuje */}
+      <PushPrompt />
 
       {/* Stats zákazníka */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">

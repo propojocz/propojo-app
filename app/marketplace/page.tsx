@@ -313,7 +313,9 @@ async function ServiceList({
   if (providerIds.length > 0) {
     const { data: slotRows } = await supabase
       .from('availability_slots').select('provider_id')
-      .in('provider_id', providerIds).eq('status', 'volno').gte('starts_at', new Date().toISOString())
+      .in('provider_id', providerIds).eq('status', 'volno')
+      .eq('pending_confirm', false)
+      .gte('starts_at', new Date().toISOString())
     for (const r of (slotRows ?? []) as any[]) freeSlotProviders.add(r.provider_id)
   }
 
