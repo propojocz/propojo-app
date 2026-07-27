@@ -265,7 +265,7 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   // vázaná na položku; jinak fallback na kartu (services) — starý tok.
   const { data: ordCheck } = await supabase
     .from('orders')
-    .select('customer_id, provider_id, deposit_status, slot_id, service_item_id, services(payment_model, deposit_amount, quote_fee), service_items(payment_model, deposit_amount)')
+    .select('customer_id, provider_id, deposit_status, slot_id, service_item_id, services(payment_model, deposit_amount, quote_fee), service_items(payment_model, deposit_amount, quote_fee)')
     .eq('id', orderId)
     .single() as { data: any }
 
@@ -282,7 +282,7 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
     // Model určuje úkon (má-li ho objednávka), jinak karta.
     const model = it?.payment_model ?? svc?.payment_model
     const amount = model === 'B'
-      ? Number(svc?.quote_fee ?? 0)                       // poplatek za nacenění zůstává na kartě (model B)
+      ? Number(it?.quote_fee ?? svc?.quote_fee ?? 0)      // poplatek za nacenění z ÚKONU, fallback karta (staré objednávky)
       : Number(it?.deposit_amount ?? svc?.deposit_amount ?? 0)  // záloha z úkonu, fallback karta
     if (amount > 0) extraUpdate = { deposit_status: 'pending' }
   }
@@ -377,7 +377,7 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
         total_price,
         service_item_id,
         services(title, price, price_unit, payment_model, deposit_amount, quote_fee, cancellation_policy, city),
-        service_items(name, price, price_unit, payment_model, deposit_amount),
+        service_items(name, price, price_unit, payment_model, deposit_amount, quote_fee),
         profiles!orders_provider_id_fkey(full_name, display_name, company_name, ico, phone)
       `)
       .eq('id', orderId)
@@ -402,8 +402,11 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
         const providerDisplayName = pr.display_name || pr.company_name || pr.full_name || 'Živnostník'
         const providerLegalName = pr.company_name || pr.full_name || null
 
-        // Záloha (Model A) z úkonu, poplatek za nacenění (Model B) z karty.
-        const depositAmount = isModelB ? sv.quote_fee : (it?.deposit_amount ?? sv.deposit_amount)
+        // Záloha (Model A) i poplatek za nacenění (Model B) se berou z ÚKONU;
+        // karta zůstává jen jako záloha pro objednávky z doby před ceníkem.
+        const depositAmount = isModelB
+          ? (it?.quote_fee ?? sv.quote_fee)
+          : (it?.deposit_amount ?? sv.deposit_amount)
         const depositLabel = fmtMoney(depositAmount)
 
         const { subject, html } = orderStatusEmail({

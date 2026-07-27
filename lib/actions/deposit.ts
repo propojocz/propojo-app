@@ -3,6 +3,12 @@
 // Platba zálohy (Model A) / poplatku za výjezd (Model B) za objednávku.
 // Peníze přitečou na Propojo a DRŽÍ se (separate charges and transfers).
 // Převod poskytovateli / vratka = vrstva 4.
+//
+// ČÁSTKA se bere v tomto pořadí:
+//   1) orders.deposit_amount — zamrzlá při objednání, platí i když poskytovatel
+//      mezitím ceník změnil (zákazník platí to, co viděl),
+//   2) service_items — úkon, který si zákazník objednal,
+//   3) services — karta, jen jako záloha pro objednávky z doby před ceníkem.
 import { createClient } from '@/lib/supabase/server'
 import { stripe } from '@/lib/stripe'
 
@@ -21,8 +27,9 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
   const { data: order } = await supabase
     .from('orders')
     .select(`
-      id, customer_id, provider_id, status, deposit_status, deposit_amount,
+      id, customer_id, provider_id, status, deposit_status, deposit_amount, service_item_id,
       services(title, payment_model, deposit_amount, quote_fee),
+      service_items(name, payment_model, deposit_amount, quote_fee),
       profiles!orders_provider_id_fkey(stripe_account_id, stripe_payouts_enabled)
     `)
     .eq('id', orderId)
@@ -49,10 +56,16 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
   }
 
   const svc = order.services
-  const isModelB = svc?.payment_model === 'B'
+  const item = order.service_items ?? null
+
+  // Model určuje ÚKON (má-li ho objednávka), jinak karta — starý tok.
+  const isModelB = (item?.payment_model ?? svc?.payment_model) === 'B'
+
+  // U modelu B se platí poplatek za nacenění, u modelu A rezervační záloha.
+  // Zamrzlá částka na objednávce má u modelu A přednost před ceníkem.
   const amount = isModelB
-    ? Number(svc?.quote_fee ?? 0)
-    : Number(svc?.deposit_amount ?? 0)
+    ? Number(item?.quote_fee ?? svc?.quote_fee ?? 0)
+    : Number(order.deposit_amount ?? item?.deposit_amount ?? svc?.deposit_amount ?? 0)
 
   if (!amount || amount <= 0) {
     return { success: false, error: 'Pro tuto objednávku není nastavena žádná platba předem.' }
@@ -63,9 +76,11 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
     return { success: false, error: `Minimální částka platby je ${MIN_AMOUNT_CZK} Kč.` }
   }
 
+  // V názvu platby chceme úkon, který si zákazník objednal — ne název celé karty.
+  const nazev = item?.name || svc?.title || 'služba'
   const popis = isModelB
-    ? `Poplatek za výjezd – ${svc?.title ?? 'služba'}`
-    : `Rezervační záloha – ${svc?.title ?? 'služba'}`
+    ? `Poplatek za nacenění – ${nazev}`
+    : `Rezervační záloha – ${nazev}`
 
   try {
     const session = await stripe.checkout.sessions.create({

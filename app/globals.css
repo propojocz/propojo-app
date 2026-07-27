@@ -59,3 +59,13 @@
 button, a[class*="bg-emerald"], a[class*="bg-slate-900"] {
   font-family: 'Poppins', system-ui, sans-serif;
 }
+/* ── Mapa (Leaflet) ────────────────────────────────────────
+   Leaflet si na svých vrstvách nastavuje z-index až 1000 a přebíjí
+   tím rozbalovací oznámení i menu v hlavičce. `isolation` uzavře mapu
+   do vlastní vrstvy — uvnitř si pořadí řídí sama, navenek už ale
+   nepřeleze přes nic. */
+.leaflet-container {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+}

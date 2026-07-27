@@ -9,8 +9,10 @@
 //  2) Žádné vhodné okno / model B (nacenění) → poptávka bez termínu přes createOrder
 //     (poskytovatel se ozve).
 //
-// Cena a model se řídí ÚKONEM (service_item), ne kartou. Město = našeptávač obcí,
-// předvyplní se z profilu. Délka se ukazuje jen u jednotek, kde dává smysl (ukon/hod).
+// Cena, model I PODMÍNKY VÝJEZDU se řídí ÚKONEM (service_item), ne kartou. Každý
+// úkon modelu B může mít vlastní poplatek za nacenění, dopravu i lhůtu nabídky.
+// Město = našeptávač obcí, předvyplní se z profilu. Délka se ukazuje jen u jednotek,
+// kde dává smysl (ukon/hod).
 
 import { useState, useEffect, type MouseEvent } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -30,7 +32,12 @@ export type SlotOption = {
   ends_at: string
 }
 
-/** Podmínky výjezdu z karty — ukazují se u úkonů s naceněním (model B). */
+/**
+ * Podmínky výjezdu a nacenění (model B).
+ * Tato pole žijí na ÚKONU (service_items). Typ zůstává exportovaný kvůli
+ * ostatním souborům, které si jím popisují data — modal už je ale nebere
+ * z karty, čte je přímo z položky.
+ */
 export type QuoteTerms = {
   quote_fee?: number | null
   price_per_km?: number | null
@@ -47,8 +54,6 @@ interface Props {
   locationType?: string | null
   /** Volná okna poskytovatele, do kterých se tento úkon nabízí (z detailu karty). */
   slots?: SlotOption[]
-  /** Podmínky výjezdu z karty — zobrazí se u úkonu s naceněním (model B). */
-  quoteTerms?: QuoteTerms
   /** Odkud poskytovatel vyjíždí a jak daleko — pro kontrolu dosahu. */
   providerGeo?: { lat: number | null; lng: number | null; radiusKm: number | null }
   onClose: () => void
@@ -83,7 +88,7 @@ function windowMinutes(s: SlotOption): number {
 }
 
 export default function OrderItemModal({
-  item, serviceId, providerId, isLoggedIn, locationType = 'u_zakaznika', slots = [], quoteTerms, providerGeo, onClose,
+  item, serviceId, providerId, isLoggedIn, locationType = 'u_zakaznika', slots = [], providerGeo, onClose,
 }: Props) {
   const router = useRouter()
   const [state, setState] = useState<'form' | 'loading' | 'success' | 'error'>('form')
@@ -106,11 +111,15 @@ export default function OrderItemModal({
   const dur = showDuration ? formatDuration(item.duration_minutes) : null
   const deposit = !isModelB && item.deposit_amount ? Number(item.deposit_amount) : 0
 
-  // Podmínky výjezdu z karty (jen model B).
-  const quoteFee = Number(quoteTerms?.quote_fee ?? 0)
-  const perKm = Number(quoteTerms?.price_per_km ?? 0)
-  const freeKm = Number(quoteTerms?.free_km ?? 0)
-  const quoteDays = Number(quoteTerms?.quote_days ?? 0)
+  // ── Podmínky výjezdu (model B) — z ÚKONU ─────────────────────
+  // Dřív se braly z karty, takže všechny úkony modelu B na jedné kartě
+  // ukazovaly stejný poplatek. Teď má každý úkon svůj. Průnik typů drží
+  // kód funkční i kdyby types/database.ts zaostával za databází.
+  const q = item as ServiceItem & QuoteTerms
+  const quoteFee = Number(q.quote_fee ?? 0)
+  const perKm = Number(q.price_per_km ?? 0)
+  const freeKm = Number(q.free_km ?? 0)
+  const quoteDays = Number(q.quote_days ?? 0)
 
   // Vhodná okna: budoucí a dost dlouhá na délku úkonu. U modelu B termín nenabízíme
   // (termín prohlídky se domlouvá zvlášť).
@@ -287,7 +296,7 @@ export default function OrderItemModal({
                 )}
 
                 {/* Model B: co zákazník zaplatí za výjezd a nacenění. Musí to vědět
-                    PŘED objednáním, ne až z faktury. */}
+                    PŘED objednáním, ne až z faktury. Údaje jsou z tohoto úkonu. */}
                 {isModelB && (quoteFee > 0 || perKm > 0 || quoteDays > 0) && (
                   <div className="mt-2 space-y-1 border-t border-slate-200 pt-2 text-xs leading-relaxed text-slate-600">
                     {quoteFee > 0 && (

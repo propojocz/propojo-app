@@ -2,6 +2,10 @@
 // app/termin/[id]/SlotBooking.tsx
 // Klientská část veřejné stránky termínu: seznam úkonů, které se do okna vejdou,
 // a otevření objednávky (OrderItemModal) s TÍMHLE jedním termínem.
+//
+// Podmínky výjezdu (model B) si modal čte přímo z úkonu — z karty se už
+// nepředávají. Pole `quoteTerms` v ServiceInfo je proto volitelné a nepoužité;
+// zůstalo jen proto, aby nadřazená stránka nemusela měnit tvar dat.
 
 import { useState } from 'react'
 import { Clock, Wallet } from 'lucide-react'
@@ -12,7 +16,8 @@ import OrderItemModal, { type SlotOption, type QuoteTerms } from '@/components/u
 interface ServiceInfo {
   title: string
   locationType: string | null
-  quoteTerms: QuoteTerms
+  /** @deprecated Podmínky výjezdu jsou na úkonu (service_items). Nepoužívá se. */
+  quoteTerms?: QuoteTerms
   providerGeo?: { lat: number | null; lng: number | null; radiusKm: number | null }
 }
 
@@ -20,7 +25,7 @@ interface Props {
   items: ServiceItem[]
   slot: SlotOption
   providerId: string
-  /** service_id → údaje karty (název, místo výkonu, podmínky výjezdu) */
+  /** service_id → údaje karty (název, místo výkonu) */
   serviceMap: Record<string, ServiceInfo>
   isLoggedIn: boolean
 }
@@ -97,7 +102,6 @@ export default function SlotBooking({ items, slot, providerId, serviceMap, isLog
           isLoggedIn={isLoggedIn}
           locationType={active.locationType}
           slots={[slot]}
-          quoteTerms={active.quoteTerms}
           providerGeo={active.providerGeo}
           onClose={() => setOrderItem(null)}
         />

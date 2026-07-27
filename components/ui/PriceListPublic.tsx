@@ -3,6 +3,9 @@
 // Veřejný (read-only) ceník na detailu karty. Zákazník vidí úkony s cenou,
 // délkou a zálohou; kliknutím na „Objednat"/„Poptat" se otevře OrderItemModal
 // pro TEN konkrétní úkon (objednávka se naváže na service_item_id).
+//
+// Podmínky výjezdu (model B) se berou z ÚKONU, ne z karty — každý úkon může
+// mít vlastní poplatek za nacenění i dopravu.
 
 import { useState } from 'react'
 import { Clock, Wallet, Package, ChevronDown } from 'lucide-react'
@@ -19,8 +22,6 @@ interface Props {
   locationType?: string | null
   /** Volná okna poskytovatele (z detailu karty) — modal z nich nabídne termíny. */
   slots?: SlotOption[]
-  /** Podmínky výjezdu z karty — modal je ukáže u úkonů s naceněním (model B). */
-  quoteTerms?: QuoteTerms
   /** Odkud poskytovatel vyjíždí a jak daleko — modal podle toho hlídá dosah. */
   providerGeo?: { lat: number | null; lng: number | null; radiusKm: number | null }
 }
@@ -33,20 +34,48 @@ function formatDuration(min: number | null): string | null {
   return m ? `${h} h ${m} min` : `${h} h`
 }
 
-function priceText(it: ServiceItem): { main: string; sub: string | null } {
+// Co se ukáže vpravo u tlačítka. U modelu B je hlavním číslem POPLATEK ZA
+// NACENĚNÍ — je to jediná částka, kterou zákazník v tu chvíli zná jistě.
+// `small` = hlavní řádek je slovo, ne částka, takže se vysází menším písmem.
+function priceText(it: ServiceItem, quote: Quote): { main: string; sub: string | null; small: boolean } {
   const unit = PRICE_UNIT_LABELS[(it.price_unit as keyof typeof PRICE_UNIT_LABELS)] ?? ''
-  if (it.payment_model === 'B') return { main: 'Nacenění na místě', sub: null }
-  if (it.price_type === 'on_agreement') return { main: 'Cena dohodou', sub: null }
+
+  if (it.payment_model === 'B') {
+    if (quote.fee > 0) {
+      return { main: `${quote.fee.toLocaleString('cs-CZ')} Kč`, sub: 'za nacenění na místě', small: false }
+    }
+    return {
+      main: 'Nacenění na místě',
+      sub: quote.perKm > 0 ? null : 'výjezd zdarma',
+      small: true,
+    }
+  }
+
+  if (it.price_type === 'on_agreement') return { main: 'Cena dohodou', sub: null, small: true }
   if (it.price_type === 'range' && it.price != null && it.price_max != null) {
-    return { main: `${it.price.toLocaleString('cs-CZ')} – ${it.price_max.toLocaleString('cs-CZ')} Kč`, sub: unit || null }
+    return { main: `${it.price.toLocaleString('cs-CZ')} – ${it.price_max.toLocaleString('cs-CZ')} Kč`, sub: unit || null, small: false }
   }
   if (it.price != null && it.price > 0) {
-    return { main: `${it.price.toLocaleString('cs-CZ')} Kč`, sub: unit || null }
+    return { main: `${it.price.toLocaleString('cs-CZ')} Kč`, sub: unit || null, small: false }
   }
-  return { main: 'Cena dohodou', sub: null }
+  return { main: 'Cena dohodou', sub: null, small: true }
 }
 
-export default function PriceListPublic({ items, serviceId, providerId, isLoggedIn = false, locationType = 'u_zakaznika', slots = [], quoteTerms, providerGeo }: Props) {
+// Podmínky výjezdu daného úkonu. Průnik typů drží kód funkční i kdyby
+// types/database.ts zaostával za databází.
+type Quote = { fee: number; perKm: number; freeKm: number; days: number }
+
+function quoteOf(it: ServiceItem): Quote {
+  const q = it as ServiceItem & QuoteTerms
+  return {
+    fee: Number(q.quote_fee ?? 0),
+    perKm: Number(q.price_per_km ?? 0),
+    freeKm: Number(q.free_km ?? 0),
+    days: Number(q.quote_days ?? 0),
+  }
+}
+
+export default function PriceListPublic({ items, serviceId, providerId, isLoggedIn = false, locationType = 'u_zakaznika', slots = [], providerGeo }: Props) {
   const [openId, setOpenId] = useState<string | null>(null)
   const [orderItem, setOrderItem] = useState<ServiceItem | null>(null)
 
@@ -66,13 +95,18 @@ export default function PriceListPublic({ items, serviceId, providerId, isLogged
     <>
       <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white">
         {visible.map((it) => {
-          const { main, sub } = priceText(it)
+          const quote = quoteOf(it)
+          const { main, sub, small } = priceText(it, quote)
           const dur = formatDuration(it.duration_minutes)
-          const materialExtra = it.payment_model !== 'B' && it.price_type !== 'on_agreement' && it.price_includes_material === false
-          const deposit = it.payment_model !== 'B' && it.deposit_amount ? Number(it.deposit_amount) : 0
+          const isB = it.payment_model === 'B'
+          const materialExtra = !isB && it.price_type !== 'on_agreement' && it.price_includes_material === false
+          const deposit = !isB && it.deposit_amount ? Number(it.deposit_amount) : 0
           const note = (it.price_note ?? '').trim()
           const isOpen = openId === it.id
-          const hasDetail = !!note || deposit > 0 || !!dur || materialExtra
+          const hasQuoteInfo = isB && (quote.fee > 0 || quote.perKm > 0 || quote.days > 0)
+          // Délka se do panelu nevykresluje (je vidět v řádku výš), takže sama
+          // o sobě „Detail" neotvírá — jinak by se otevřel prázdný panel.
+          const hasDetail = !!note || deposit > 0 || materialExtra || hasQuoteInfo
 
           return (
             <li key={it.id} className="p-4 sm:p-5">
@@ -111,19 +145,36 @@ export default function PriceListPublic({ items, serviceId, providerId, isLogged
                   {isOpen && (
                     <div className="mt-2 space-y-1.5 rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
                       {note && <p>{note}</p>}
-                      {it.payment_model !== 'B' && (
+                      {!isB && (
                         materialExtra
                           ? <p>Uvedená cena je za práci. Materiál se účtuje zvlášť podle skutečné spotřeby.</p>
                           : it.price_type !== 'on_agreement' && <p>V ceně je i materiál — nic se nedoplácí.</p>
                       )}
                       {deposit > 0 && <p>Rezervační záloha {deposit.toLocaleString('cs-CZ')} Kč se započítá do konečné ceny.</p>}
+
+                      {/* Model B: podmínky výjezdu tohoto úkonu */}
+                      {hasQuoteInfo && (
+                        <>
+                          {quote.fee > 0 && (
+                            <p>Nacenění stojí {quote.fee.toLocaleString('cs-CZ')} Kč. Přijmete-li nabídku, započítá se do celkové ceny.</p>
+                          )}
+                          {quote.perKm > 0 && (
+                            <p>
+                              {quote.freeKm > 0
+                                ? `Doprava zdarma do ${quote.freeKm} km, nad rámec ${quote.perKm.toLocaleString('cs-CZ')} Kč/km.`
+                                : `Doprava ${quote.perKm.toLocaleString('cs-CZ')} Kč/km.`}
+                            </p>
+                          )}
+                          {quote.days > 0 && <p>Nabídku dodá do {quote.days} dnů od prohlídky.</p>}
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
 
                 <div className="flex flex-none flex-col items-end gap-2">
                   <div className="text-right">
-                    <div className={`font-black text-slate-900 ${it.payment_model === 'B' ? 'text-sm' : 'text-lg'}`}>{main}</div>
+                    <div className={`font-black text-slate-900 ${small ? 'text-sm' : 'text-lg'}`}>{main}</div>
                     {sub && <div className="text-xs text-slate-400">{sub}</div>}
                   </div>
                   <button
@@ -131,7 +182,7 @@ export default function PriceListPublic({ items, serviceId, providerId, isLogged
                     onClick={() => setOrderItem(it)}
                     className="whitespace-nowrap rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600"
                   >
-                    {it.payment_model === 'B' ? 'Poptat' : 'Objednat'}
+                    {isB ? 'Poptat' : 'Objednat'}
                   </button>
                 </div>
               </div>
@@ -148,7 +199,6 @@ export default function PriceListPublic({ items, serviceId, providerId, isLogged
           isLoggedIn={isLoggedIn}
           locationType={locationType}
           slots={slots}
-          quoteTerms={quoteTerms}
           providerGeo={providerGeo}
           onClose={() => setOrderItem(null)}
         />

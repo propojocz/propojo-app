@@ -2,7 +2,9 @@
 // Detail KARTY (poskytovatel/pobočka) v modelu „karta + ceník".
 // Nahoře identita: název, podtitul, galerie, poskytovatel, adresa + mapa.
 // Pod tím CENÍK úkonů (service_items) — každý s cenou, délkou, zálohou a tlačítkem.
-// Objednávkový tok konkrétního úkonu se dozapojí v kroku 5.
+//
+// Podmínky výjezdu (model B) se z karty už NEPŘEDÁVAJÍ — žijí na úkonu
+// (service_items) a čte si je přímo objednávkový modal.
 
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
@@ -235,12 +237,6 @@ export default async function ServiceDetailPage({ params }: Props) {
                 isLoggedIn={!!user}
                 locationType={s.location_type}
                 slots={freeSlots}
-                quoteTerms={{
-                  quote_fee: s.quote_fee,
-                  price_per_km: s.price_per_km,
-                  free_km: s.free_km,
-                  quote_days: s.quote_days,
-                }}
                 providerGeo={{
                   lat: (s as any).city_lat ?? null,
                   lng: (s as any).city_lng ?? null,

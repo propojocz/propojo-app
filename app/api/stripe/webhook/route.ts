@@ -21,6 +21,7 @@ import {
   paymentFailedEmail,
 } from '@/lib/email/templates'
 import { Resend } from 'resend'
+import { createNotification } from '@/lib/actions/notifications'
 
 export const dynamic = 'force-dynamic'
 
@@ -113,6 +114,70 @@ async function upsertSubscription(db: ReturnType<typeof admin>, sub: Stripe.Subs
   return billing
 }
 
+// ── ZÁLOHA ZAPLACENA ──────────────────────────────────────────
+// Checkout v režimu 'payment' s metadatem kind='deposit' = zákazník zaplatil
+// rezervační zálohu (model A) nebo poplatek za nacenění (model B).
+// Bez tohoto kroku by peníze dorazily, ale objednávka by zůstala v 'pending'
+// a poskytovatel by nemohl zahájit práci.
+async function handleDepositPaid(
+  db: ReturnType<typeof admin>,
+  session: Stripe.Checkout.Session
+) {
+  const orderId = session.metadata?.order_id
+  if (!orderId) {
+    console.error('[webhook] deposit bez order_id v metadatech')
+    return
+  }
+
+  // Hlavní zápis — jen sloupec, o kterém víme jistě, že existuje.
+  const { error } = await (db.from('orders') as any)
+    .update({ deposit_status: 'paid' })
+    .eq('id', orderId)
+
+  if (error) {
+    console.error('[webhook] zápis deposit_status:', error)
+    return
+  }
+
+  // Uložení payment intentu je NEPOVINNÉ — hodí se pro pozdější převod
+  // poskytovateli a vratky. Když sloupec v tabulce není, jen to zalogujeme
+  // a jedeme dál; potvrzení platby je důležitější než tenhle údaj.
+  const paymentIntentId =
+    typeof session.payment_intent === 'string'
+      ? session.payment_intent
+      : (session.payment_intent as Stripe.PaymentIntent | null)?.id ?? null
+
+  if (paymentIntentId) {
+    const { error: piErr } = await (db.from('orders') as any)
+      .update({ stripe_payment_intent_id: paymentIntentId })
+      .eq('id', orderId)
+    if (piErr) console.warn('[webhook] payment_intent neuložen:', piErr.message)
+  }
+
+  // Dát vědět poskytovateli — do zvonečku i jako push do telefonu.
+  const { data: order } = await db
+    .from('orders')
+    .select('provider_id, customer_id, service_items(name), services(title)')
+    .eq('id', orderId)
+    .single() as { data: any }
+
+  if (!order?.provider_id) return
+
+  const nazev = order.service_items?.name || order.services?.title || null
+  try {
+    await createNotification({
+      userId: order.provider_id,
+      type: 'status_change',
+      orderId,
+      actorId: order.customer_id ?? null,
+      title: 'Záloha zaplacena — můžete začít',
+      preview: nazev,
+    })
+  } catch (err) {
+    console.error('[webhook] notifikace o záloze:', err)
+  }
+}
+
 export async function POST(req: Request) {
   const body = await req.text()
   const sig = headers().get('stripe-signature')
@@ -144,9 +209,19 @@ export async function POST(req: Request) {
 
   try {
     switch (event.type) {
-      // ── Předplatné zaplaceno (Checkout dokončen) ──────────────────
+      // ── Checkout dokončen ─────────────────────────────────────────
+      // Dva různé případy: předplatné (mode 'subscription') a záloha za
+      // objednávku (mode 'payment' + metadata kind='deposit').
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session
+
+        if (session.mode === 'payment') {
+          if (session.metadata?.kind === 'deposit') {
+            await handleDepositPaid(db, session)
+          }
+          break
+        }
+
         if (session.mode !== 'subscription') break
 
         const userId = session.metadata?.supabase_user_id
