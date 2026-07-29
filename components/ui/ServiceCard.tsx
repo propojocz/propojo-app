@@ -9,7 +9,7 @@
 
 import { useState, type MouseEvent } from 'react'
 import { motion } from 'framer-motion'
-import { MapPin, Star, ShieldCheck, CalendarCheck, Sparkles, ChevronLeft, ChevronRight, ListChecks } from 'lucide-react'
+import { MapPin, Star, ShieldCheck, Zap, Sparkles, ChevronLeft, ChevronRight, ListChecks } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
 import type { ServiceWithProvider } from '@/types/database'
@@ -21,6 +21,7 @@ interface ServiceCardProps {
   index?: number
   categoryName?: string
   subcatNames?: string[]
+  /** Má TATO karta do budoucna vypsané volné okno? Ukáže štítek „Last minute". */
   hasFreeSlot?: boolean
   isFavorited?: boolean
   isLoggedIn?: boolean
@@ -149,8 +150,8 @@ export default function ServiceCard({
         )}
 
         {hasFreeSlot && (
-          <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-xs font-semibold text-emerald-700 shadow-sm">
-            <CalendarCheck className="h-3.5 w-3.5" /> Volný termín
+          <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-emerald-500 px-2.5 py-1 text-xs font-bold text-white shadow-md ring-2 ring-white/60">
+            <Zap className="h-3.5 w-3.5 fill-white" /> Last minute
           </span>
         )}
       </div>

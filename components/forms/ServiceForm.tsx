@@ -6,6 +6,10 @@
 // Cena/model/délka/záloha/materiál/storno se sem UŽ NEPÍŠE — nese je ceník
 // (service_items) přes komponentu PriceList níže.
 //
+// Dostupnost (otevírací doba, pauzy, blokace) má vlastní stránku
+// /dashboard/dostupnost/[id] — tady je na ni jen odkaz, ať nastavení
+// neexistuje na dvou místech.
+//
 // Dvě fáze ukládání:
 //  1) Vyplníte kartu → „Uložit kartu a pokračovat k ceníku“ → karta dostane id
 //  2) Pod formulářem se otevře ceník, přidáte úkony → „Hotovo“
@@ -16,8 +20,9 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle2, AlertCircle, Loader2, ChevronRight, Store, Home, Lightbulb, Eye, ListChecks } from 'lucide-react'
+import { CheckCircle2, AlertCircle, Loader2, ChevronRight, Store, Home, Lightbulb, Eye, ListChecks, CalendarDays } from 'lucide-react'
 import { createService, updateService } from '@/lib/actions/services'
 import type { Service, ServiceItem } from '@/types/database'
 import { createClient } from '@/lib/supabase/client'
@@ -643,6 +648,26 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
                   onChanged={loadItems}
                 />
               )}
+
+              {/* Dostupnost — žije na vlastní stránce, tady je jen rozcestník.
+                  Otevírací doba se mění jindy než popis a fotky a formulář je
+                  už dost dlouhý. */}
+              <Link
+                href={`/dashboard/dostupnost/${serviceId}`}
+                className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 transition-all hover:border-emerald-300 hover:bg-emerald-50/40"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100">
+                  <CalendarDays className="h-5 w-5 text-emerald-600" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-bold text-slate-900">Dostupnost a otevírací doba</span>
+                  <span className="block text-xs leading-relaxed text-slate-500">
+                    Vyplňte, kdy máte otevřeno, a zákazníci si u vás rovnou vyberou konkrétní termín.
+                    Bez toho vám budou chodit poptávky bez času.
+                  </span>
+                </span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+              </Link>
 
               {mode === 'create' && (
                 <button

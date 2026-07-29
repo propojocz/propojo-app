@@ -161,8 +161,8 @@ export default function NabidkyPage() {
                   <Pencil className="h-4 w-4" /> Upravit
                 </Link>
                 {s.payment_model === 'A' && (
-                  <Link href={`/dashboard/terminy?service=${s.id}`} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition-colors hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700">
-                    <CalendarPlus className="h-4 w-4" /> Přidat termín
+                  <Link href={`/dashboard/terminy?service=${s.id}`} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700 transition-colors hover:border-emerald-400 hover:bg-emerald-100" title="Vypadl vám klient? Vypište volný termín a dejte o něm hned vědět zákazníkům.">
+                    <CalendarPlus className="h-4 w-4" /> Vypsat termín
                   </Link>
                 )}
                 <button onClick={() => handleToggle(s.id, s.is_active)} disabled={actionId === s.id} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition-colors hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 disabled:opacity-50">

@@ -5,6 +5,10 @@
 //
 // Podmínky výjezdu (model B) se z karty už NEPŘEDÁVAJÍ — žijí na úkonu
 // (service_items) a čte si je přímo objednávkový modal.
+//
+// Nad ceníkem je blok VOLNÉ TERMÍNY — vypsaná okna poskytovatele. To je
+// hlavní featura Propojo (zaplnit díru v rozvrhu), proto je nahoře a ne
+// schovaná v objednávkovém modalu. Ceník samotný zůstává čistý.
 
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
@@ -12,7 +16,7 @@ import { CATEGORY_META } from '@/types/database'
 import type { ServiceItem } from '@/types/database'
 import Image from 'next/image'
 import Link from 'next/link'
-import { MapPin, Star, ArrowLeft, ShieldCheck, ListChecks } from 'lucide-react'
+import { MapPin, Star, ArrowLeft, ShieldCheck, ListChecks, Zap, ChevronRight } from 'lucide-react'
 import Avatar from '@/components/ui/Avatar'
 import PriceListPublic from '@/components/ui/PriceListPublic'
 import ServiceMap from '@/components/ui/ServiceMap'
@@ -225,6 +229,37 @@ export default async function ServiceDetailPage({ params }: Props) {
               <p className="whitespace-pre-line leading-relaxed text-slate-700">{s.description}</p>
             </div>
 
+            {/* ── VOLNÉ TERMÍNY (last-minute) ── */}
+            {freeSlots.length > 0 && (
+              <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/70 p-5">
+                <h2 className="flex items-center gap-2 text-lg font-black text-slate-900">
+                  <Zap className="h-5 w-5 fill-emerald-500 text-emerald-500" /> Volné termíny
+                </h2>
+                <p className="mt-0.5 text-sm leading-relaxed text-slate-600">
+                  Tyhle časy má {providerDisplayName} volné. Vyberte termín, zvolte úkon a zálohou
+                  si ho rovnou zamluvte — potvrzení je okamžité.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {freeSlots.map((slot) => {
+                    const den = new Intl.DateTimeFormat('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' }).format(new Date(slot.starts_at))
+                    const od = new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(slot.starts_at))
+                    const doC = new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(slot.ends_at))
+                    return (
+                      <Link
+                        key={slot.id}
+                        href={`/termin/${slot.id}`}
+                        className="group inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-white px-3.5 py-2.5 text-sm font-bold text-slate-800 shadow-sm transition hover:border-emerald-500 hover:bg-emerald-50"
+                      >
+                        <span>{den}</span>
+                        <span className="tabular-nums text-emerald-700">{od}–{doC}</span>
+                        <ChevronRight className="h-4 w-4 text-emerald-400 transition group-hover:translate-x-0.5" />
+                      </Link>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* ── CENÍK ── */}
             <div>
               <h2 className="mb-3 flex items-center gap-2 text-lg font-bold text-slate-900">
@@ -242,9 +277,10 @@ export default async function ServiceDetailPage({ params }: Props) {
                   lng: (s as any).city_lng ?? null,
                   radiusKm: (s as any).radius_km ?? null,
                 }}
+                providerName={providerDisplayName}
               />
               <p className="mt-3 text-xs leading-relaxed text-slate-400">
-                Vyberte konkrétní úkon a objednejte se na termín, který vám vyhovuje. Záloha se započítá do konečné ceny.
+                Nevyhovuje žádný z volných termínů? Vyberte úkon a pošlete poptávku — poskytovatel vám navrhne čas.
               </p>
             </div>
           </div>

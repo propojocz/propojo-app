@@ -438,9 +438,26 @@ export default function OrderDetailClient({
         {isCustomer && hasDeposit && (order.status === 'prijato' || order.status === 'v_procesu') && (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             {platbaStav === 'uspech' && (
-              <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                <CheckCircle2 className="h-4 w-4 shrink-0" /> Platba proběhla. Potvrzení se může projevit do pár sekund – obnovte stránku.
-              </div>
+              isPaid ? (
+                <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-center">
+                  <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-emerald-100">
+                    <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+                  </div>
+                  <p className="text-base font-black text-emerald-800">Hotovo! Můžete se těšit 🎉</p>
+                  <p className="mt-1 text-sm leading-relaxed text-emerald-700">
+                    {service?.title ?? 'Objednaná služba'}
+                    {otherProfile?.full_name ? <> u <strong>{otherProfile.full_name}</strong></> : null}
+                    {order.scheduled_at ? <>, {new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(new Date(order.scheduled_at))}</> : null}.
+                  </p>
+                  <p className="mt-1.5 text-xs text-emerald-600">
+                    Potvrzení máme v e-mailu a den předem vám přijde připomínka. Záloha se započítá do konečné ceny.
+                  </p>
+                </div>
+              ) : (
+                <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                  <CheckCircle2 className="h-4 w-4 shrink-0" /> Platba proběhla. Potvrzení naskočí za pár sekund – hned obnovte stránku.
+                </div>
+              )
             )}
             {platbaStav === 'zruseno' && (
               <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">

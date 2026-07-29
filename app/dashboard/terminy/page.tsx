@@ -1,17 +1,21 @@
 // app/dashboard/terminy/page.tsx
-// Správa volných termínů poskytovatele.
+// Správa termínů poskytovatele.
 //
-// Karty se do výběru nabízejí podle CENÍKU: musí mít aspoň jeden zveřejněný
-// úkon s pevnou cenou (model A). Dřív se filtrovalo přes services.payment_model —
-// legacy sloupec, který po přestavbě nic neznamená (model i délka patří úkonu).
+// Nahoře DENNÍ PANEL — kdo dnes (nebo ve vybraný den) přijde a v kolik, plus
+// blokace času. Pod ním správa VOLNÝCH OKEN (last-minute), která tu byla i dřív.
+//
+// Karty se do výběru oken nabízejí podle CENÍKU: musí mít aspoň jeden zveřejněný
+// úkon s pevnou cenou (model A). Legacy services.payment_model se neřeší.
 
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import TerminyClient from './TerminyClient'
+import DaySchedulePanel from '@/components/ui/DaySchedulePanel'
+import { getDaySchedule } from '@/lib/actions/day-schedule'
 
 export const metadata = { title: 'Moje termíny | Propojo' }
 
-export default async function TerminyPage({ searchParams }: { searchParams: { service?: string } }) {
+export default async function TerminyPage({ searchParams }: { searchParams: { service?: string; den?: string } }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/prihlasit?next=/dashboard/terminy')
@@ -23,6 +27,9 @@ export default async function TerminyPage({ searchParams }: { searchParams: { se
     .single() as { data: { is_provider: boolean } | null }
 
   if (profile?.is_provider !== true) redirect('/dashboard')
+
+  // Denní panel — rozvrh pro vybraný den (?den=YYYY-MM-DD), jinak dnešek.
+  const schedule = await getDaySchedule(searchParams?.den)
 
   // Moje aktivní karty
   const { data: myServices } = await supabase
@@ -71,5 +78,10 @@ export default async function TerminyPage({ searchParams }: { searchParams: { se
     .gte('ends_at', new Date().toISOString())
     .order('starts_at', { ascending: true }) as { data: any[] | null }
 
-  return <TerminyClient services={services} slots={slots ?? []} preselectedServiceId={searchParams?.service} />
+  return (
+    <div className="space-y-6">
+      <DaySchedulePanel date={schedule.date} entries={schedule.entries} />
+      <TerminyClient services={services} slots={slots ?? []} preselectedServiceId={searchParams?.service} />
+    </div>
+  )
 }

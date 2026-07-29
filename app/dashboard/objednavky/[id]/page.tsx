@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import OrderDetailClient from './OrderDetailClient'
 import ReviewForm from '@/components/ui/ReviewForm'
+import TimeProposalPanel from '@/components/ui/TimeProposalPanel'
+import { getProposals } from '@/lib/actions/time-proposals'
 
 interface Props { params: { id: string }; searchParams: { platba?: string } }
 
@@ -39,7 +41,10 @@ type OrderRow = {
   location_lng: number | null
   service_location: string | null
   scheduled_at: string | null
+  scheduled_end: string | null
+  service_item_id: string | null
   services: ServiceLite | null
+  service_items: { name: string | null; deposit_amount: number | null; payment_model: string | null } | null
 }
 
 type ProfileLite = {
@@ -68,7 +73,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
 
   const { data: order, error } = await supabase
     .from('orders')
-    .select('*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee, location_type)')
+    .select('*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee, location_type), service_items(name, deposit_amount, payment_model)')
     .eq('id', params.id)
     .single() as { data: OrderRow | null; error: any }
 
@@ -78,6 +83,20 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
 
   const isProvider = order.provider_id === user.id
   const otherId = isProvider ? order.customer_id : order.provider_id
+
+  // Návrhy termínů (vrstva 4). Panel se ukazuje jen u objednávky bez
+  // potvrzeného termínu; jakmile zákazník přijme a zaplatí, scheduled_at
+  // se vyplní a panel sám zmizí.
+  const proposals = await getProposals(order.id)
+  const depositForPanel = Number(
+    order.deposit_amount ?? order.service_items?.deposit_amount ?? order.services?.deposit_amount ?? 0
+  )
+  const showProposalPanel =
+    !order.scheduled_at &&
+    order.status !== 'zruseno' &&
+    order.status !== 'dokonceno' &&
+    order.service_items?.payment_model !== 'B' &&
+    (isProvider || proposals.length > 0)
 
   const [myProfileRes, otherProfileRes] = await Promise.all([
     supabase.from('profiles').select('id, full_name, avatar_url, phone, city, created_at').eq('id', user.id).single(),
@@ -135,6 +154,16 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
       </Link>
 
       {canReview && <ReviewForm orderId={order.id} />}
+
+      {showProposalPanel && (
+        <TimeProposalPanel
+          orderId={order.id}
+          isProvider={isProvider}
+          proposals={proposals}
+          depositAmount={depositForPanel}
+          itemName={order.service_items?.name ?? order.services?.title ?? null}
+        />
+      )}
 
       <OrderDetailClient
         order={order}

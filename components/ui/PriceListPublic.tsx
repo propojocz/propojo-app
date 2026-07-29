@@ -24,6 +24,8 @@ interface Props {
   slots?: SlotOption[]
   /** Odkud poskytovatel vyjíždí a jak daleko — modal podle toho hlídá dosah. */
   providerGeo?: { lat: number | null; lng: number | null; radiusKm: number | null }
+  /** Jméno poskytovatele — pro navádění v modalu u objednávky bez termínu. */
+  providerName?: string | null
 }
 
 function formatDuration(min: number | null): string | null {
@@ -75,7 +77,7 @@ function quoteOf(it: ServiceItem): Quote {
   }
 }
 
-export default function PriceListPublic({ items, serviceId, providerId, isLoggedIn = false, locationType = 'u_zakaznika', slots = [], providerGeo }: Props) {
+export default function PriceListPublic({ items, serviceId, providerId, isLoggedIn = false, locationType = 'u_zakaznika', slots = [], providerGeo, providerName }: Props) {
   const [openId, setOpenId] = useState<string | null>(null)
   const [orderItem, setOrderItem] = useState<ServiceItem | null>(null)
 
@@ -200,6 +202,7 @@ export default function PriceListPublic({ items, serviceId, providerId, isLogged
           locationType={locationType}
           slots={slots}
           providerGeo={providerGeo}
+          providerName={providerName}
           onClose={() => setOrderItem(null)}
         />
       )}

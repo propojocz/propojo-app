@@ -420,3 +420,68 @@ export async function adminMessageToOrder(orderId: string, content: string, imag
   revalidatePath(`/dashboard/objednavky/${orderId}`)
   return { success: true, message: inserted }
 }
+// ── AUTOMATICKÉ UVOLNĚNÍ PO 7 DNECH MLČENÍ ────────────────
+// Když zákazník po dokončení nereaguje, poskytovatel nemá čekat věčně. Po 7 dnech
+// od okamžiku, kdy poskytovatel označil zakázku za hotovou (ceka_potvrzeni),
+// se záloha uvolní sama — stejně jako by ji zákazník potvrdil.
+//
+// Spouští se cronem (viz app/api/cron/release-deposits/route.ts). Bez cronu jde
+// zavolat i ručně; funkce si sama najde a zpracuje všechny zralé objednávky.
+//
+// Bezpečné pustit opakovaně: bere jen status 'ceka_potvrzeni' + deposit 'paid',
+// a po zpracování stav změní, takže se stejná objednávka podruhé nechytí.
+const AUTO_RELEASE_DAYS = 7
+
+export async function autoReleaseStaleDeposits(): Promise<{ released: number; failed: number }> {
+  const admin = getAdminClient()
+  const cutoff = new Date(Date.now() - AUTO_RELEASE_DAYS * 24 * 3600 * 1000).toISOString()
+
+  // Objednávky čekající na potvrzení déle než 7 dnů. Rozhoduje okamžik, kdy
+  // poskytovatel označil hotovo — ukládáme ho do completed_at (viz níže);
+  // starší objednávky bez něj poznáme podle updated_at jako záloha.
+  const { data: stale } = await admin
+    .from('orders')
+    .select('id, provider_id, customer_id, deposit_status, deposit_amount, stripe_payment_intent_id, completed_at, updated_at, profiles!orders_provider_id_fkey(stripe_account_id)')
+    .eq('status', 'ceka_potvrzeni')
+    .eq('deposit_status', 'paid')
+    .lt('completed_at', cutoff) as { data: any[] | null }
+
+  let released = 0
+  let failed = 0
+
+  for (const order of stale ?? []) {
+    const providerAccount = order.profiles?.stripe_account_id
+    const nominal = Number(order.deposit_amount ?? 0)
+
+    try {
+      if (nominal > 0 && providerAccount) {
+        const ok = await doTransfer(order.stripe_payment_intent_id, nominal, providerAccount)
+        if (!ok) { failed++; continue }
+        await (admin.from('orders') as any)
+          .update({ deposit_status: 'released', status: 'dokonceno' })
+          .eq('id', order.id)
+      } else {
+        await (admin.from('orders') as any)
+          .update({ status: 'dokonceno' })
+          .eq('id', order.id)
+      }
+      released++
+
+      try {
+        await createNotification({
+          userId: order.provider_id,
+          type: 'status_change',
+          orderId: order.id,
+          actorId: order.provider_id,
+          title: nominal > 0 ? 'Záloha vám byla automaticky uvolněna' : 'Zakázka byla automaticky uzavřena',
+          preview: 'Zákazník do 7 dnů nepotvrdil, uzavřeno automaticky.',
+        })
+      } catch { /* notifikace není kritická */ }
+    } catch (err) {
+      console.error('[autoReleaseStaleDeposits] chyba u', order.id, err)
+      failed++
+    }
+  }
+
+  return { released, failed }
+}

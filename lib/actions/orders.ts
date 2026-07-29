@@ -292,6 +292,13 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
     return { success: false, error: 'Práci lze zahájit až po úhradě zálohy zákazníkem.' }
   }
 
+  // Poskytovatel označil hotovo → uložíme okamžik. Od něj běží 7denní lhůta,
+  // po které se záloha uvolní i bez potvrzení zákazníka (autoReleaseStaleDeposits).
+  // (status as string) — hodnotu 'ceka_potvrzeni' zatím nemusí znát typ OrderStatus.
+  if ((status as string) === 'ceka_potvrzeni') {
+    extraUpdate = { ...extraUpdate, completed_at: new Date().toISOString() }
+  }
+
   // Status 'dokonceno' se NEnastavuje napřímo – děje se přes potvrzení zákazníka.
   if (status === 'dokonceno') {
     return { success: false, error: 'Dokončení potvrzuje zákazník.' }

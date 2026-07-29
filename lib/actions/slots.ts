@@ -437,8 +437,8 @@ export async function reserveSlotForItem(values: {
         type: 'status_change',
         order_id: order.id,
         actor_id: user.id,
-        title: `Nová rezervace — zbývá vám ${remainderMin} min, nabídnout dál?`,
-        preview: item.name,
+        title: 'Nová rezervace ✓',
+        preview: `${item.name} · po něm vám zbývá ${remainderMin} min volných — nabídnout je někomu dalšímu?`,
       })
     } catch {}
 

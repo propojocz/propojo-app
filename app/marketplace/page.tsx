@@ -309,14 +309,23 @@ async function ServiceList({
     ;(subsByService[l.service_id] ??= []).push(nm)
   }
 
-  const freeSlotProviders = new Set<string>()
-  if (providerIds.length > 0) {
+  // Které KARTY mají do budoucna vypsané volné okno — štítek „Volný termín"
+  // patří kartě, ne poskytovateli. Jinak by se u někoho se třemi kartami
+  // rozsvítil i tam, kde okno není. Okno ↔ karta je přes slot_services.
+  const freeSlotServices = new Set<string>()
+  if (serviceIds.length > 0) {
     const { data: slotRows } = await supabase
-      .from('availability_slots').select('provider_id')
-      .in('provider_id', providerIds).eq('status', 'volno')
+      .from('availability_slots')
+      .select('id, slot_services!inner(service_id)')
+      .eq('status', 'volno')
       .eq('pending_confirm', false)
       .gte('starts_at', new Date().toISOString())
-    for (const r of (slotRows ?? []) as any[]) freeSlotProviders.add(r.provider_id)
+      .in('slot_services.service_id', serviceIds) as { data: any[] | null }
+    for (const r of (slotRows ?? [])) {
+      for (const l of (r.slot_services ?? [])) {
+        if (l.service_id) freeSlotServices.add(l.service_id)
+      }
+    }
   }
 
   const favSet = new Set<string>()
@@ -341,7 +350,7 @@ async function ServiceList({
               index={i}
               categoryName={catName[service.category]}
               subcatNames={subsByService[service.id] ?? []}
-              hasFreeSlot={freeSlotProviders.has(pid)}
+              hasFreeSlot={freeSlotServices.has(service.id)}
               isFavorited={favSet.has(pid)}
               isLoggedIn={!!user}
               minItemPrice={minPriceOf(service.id)}
