@@ -1,12 +1,12 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
-import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2, CreditCard, ShieldCheck, Clock, XCircle, Flag, AlertTriangle, ImagePlus, X, RotateCcw } from 'lucide-react'
+import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CalendarCheck, CheckCircle2, CreditCard, ShieldCheck, Clock, XCircle, Flag, AlertTriangle, ImagePlus, X, RotateCcw } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import OrderStatusButton from '../OrderStatusButton'
 import { sendOrderMessage, updateOrderStatus, setOrderAddress } from '@/lib/actions/orders'
 import { createDepositCheckout } from '@/lib/actions/deposit'
-import ConfirmCompletionButton from '@/components/ui/ConfirmCompletionButton'
+import ConfirmAndReview from '@/components/ui/ConfirmAndReview'
 import ChatThread from '@/components/ui/ChatThread'
 import Avatar from '@/components/ui/Avatar'
 import AddressInput from '@/components/ui/AddressInput'
@@ -110,6 +110,7 @@ export default function OrderDetailClient({
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [chatImage, setChatImage] = useState<string | null>(null)
+  const [reviewModalOpen, setReviewModalOpen] = useState(!isProvider && order.status === 'ceka_potvrzeni')
   const [imgUploading, setImgUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const [payBusy, setPayBusy] = useState(false)
@@ -247,6 +248,28 @@ export default function OrderDetailClient({
     <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
       {/* Levý sloupec: detail + chat */}
       <div className="space-y-4">
+        {/* Radostné potvrzení nahoře — jakmile je zaplaceno a termín potvrzený. */}
+        {isCustomer && isPaid && order.scheduled_at && order.status !== 'zruseno' && order.status !== 'dokonceno' && (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-center">
+            <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-emerald-100">
+              <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+            </div>
+            <p className="text-base font-black text-emerald-800">Termín je váš! 🎉</p>
+            <p className="mt-1 text-sm leading-relaxed text-emerald-700">
+              <strong>{service?.title ?? 'Rezervace'}</strong>
+              {otherProfile?.full_name ? <> u <strong>{otherProfile.full_name}</strong></> : null}
+              , {new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(new Date(order.scheduled_at))}.
+            </p>
+            {(() => {
+              const total = Number(order.total_price ?? 0)
+              const paid = Number(order.deposit_amount ?? depositAmount ?? 0)
+              const rest = total - paid
+              if (total > 0 && rest > 0) return <p className="mt-1 text-xs text-emerald-600">Zaplaceno {paid.toLocaleString('cs-CZ')} Kč — na místě doplatíte {rest.toLocaleString('cs-CZ')} Kč.</p>
+              if (total > 0 && rest <= 0) return <p className="mt-1 text-xs text-emerald-600">Zaplaceno v plné výši — na místě už nic nedoplácíte.</p>
+              return <p className="mt-1 text-xs text-emerald-600">Záloha se započítá do konečné ceny.</p>
+            })()}
+          </div>
+        )}
         {/* Hlavička objednávky */}
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-start justify-between gap-4">
@@ -319,7 +342,12 @@ export default function OrderDetailClient({
                   ? <p className="font-medium text-slate-800">U poskytovatele (provozovna)</p>
                   : order.location_address && order.status !== 'cekajici'
                     ? <p className="font-medium text-slate-800">{order.location_address}</p>
-                    : <p className="font-medium text-slate-800">{order.location_city ?? '—'}{order.status === 'cekajici' ? '' : ' (přesná adresa se doplní)'}</p>}
+                    : <div>
+                        <p className="font-medium text-slate-800">{order.location_city ?? '—'}</p>
+                        {order.status !== 'cekajici' && (
+                          <p className="mt-0.5 text-xs text-slate-400">Přesnou adresu domluvte s druhou stranou v chatu níže.</p>
+                        )}
+                      </div>}
               </div>
             </div>
           )}
@@ -434,50 +462,16 @@ export default function OrderDetailClient({
           </div>
         )}
 
-        {/* ── PLATBA ZÁLOHY (jen zákazník, po přijetí) ───────── */}
-        {isCustomer && hasDeposit && (order.status === 'prijato' || order.status === 'v_procesu') && (
+        {/* ── PLATBA ZÁLOHY (jen zákazník, dokud NENÍ zaplaceno; po platbě je potvrzení nahoře) ── */}
+        {isCustomer && hasDeposit && !isPaid && (order.status === 'prijato' || order.status === 'v_procesu') && (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            {platbaStav === 'uspech' && (
-              isPaid ? (
-                <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-center">
-                  <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-emerald-100">
-                    <CheckCircle2 className="h-6 w-6 text-emerald-600" />
-                  </div>
-                  <p className="text-base font-black text-emerald-800">Hotovo! Můžete se těšit 🎉</p>
-                  <p className="mt-1 text-sm leading-relaxed text-emerald-700">
-                    {service?.title ?? 'Objednaná služba'}
-                    {otherProfile?.full_name ? <> u <strong>{otherProfile.full_name}</strong></> : null}
-                    {order.scheduled_at ? <>, {new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(new Date(order.scheduled_at))}</> : null}.
-                  </p>
-                  <p className="mt-1.5 text-xs text-emerald-600">
-                    Potvrzení máme v e-mailu a den předem vám přijde připomínka. Záloha se započítá do konečné ceny.
-                  </p>
-                </div>
-              ) : (
-                <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                  <CheckCircle2 className="h-4 w-4 shrink-0" /> Platba proběhla. Potvrzení naskočí za pár sekund – hned obnovte stránku.
-                </div>
-              )
-            )}
             {platbaStav === 'zruseno' && (
               <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
                 <Clock className="h-4 w-4 shrink-0" /> Platba byla zrušena. {notPaidLabel}
               </div>
             )}
 
-            {isPaid ? (
-              <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-100">
-                  <CheckCircle2 className="h-6 w-6 text-emerald-600" />
-                </div>
-                <div>
-                  <p className="font-bold text-slate-900">{paidTitle}</p>
-                  <p className="text-sm text-slate-500">
-                    {Number(order.deposit_amount ?? depositAmount).toLocaleString('cs-CZ')} Kč · drží se bezpečně přes Propojo
-                  </p>
-                </div>
-              </div>
-            ) : (
+            {(
               <div>
                 <div className="mb-1 flex items-center gap-2">
                   <CreditCard className="h-5 w-5 text-emerald-600" />
@@ -513,17 +507,45 @@ export default function OrderDetailClient({
 
         {/* ── POTVRZENÍ DOKONČENÍ (jen zákazník, stav ceka_potvrzeni) ── */}
         {isCustomer && order.status === 'ceka_potvrzeni' && (
-          <div className="rounded-2xl border border-purple-200 bg-white p-6 shadow-sm">
-            <div className="mb-1 flex items-center gap-2">
-              <Flag className="h-5 w-5 text-purple-600" />
-              <h2 className="font-black text-slate-900">Poskytovatel označil zakázku jako splněnou</h2>
+          <div className="rounded-2xl border-2 border-purple-200 bg-purple-50/60 p-6 text-center shadow-sm">
+            <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-purple-100">
+              <Flag className="h-6 w-6 text-purple-600" />
             </div>
-            <p className="mb-4 text-sm text-slate-500">
-              Pokud {isModelB ? 'výjezd a nacenění proběhly' : 'řemeslník dorazil a plní zakázku'}, potvrďte to.
-              {hasDeposit && ' Tím se mu uvolní zaplacená záloha.'}
-              {' '}Další domluva o ceně a postupu probíhá přímo s řemeslníkem.
+            <h2 className="font-black text-slate-900">Řemeslník označil zakázku za hotovou</h2>
+            <p className="mx-auto mt-1 mb-4 max-w-sm text-sm text-slate-500">
+              Potvrďte, že {isModelB ? 'výjezd a nacenění proběhly' : 'všechno proběhlo v pořádku'}, a rovnou ohodnoťte.
             </p>
-            <ConfirmCompletionButton orderId={order.id} hasDeposit={hasDeposit} />
+            <button
+              onClick={() => setReviewModalOpen(true)}
+              className="btn-primary mx-auto justify-center px-6 py-3 text-base"
+            >
+              <CheckCircle2 className="h-4 w-4" /> Potvrdit a ohodnotit
+            </button>
+          </div>
+        )}
+
+        {/* Modal potvrzení + recenze */}
+        {isCustomer && order.status === 'ceka_potvrzeni' && reviewModalOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-0 sm:items-center sm:p-4"
+            onClick={() => setReviewModalOpen(false)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white p-6 shadow-xl sm:rounded-2xl"
+            >
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-purple-600">Zakázka je hotová</p>
+                  <h3 className="mt-0.5 text-lg font-black text-slate-900">Potvrďte a ohodnoťte</h3>
+                </div>
+                <button onClick={() => setReviewModalOpen(false)} aria-label="Zavřít"
+                  className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <ConfirmAndReview orderId={order.id} hasDeposit={hasDeposit} />
+            </div>
           </div>
         )}
 

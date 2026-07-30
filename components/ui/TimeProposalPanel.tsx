@@ -4,7 +4,8 @@
 //
 //  POSKYTOVATEL — u poptávky bez termínu navrhne 1–6 časů. Tři nejbližší volné
 //  se předvyplní z jeho dostupnosti (otevírací doba mínus obsazené a blokace),
-//  takže obvykle stačí kliknout na Odeslat.
+//  takže obvykle stačí kliknout na Odeslat. Vidí i preferenci zákazníka
+//  (od–do + denní doba), pokud ji zákazník vyplnil nad chatem.
 //
 //  ZÁKAZNÍK — vidí navržené časy jako tlačítka s cenou. Klik = přijetí a rovnou
 //  platba zálohy, tím je termín potvrzený. Nebo odmítne a domluví se v chatu.
@@ -13,7 +14,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { CalendarDays, Loader2, Plus, X, Send, Check, Clock, Sparkles } from 'lucide-react'
+import { CalendarDays, Loader2, Plus, X, Send, Check, Clock, Sparkles, CalendarRange } from 'lucide-react'
 import {
   suggestTimes, proposeTimes, acceptProposal, declineProposals, type Proposal,
 } from '@/lib/actions/time-proposals'
@@ -28,12 +29,25 @@ interface Props {
   depositAmount: number
   /** Název úkonu do hlavičky panelu. */
   itemName?: string | null
+  /** Jméno zákazníka do nadpisu (1. pád, neskloňujeme). */
+  customerName?: string | null
+  /** Preference zákazníka (od–do + denní doba) — jen pro poskytovatele. */
+  prefFrom?: string | null
+  prefTo?: string | null
+  prefTime?: string | null
 }
 
 const fmtLong = (iso: string) =>
   new Intl.DateTimeFormat('cs-CZ', {
     weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit',
   }).format(new Date(iso))
+
+const fmtDay = (iso: string) =>
+  new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'numeric' }).format(new Date(iso))
+
+const TIME_LABELS: Record<string, string> = {
+  rano: 'ráno (8–12)', odpoledne: 'odpoledne (12–17)', vecer: 'večer (17–20)', kdykoli: 'kdykoli',
+}
 
 // Hodnota pro <input type="datetime-local"> v místním čase.
 function toLocalInput(iso: string): string {
@@ -43,7 +57,8 @@ function toLocalInput(iso: string): string {
 }
 
 export default function TimeProposalPanel({
-  orderId, isProvider, proposals, depositAmount, itemName,
+  orderId, isProvider, proposals, depositAmount, itemName, customerName,
+  prefFrom, prefTo, prefTime,
 }: Props) {
   const router = useRouter()
   const [draft, setDraft] = useState<string[]>([])      // ISO časy k odeslání
@@ -51,6 +66,9 @@ export default function TimeProposalPanel({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [loadingHint, setLoadingHint] = useState(isProvider && proposals.length === 0)
+  // Poskytovatel klikl „Navrhnout jiné termíny" → editujeme nový návrh, i když
+  // nějaké návrhy už existují (jinak by panel dál ukazoval jen hotové).
+  const [editMode, setEditMode] = useState(false)
 
   // Předvyplnění z dostupnosti — jen když ještě nic nenavrhl.
   useEffect(() => {
@@ -83,8 +101,11 @@ export default function TimeProposalPanel({
       const res = await proposeTimes(orderId, draft)
       setBusy(false)
       if (!res.success) { setError(res.error); return }
+      setEditMode(false)
       router.refresh()
     }
+
+    const hasPref = !!(prefFrom && prefTo)
 
     return (
       <div className="rounded-2xl border-2 border-amber-300 bg-amber-50/60 p-5">
@@ -92,10 +113,22 @@ export default function TimeProposalPanel({
           <CalendarDays className="h-5 w-5 text-amber-600" />
           <h2 className="font-black text-slate-900">
             {proposals.length > 0 ? 'Navržené termíny' : 'Navrhněte termín'}
+            {!proposals.length && customerName ? <span className="font-normal text-slate-500"> pro: {customerName}</span> : null}
           </h2>
         </div>
 
-        {proposals.length > 0 ? (
+        {/* Preference zákazníka — kdy se mu to hodí */}
+        {hasPref && proposals.length === 0 && (
+          <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm text-slate-700">
+            <CalendarRange className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            <span>
+              Zákazníkovi se hodí <strong>{fmtDay(prefFrom!)} – {fmtDay(prefTo!)}</strong>
+              {prefTime ? <>, <strong>{TIME_LABELS[prefTime] ?? prefTime}</strong></> : null}.
+            </span>
+          </div>
+        )}
+
+        {proposals.length > 0 && !editMode ? (
           <>
             <p className="mb-3 text-sm text-slate-600">
               Zákazník si vybírá z těchto časů. Dokud jeden nepřijme a nezaplatí, termín se nikomu nedrží.
@@ -109,7 +142,7 @@ export default function TimeProposalPanel({
             </div>
             <button
               type="button"
-              onClick={() => { setDraft(proposals.map((p) => p.starts_at)); router.refresh() }}
+              onClick={() => { setDraft(proposals.map((p) => p.starts_at)); setEditMode(true) }}
               className="mt-3 text-xs font-semibold text-slate-500 hover:text-slate-700"
             >
               Navrhnout jiné termíny
@@ -257,7 +290,7 @@ export default function TimeProposalPanel({
 
       <div className="mt-3 flex items-center justify-between gap-3">
         <p className="text-xs text-slate-500">
-          {depositAmount > 0 ? 'Na dokončení platby máte 10 minut, pak se termín uvolní.' : 'Termín se potvrdí ihned.'}
+          {depositAmount > 0 ? 'Termíny platí, dokud si je někdo nezarezervuje. Po kliknutí máte na platbu 10 minut.' : 'Termín se potvrdí ihned.'}
         </p>
         <button
           type="button"

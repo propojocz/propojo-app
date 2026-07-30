@@ -23,6 +23,8 @@ const itemSchema = z.object({
   price_max: z.number().min(0).max(999999).nullable().optional(),
   duration_minutes: z.number().int().min(0).max(100000).nullable().optional(),
   deposit_amount: z.number().min(0).max(999999).nullable().optional(),
+  deposit_type: z.enum(['zaloha', 'plna_platba'] as const).optional(),
+  no_show_fee: z.number().min(0).max(999999).nullable().optional(),
   price_includes_material: z.boolean().optional(),
   price_note: z.string().max(200).nullable().optional(),
   is_active: z.boolean().optional(),
@@ -49,6 +51,8 @@ function normalizeItem(d: ItemParsed): ItemParsed {
     out.price_type = 'on_agreement'
     out.price_max = null
     out.deposit_amount = null
+    out.deposit_type = 'zaloha'
+    out.no_show_fee = null
     out.price_includes_material = true
     out.price_note = out.price_note?.trim() || null
   } else {
@@ -63,8 +67,14 @@ function normalizeItem(d: ItemParsed): ItemParsed {
       out.price_max = null
     }
     if (out.price_type !== 'range') out.price_max = null
-    if (out.deposit_amount != null && out.deposit_amount < 200) out.deposit_amount = 200
-    if (out.deposit_amount == null) out.deposit_amount = 200
+    if (out.deposit_type == null) out.deposit_type = 'zaloha'
+    if (out.deposit_type === 'plna_platba') {
+      out.deposit_amount = null   // platí se celá cena, záloha se neřeší
+    } else {
+      if (out.deposit_amount != null && out.deposit_amount < 200) out.deposit_amount = 200
+      if (out.deposit_amount == null) out.deposit_amount = 200
+    }
+    if (out.no_show_fee != null && out.no_show_fee <= 0) out.no_show_fee = null
     out.price_note = out.price_note?.trim() || null
   }
   return out

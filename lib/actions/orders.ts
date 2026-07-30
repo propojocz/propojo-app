@@ -265,7 +265,7 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   // vázaná na položku; jinak fallback na kartu (services) — starý tok.
   const { data: ordCheck } = await supabase
     .from('orders')
-    .select('customer_id, provider_id, deposit_status, slot_id, service_item_id, services(payment_model, deposit_amount, quote_fee), service_items(payment_model, deposit_amount, quote_fee)')
+    .select('customer_id, provider_id, deposit_status, slot_id, service_item_id, scheduled_at, services(payment_model, deposit_amount, quote_fee), service_items(payment_model, deposit_amount, quote_fee, deposit_type, price)')
     .eq('id', orderId)
     .single() as { data: any }
 
@@ -277,14 +277,25 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   // Při PŘIJETÍ: nastavíme deposit_status='pending' když je co platit
   let extraUpdate: Record<string, any> = {}
   if (status === 'prijato') {
+    // Přijmout (a spustit platbu) jde jen s domluveným termínem. Bez něj by
+    // vznikla zaplacená objednávka bez času → spory. Poskytovatel musí nejdřív
+    // navrhnout termín (panel návrhu), zákazník ho přijme a tím vznikne scheduled_at.
+    const model0 = ordCheck.service_items?.payment_model ?? ordCheck.services?.payment_model
+    if (!ordCheck.scheduled_at && model0 !== 'B') {
+      return { success: false, error: 'Nejdřív zákazníkovi navrhněte termín — bez domluveného času nejde objednávku přijmout ani platit.' }
+    }
     const svc = ordCheck.services
     const it = ordCheck.service_items
     // Model určuje úkon (má-li ho objednávka), jinak karta.
     const model = it?.payment_model ?? svc?.payment_model
+    // U plné platby předem se platí CELÁ cena úkonu, ne záloha.
+    const fullPay = model !== 'B' && (it as any)?.deposit_type === 'plna_platba'
     const amount = model === 'B'
-      ? Number(it?.quote_fee ?? svc?.quote_fee ?? 0)      // poplatek za nacenění z ÚKONU, fallback karta (staré objednávky)
-      : Number(it?.deposit_amount ?? svc?.deposit_amount ?? 0)  // záloha z úkonu, fallback karta
-    if (amount > 0) extraUpdate = { deposit_status: 'pending' }
+      ? Number(it?.quote_fee ?? svc?.quote_fee ?? 0)      // poplatek za nacenění
+      : fullPay
+        ? Number((it as any)?.price ?? 0)                  // celá cena předem
+        : Number(it?.deposit_amount ?? svc?.deposit_amount ?? 0)  // záloha
+    if (amount > 0) extraUpdate = { deposit_status: 'pending', deposit_amount: amount }
   }
 
   // Do 'v_procesu' jen když je záloha zaplacená (nebo žádná není potřeba)
@@ -296,6 +307,10 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   // po které se záloha uvolní i bez potvrzení zákazníka (autoReleaseStaleDeposits).
   // (status as string) — hodnotu 'ceka_potvrzeni' zatím nemusí znát typ OrderStatus.
   if ((status as string) === 'ceka_potvrzeni') {
+    // Uzavřít jde jen zaplacenou zakázku — jinak by výplata neměla z čeho vyjít.
+    if (ordCheck.deposit_status === 'pending') {
+      return { success: false, error: 'Zakázku lze uzavřít až po úhradě od zákazníka.' }
+    }
     extraUpdate = { ...extraUpdate, completed_at: new Date().toISOString() }
   }
 
@@ -324,6 +339,24 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
       await (getAdminClient().from('availability_slots') as any)
         .update({ status: 'volno', order_id: null })
         .eq('id', ordCheck.slot_id)
+    }
+    // Zrušit může zákazník i poskytovatel — druhá strana se to musí dozvědět.
+    try {
+      const recipientId = user.id === ordCheck.customer_id ? ordCheck.provider_id : ordCheck.customer_id
+      const { data: svc } = await getAdminClient()
+        .from('orders').select('services(title), service_items(name)').eq('id', orderId).single() as { data: any }
+      const nm = svc?.service_items?.name || svc?.services?.title || null
+      const byCustomer = user.id === ordCheck.customer_id
+      await createNotification({
+        userId: recipientId,
+        type: 'status_change',
+        orderId,
+        actorId: user.id,
+        title: byCustomer ? 'Zákazník zrušil objednávku' : 'Poskytovatel zrušil objednávku',
+        preview: nm,
+      })
+    } catch (err) {
+      console.error('[updateOrderStatus] cancel notifikace:', err)
     }
     revalidatePath('/dashboard/objednavky')
     revalidatePath(`/dashboard/objednavky/${orderId}`)

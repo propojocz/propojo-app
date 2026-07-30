@@ -16,7 +16,7 @@
 
 import { useState, useEffect, type MouseEvent } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle2, Loader2, MapPin, Store, X, Clock, Wallet, CalendarDays, Truck } from 'lucide-react'
+import { CheckCircle2, Loader2, MapPin, Store, X, Clock, Wallet, CalendarDays, Truck, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createOrder } from '@/lib/actions/orders'
@@ -115,9 +115,17 @@ export default function OrderItemModal({
   const unit = PRICE_UNIT_LABELS[(item.price_unit as keyof typeof PRICE_UNIT_LABELS)] ?? ''
   const showDuration = UNITS_WITH_DURATION.includes(item.price_unit as PriceUnit) || isModelB
   const dur = showDuration ? formatDuration(item.duration_minutes) : null
-  const deposit = !isModelB && item.deposit_amount ? Number(item.deposit_amount) : 0
+  const depositType = ((item as any).deposit_type as 'zaloha' | 'plna_platba' | undefined) ?? 'zaloha'
+  const noShowFee = (item as any).no_show_fee != null ? Number((item as any).no_show_fee) : 0
   // Známe pevnou konečnou cenu? Jen tehdy má smysl ukazovat rozklad záloha/doplatek.
   const hasFixedPrice = !isModelB && item.price_type !== 'on_agreement' && item.price != null && Number(item.price) > 0
+  const isFullPayment = !isModelB && depositType === 'plna_platba' && hasFixedPrice
+  // Kolik zákazník platí předem: u plné platby celá cena, jinak záloha.
+  const deposit = isModelB
+    ? 0
+    : isFullPayment
+      ? Number(item.price)
+      : (item.deposit_amount ? Number(item.deposit_amount) : 0)
 
   // ── Podmínky výjezdu (model B) — z ÚKONU ─────────────────────
   // Dřív se braly z karty, takže všechny úkony modelu B na jedné kartě
@@ -258,26 +266,50 @@ export default function OrderItemModal({
           </div>
 
           {state === 'success' ? (
-            <div className="flex flex-col items-center gap-2 rounded-xl bg-emerald-50 p-5 text-center">
-              <CheckCircle2 className="h-8 w-8 text-emerald-500" />
-              <p className="font-bold text-emerald-800">
-                {hasSlots && selectedSlot && !skipSlot ? 'Termín rezervován' : skipSlot ? 'Poptávka odeslána' : 'Objednávka odeslána'}
-              </p>
-              <p className="text-xs leading-relaxed text-emerald-700">
-                {hasSlots && selectedSlot && !skipSlot
-                  ? 'Přesměrováváme na vaši objednávku…'
-                  : skipSlot
-                    ? 'Živnostník vám navrhne konkrétní termíny — přijde vám upozornění a vyberete si.'
-                    : isModelB
-                      ? 'Živnostník se vám ozve a domluvíte se na termínu prohlídky.'
-                      : 'Živnostník ji potvrdí a ozve se vám.'}
-              </p>
-              {!(hasSlots && selectedSlot && !skipSlot) && (
-                <Link href="/dashboard/objednavky" className="mt-1 text-xs font-bold text-emerald-700 underline">
-                  Sledovat v Objednávkách
-                </Link>
-              )}
-            </div>
+            (() => {
+              const bookedSlot = hasSlots && selectedSlot && !skipSlot
+                ? (slots.find((sl) => sl.id === selectedSlot) ?? null)
+                : null
+              const bookedWhen = bookedSlot
+                ? new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(new Date(bookedSlot.starts_at))
+                : null
+              return (
+                <div className="flex flex-col items-center gap-2 rounded-xl bg-emerald-50 p-5 text-center">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100">
+                    <CheckCircle2 className="h-7 w-7 text-emerald-600" />
+                  </div>
+                  <p className="text-lg font-black text-emerald-800">
+                    {bookedSlot ? 'Termín je váš! 🎉' : skipSlot ? 'Poptávka odeslána' : 'Objednávka odeslána'}
+                  </p>
+                  {bookedSlot ? (
+                    <>
+                      <p className="text-sm leading-relaxed text-emerald-700">
+                        <strong>{item.name}</strong>{bookedWhen ? <>, {bookedWhen}</> : null}.
+                      </p>
+                      {deposit > 0 && hasFixedPrice && (
+                        <p className="text-xs text-emerald-600">
+                          Zaplatíte zálohu {deposit.toLocaleString('cs-CZ')} Kč, na místě doplatíte {Math.max(0, Number(item.price) - deposit).toLocaleString('cs-CZ')} Kč.
+                        </p>
+                      )}
+                      <p className="text-xs text-emerald-600">Otevírám platbu…</p>
+                    </>
+                  ) : (
+                    <p className="text-xs leading-relaxed text-emerald-700">
+                      {skipSlot
+                        ? 'Živnostník vám navrhne konkrétní termíny — přijde vám upozornění a vyberete si.'
+                        : isModelB
+                          ? 'Živnostník se vám ozve a domluvíte se na termínu prohlídky.'
+                          : 'Živnostník ji potvrdí a ozve se vám.'}
+                    </p>
+                  )}
+                  {!bookedSlot && (
+                    <Link href="/dashboard/objednavky" className="mt-1 text-xs font-bold text-emerald-700 underline">
+                      Sledovat v Objednávkách
+                    </Link>
+                  )}
+                </div>
+              )
+            })()
           ) : !isLoggedIn ? (
             <div className="space-y-3">
               <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
@@ -302,11 +334,12 @@ export default function OrderItemModal({
                   <div className="mt-2 space-y-1 border-t border-slate-200 pt-2 text-xs">
                     <div className="flex items-center justify-between">
                       <span className="flex items-center gap-1.5 font-semibold text-slate-700">
-                        <Wallet className="h-3.5 w-3.5 text-emerald-600" /> Zaplatíte teď (záloha)
+                        <Wallet className="h-3.5 w-3.5 text-emerald-600" />
+                        {isFullPayment ? 'Zaplatíte teď (celá cena)' : 'Zaplatíte teď (záloha)'}
                       </span>
                       <strong className="text-emerald-700">{deposit.toLocaleString('cs-CZ')} Kč</strong>
                     </div>
-                    {hasFixedPrice && (
+                    {hasFixedPrice && !isFullPayment && (
                       <>
                         <div className="flex items-center justify-between text-slate-500">
                           <span>Celková cena</span>
@@ -318,12 +351,31 @@ export default function OrderItemModal({
                         </div>
                       </>
                     )}
+                    {isFullPayment && (
+                      <div className="flex items-center justify-between font-semibold text-emerald-700">
+                        <span>Na místě doplatíte</span>
+                        <span>0 Kč</span>
+                      </div>
+                    )}
                     <p className="pt-0.5 text-[11px] leading-relaxed text-slate-400">
-                      {hasFixedPrice
-                        ? 'Záloha se započítá do konečné ceny — na místě doplatíte jen rozdíl.'
-                        : 'Záloha se započítá do konečné ceny. Zbytek doplatíte na místě podle skutečného rozsahu.'}
+                      {isFullPayment
+                        ? 'Platíte celou cenu předem — na místě už nic nedoplácíte.'
+                        : hasFixedPrice
+                          ? 'Záloha se započítá do konečné ceny — na místě doplatíte jen rozdíl.'
+                          : 'Záloha se započítá do konečné ceny. Zbytek doplatíte na místě podle skutečného rozsahu.'}
                     </p>
                   </div>
+                )}
+
+                {/* Storno poplatek — zákazník musí vědět předem, na čem je. */}
+                {!isModelB && noShowFee > 0 && (
+                  <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-2 text-[11px] leading-relaxed text-amber-800">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                    <span>
+                      Když se nedostavíte a termín nezrušíte včas, poskytovatel si účtuje
+                      storno <strong>{noShowFee.toLocaleString('cs-CZ')} Kč</strong>.
+                    </span>
+                  </p>
                 )}
 
                 {/* Model B: co zákazník zaplatí za výjezd a nacenění. Musí to vědět

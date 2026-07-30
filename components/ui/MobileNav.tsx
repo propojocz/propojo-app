@@ -64,14 +64,15 @@ export default function MobileNav({
     ...(isProvider ? [{ href: '/dashboard/nabidky', label: 'Moje nabídky', icon: Package }] : []),
     ...(isProvider ? [{ href: '/dashboard/terminy', label: 'Termíny', icon: CalendarDays }] : []),
     { href: '/dashboard/objednavky', label: 'Objednávky', icon: Inbox },
-    ...(isProvider ? [{ href: '/dashboard/recenze', label: 'Moje recenze', icon: Star, badge: unansweredReviews }] : []),
+    // Odznak u recenzí ZRUŠEN — odpovídání je dobrovolné, dvojka otravovala.
+    ...(isProvider ? [{ href: '/dashboard/recenze', label: 'Moje recenze', icon: Star }] : []),
     ...(isProvider ? [{ href: '/dashboard/predplatne', label: 'Předplatné', icon: CreditCard }] : []),
     ...(isProvider ? [{ href: '/dashboard/vyplaty', label: 'Výplaty', icon: Landmark }] : []),
     { href: '/dashboard/oblibene', label: 'Oblíbené', icon: Heart },
     { href: '/dashboard/profil', label: 'Můj profil', icon: User },
   ] : []
 
-  const totalBadge = unansweredReviews + (isAdmin ? disputeCount : 0)
+  const totalBadge = (isAdmin ? disputeCount : 0)
 
   const drawer = (
     <AnimatePresence>

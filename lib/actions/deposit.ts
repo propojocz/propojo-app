@@ -63,9 +63,13 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
 
   // U modelu B se platí poplatek za nacenění, u modelu A rezervační záloha.
   // Zamrzlá částka na objednávce má u modelu A přednost před ceníkem.
+  // U plné platby předem se účtuje CELÁ cena úkonu (deposit_amount je u ní null).
+  const isFullPayment = !isModelB && (item as any)?.deposit_type === 'plna_platba'
   const amount = isModelB
     ? Number(item?.quote_fee ?? svc?.quote_fee ?? 0)
-    : Number(order.deposit_amount ?? item?.deposit_amount ?? svc?.deposit_amount ?? 0)
+    : isFullPayment
+      ? Number(order.deposit_amount ?? (item as any)?.price ?? 0)
+      : Number(order.deposit_amount ?? item?.deposit_amount ?? svc?.deposit_amount ?? 0)
 
   if (!amount || amount <= 0) {
     return { success: false, error: 'Pro tuto objednávku není nastavena žádná platba předem.' }
@@ -80,7 +84,9 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
   const nazev = item?.name || svc?.title || 'služba'
   const popis = isModelB
     ? `Poplatek za nacenění – ${nazev}`
-    : `Rezervační záloha – ${nazev}`
+    : isFullPayment
+      ? `Platba předem – ${nazev}`
+      : `Rezervační záloha – ${nazev}`
 
   try {
     const session = await stripe.checkout.sessions.create({

@@ -123,10 +123,11 @@ export async function releaseDeposit(orderId: string): Promise<Result> {
   }
 
   const admin = getAdminClient()
+  // Částka mimo blok — potřebujeme ji i níž v notifikaci.
+  const nominal = Number(order.deposit_amount ?? 0)
 
   if (order.deposit_status === 'paid') {
     const providerAccount = order.profiles?.stripe_account_id
-    const nominal = Number(order.deposit_amount ?? 0)
 
     if (nominal > 0 && providerAccount) {
       const ok = await doTransfer(order.stripe_payment_intent_id, nominal, providerAccount)
@@ -150,8 +151,12 @@ export async function releaseDeposit(orderId: string): Promise<Result> {
       type: 'status_change',
       orderId,
       actorId: user.id,
-      title: order.deposit_status === 'paid' ? `${jmeno} potvrdil – záloha vám byla uvolněna` : `${jmeno} potvrdil dokončení`,
-      preview: null,
+      title: order.deposit_status === 'paid' ? `${jmeno} potvrdil – peníze jsou na cestě` : `${jmeno} potvrdil dokončení`,
+      // Do náhledu praktické info: kolik a kdy dorazí. Sama částka je na Connect
+      // účtu hned, na bankovní účet ji Stripe posílá obvykle do 2 pracovních dnů.
+      preview: order.deposit_status === 'paid' && nominal > 0
+        ? `${nominal.toLocaleString('cs-CZ')} Kč · na účet obvykle do 2 pracovních dnů`
+        : null,
     })
   } catch (err) {
     console.error('[releaseDeposit] notifikace:', err)

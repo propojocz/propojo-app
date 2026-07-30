@@ -34,6 +34,8 @@ export interface ServiceItemValues {
   price_max: number | null
   duration_minutes: number | null
   deposit_amount: number | null
+  deposit_type: 'zaloha' | 'plna_platba'
+  no_show_fee: number | null
   price_includes_material: boolean
   price_note: string | null
   is_active: boolean
@@ -64,6 +66,8 @@ const EMPTY: ServiceItemValues = {
   price_max: null,
   duration_minutes: null,
   deposit_amount: 200,
+  deposit_type: 'zaloha',
+  no_show_fee: null,
   price_includes_material: true,
   price_note: null,
   is_active: true,
@@ -121,13 +125,20 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
       out.price_type = 'on_agreement'
       out.price_max = null
       out.deposit_amount = null
+      out.deposit_type = 'zaloha'
+      out.no_show_fee = null
       out.price_includes_material = true
       out.price_note = out.price_note?.trim() || null
     } else {
       if (isOnAgreement) { out.price = null; out.price_max = null }
       if (out.price_type !== 'range') out.price_max = null
-      if (out.deposit_amount != null && out.deposit_amount < 200) out.deposit_amount = 200
-      if (out.deposit_amount == null) out.deposit_amount = 200
+      if (out.deposit_type === 'plna_platba') {
+        out.deposit_amount = null   // platí se celá cena, záloha se neřeší
+      } else {
+        if (out.deposit_amount != null && out.deposit_amount < 200) out.deposit_amount = 200
+        if (out.deposit_amount == null) out.deposit_amount = 200
+      }
+      if (out.no_show_fee != null && out.no_show_fee <= 0) out.no_show_fee = null
       out.price_note = out.price_note?.trim() || null
       // Výjezdové podmínky patří jen k naceňovacímu úkonu.
       out.quote_fee = null
@@ -398,21 +409,62 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
               </div>
             )}
 
-            {/* Záloha */}
+            {/* Jak zákazník platí předem: záloha nebo celá cena */}
             <div className="space-y-1.5">
               <label className="form-label flex items-center justify-between gap-1">
-                <span>Rezervační záloha (Kč)</span>
+                <span>Platba předem</span>
                 <InfoTip>
-                  Kolik zákazník zaplatí předem, aby si termín zamluvil. Drží se přes Propojo
-                  a <strong>uvolní se vám po provedení práce</strong>. Zákazníkovi se započítá
-                  do konečné ceny — neplatí navíc.
+                  Buď <strong>záloha</strong> (zbytek zákazník doplatí na místě), nebo
+                  <strong> celá cena předem</strong> (na místě se nedoplácí nic). Peníze se drží
+                  přes Propojo a uvolní se vám po provedení práce.
                 </InfoTip>
               </label>
-              <input type="number" min={200} placeholder="200"
-                value={v.deposit_amount ?? ''}
-                onChange={e => set('deposit_amount', numOrNull(e.target.value))}
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button"
+                  onClick={() => set('deposit_type', 'zaloha')}
+                  className={`rounded-xl border-2 px-3 py-2.5 text-left transition ${v.deposit_type !== 'plna_platba' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
+                  <span className="block text-sm font-bold text-slate-900">Záloha</span>
+                  <span className="block text-xs text-slate-500">zbytek na místě</span>
+                </button>
+                <button type="button"
+                  onClick={() => set('deposit_type', 'plna_platba')}
+                  className={`rounded-xl border-2 px-3 py-2.5 text-left transition ${v.deposit_type === 'plna_platba' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
+                  <span className="block text-sm font-bold text-slate-900">Celá cena předem</span>
+                  <span className="block text-xs text-slate-500">na místě nic</span>
+                </button>
+              </div>
+
+              {v.deposit_type !== 'plna_platba' && (
+                <div className="mt-2 space-y-1.5">
+                  <label className="form-label"><span>Výše zálohy (Kč)</span></label>
+                  <input type="number" min={200} placeholder="200"
+                    value={v.deposit_amount ?? ''}
+                    onChange={e => set('deposit_amount', numOrNull(e.target.value))}
+                    className="form-input bg-white" />
+                  <p className="text-xs text-slate-400">Minimálně 200 Kč. Záloha se započítá do konečné ceny.</p>
+                </div>
+              )}
+              {v.deposit_type === 'plna_platba' && (
+                <p className="mt-1 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                  Zákazník zaplatí celou cenu úkonu předem. Na místě už nic nedoplácí.
+                </p>
+              )}
+            </div>
+
+            {/* Storno poplatek pro no-show */}
+            <div className="space-y-1.5">
+              <label className="form-label flex items-center justify-between gap-1">
+                <span>Storno poplatek při nedostavení <span className="font-normal text-slate-400">(volitelné)</span></span>
+                <InfoTip>
+                  Kolik si necháte, když zákazník nedorazí (no-show). Zákazník ho uvidí předem,
+                  ať ví, na čem je. Necháte-li prázdné, žádný poplatek se neúčtuje.
+                </InfoTip>
+              </label>
+              <input type="number" min={0} placeholder="např. 300"
+                value={v.no_show_fee ?? ''}
+                onChange={e => set('no_show_fee', numOrNull(e.target.value))}
                 className="form-input bg-white" />
-              <p className="text-xs text-slate-400">Minimálně 200 Kč. Záloha se započítá do konečné ceny.</p>
+              <p className="text-xs text-slate-400">Zákazníkovi se zobrazí v objednávce. Prázdné = bez poplatku.</p>
             </div>
 
             {/* Poznámka k ceně */}

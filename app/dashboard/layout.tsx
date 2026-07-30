@@ -40,15 +40,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
     disputeCount = count ?? 0
   }
 
-  // Počet recenzí bez odpovědi (odznak pro poskytovatele)
-  let unansweredReviews = 0
-  if (isProvider) {
-    const admin = getAdminClient()
-    const { count } = await admin
-      .from('reviews').select('id', { count: 'exact', head: true })
-      .eq('provider_id', user.id).is('provider_response', null).is('reported_at', null)
-    unansweredReviews = count ?? 0
-  }
+  // Odznak u recenzí ZRUŠEN — odpovídání na recenze je dobrovolné, ne upomínka.
+  const unansweredReviews = 0
 
   const NAV = [
     { href: '/dashboard', label: 'Přehled', icon: 'LayoutDashboard' },

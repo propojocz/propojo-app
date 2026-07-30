@@ -7,6 +7,7 @@ import OrderDetailClient from './OrderDetailClient'
 import ReviewForm from '@/components/ui/ReviewForm'
 import TimeProposalPanel from '@/components/ui/TimeProposalPanel'
 import { getProposals } from '@/lib/actions/time-proposals'
+import TimePreferenceForm from '@/components/ui/TimePreferenceForm'
 
 interface Props { params: { id: string }; searchParams: { platba?: string } }
 
@@ -162,6 +163,20 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
           proposals={proposals}
           depositAmount={depositForPanel}
           itemName={order.service_items?.name ?? order.services?.title ?? null}
+          customerName={isProvider ? (otherProfile?.full_name ?? null) : null}
+          prefFrom={(order as any).pref_date_from ?? null}
+          prefTo={(order as any).pref_date_to ?? null}
+          prefTime={(order as any).pref_time ?? null}
+        />
+      )}
+
+      {/* Preference zákazníka (od–do + denní doba) — nad chatem, dokud není termín. */}
+      {isCustomer && !order.scheduled_at && order.status === 'cekajici' && (
+        <TimePreferenceForm
+          orderId={order.id}
+          initialFrom={(order as any).pref_date_from ?? null}
+          initialTo={(order as any).pref_date_to ?? null}
+          initialTimePref={(order as any).pref_time ?? null}
         />
       )}
 

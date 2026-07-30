@@ -1,5 +1,5 @@
 'use client'
-// app/dashboard/objednavky/OrderStatusButton.tsx
+// components/ui/OrderStatusButton.tsx
 // Akce poskytovatele na detailu objednávky.
 //
 // Tok je zkrácený: zaplacením vzniká potvrzený termín (prijato), takže mezikrok

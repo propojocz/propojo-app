@@ -45,6 +45,8 @@ function itemToValues(it: ServiceItem): ServiceItemValues {
     price_max: it.price_max,
     duration_minutes: it.duration_minutes,
     deposit_amount: it.deposit_amount,
+    deposit_type: ((it as any).deposit_type as 'zaloha' | 'plna_platba') ?? 'zaloha',
+    no_show_fee: (it as any).no_show_fee ?? null,
     price_includes_material: it.price_includes_material ?? true,
     price_note: it.price_note,
     is_active: it.is_active,
