@@ -265,7 +265,7 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   // vázaná na položku; jinak fallback na kartu (services) — starý tok.
   const { data: ordCheck } = await supabase
     .from('orders')
-    .select('customer_id, provider_id, deposit_status, slot_id, service_item_id, scheduled_at, services(payment_model, deposit_amount, quote_fee), service_items(payment_model, deposit_amount, quote_fee, deposit_type, price)')
+    .select('customer_id, provider_id, attendance, deposit_status, slot_id, service_item_id, scheduled_at, services(payment_model, deposit_amount, quote_fee), service_items(payment_model, deposit_amount, quote_fee, deposit_type, price)')
     .eq('id', orderId)
     .single() as { data: any }
 
@@ -323,6 +323,11 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   if (status === 'zruseno') {
     if (!isProvider && !isCustomer) {
       return { success: false, error: 'K této objednávce nemáte přístup.' }
+    }
+    // Zákazník NESMÍ zrušit, když je označené nedostavení — refund by mu vrátil
+    // zálohu, která má jako storno jít poskytovateli. Řeší se přes 24h lhůtu.
+    if (!isProvider && (ordCheck as any).attendance === 'nedorazil') {
+      return { success: false, error: 'Objednávku teď nelze zrušit — je označené nedostavení. Pokud s tím nesouhlasíte, ozvěte se v objednávce; máte 24 hodin.' }
     }
     if (ordCheck.deposit_status === 'paid') {
       const refundRes = await refundDeposit(orderId, user.id)

@@ -184,19 +184,19 @@ export default function TimeProposalPanel({
               </>
             )}
 
-            <div className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
               <input
                 type="datetime-local"
                 value={newTime}
                 onChange={(e) => setNewTime(e.target.value)}
                 min={toLocalInput(new Date().toISOString())}
-                className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 sm:w-auto"
               />
               <button
                 type="button"
                 onClick={addTime}
                 disabled={!newTime}
-                className="inline-flex items-center gap-1 rounded-xl border border-dashed border-amber-400 px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-1 rounded-xl border border-dashed border-amber-400 px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
               >
                 <Plus className="h-4 w-4" /> Přidat čas
               </button>
@@ -250,6 +250,9 @@ export default function TimeProposalPanel({
     const res = await declineProposals(orderId)
     setBusy(false)
     if (!res.success) { setError(res.error); return }
+    // Návrhy zmizí → formulář „Kdy se vám to hodí?" se objeví nad chatem
+    // (řídí order-page podle proposals.length). Drží se v DB, takže vydrží
+    // i zavření appky — zákazník se k němu vrátí kdykoli.
     router.refresh()
   }
 
@@ -301,6 +304,7 @@ export default function TimeProposalPanel({
           Nevyhovuje ani jeden
         </button>
       </div>
+
     </div>
   )
 }

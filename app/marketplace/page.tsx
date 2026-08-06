@@ -57,14 +57,14 @@ async function getSubcategories(categorySlug?: string) {
   const supabase = createClient()
   const { data: cat } = await supabase.from('categories').select('id').eq('slug', categorySlug).single()
   if (!cat) return []
-  const { data } = await supabase.from('subcategories').select('id, name').eq('category_id', (cat as any).id).order('name')
+  const { data } = await supabase.from('subcategories').select('id, name').eq('category_id', (cat as any).id).eq('is_approved', true).order('name')
   return (data as { id: string; name: string }[]) ?? []
 }
 
 // Karty, jejichž podkategorie odpovídají textu (fulltext přes názvy podkategorií).
 async function serviceIdsBySubcatText(q: string): Promise<string[]> {
   const supabase = createClient()
-  const { data: subs } = await supabase.from('subcategories').select('id').ilike('name', `%${q}%`)
+  const { data: subs } = await supabase.from('subcategories').select('id').eq('is_approved', true).ilike('name', `%${q}%`)
   const subIds = (subs ?? []).map((s: any) => s.id)
   if (subIds.length === 0) return []
   const { data: links } = await supabase.from('service_subcategories').select('service_id').in('subcategory_id', subIds)
@@ -108,7 +108,7 @@ async function ServiceList({
   } else if (category) {
     const { data: cat } = await supabase.from('categories').select('id').eq('slug', category).single()
     if (cat) {
-      const { data: subs } = await supabase.from('subcategories').select('id').eq('category_id', (cat as any).id)
+      const { data: subs } = await supabase.from('subcategories').select('id').eq('category_id', (cat as any).id).eq('is_approved', true)
       if (subs && subs.length > 0) {
         query = query.in('subcategory_id', subs.map((s: any) => s.id))
       } else {

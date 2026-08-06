@@ -22,8 +22,9 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle2, AlertCircle, Loader2, ChevronRight, Store, Home, Lightbulb, Eye, ListChecks, CalendarDays } from 'lucide-react'
+import { CheckCircle2, AlertCircle, Loader2, ChevronRight, Store, Home, Lightbulb, Eye, ListChecks, CalendarDays, Plus, Sparkles } from 'lucide-react'
 import { createService, updateService } from '@/lib/actions/services'
+import { createOwnSubcategory } from '@/lib/actions/subcategories'
 import type { Service, ServiceItem } from '@/types/database'
 import { createClient } from '@/lib/supabase/client'
 import ServiceCard from '@/components/ui/ServiceCard'
@@ -32,6 +33,7 @@ import GalleryUpload from '@/components/ui/GalleryUpload'
 import AddressInput from '@/components/ui/AddressInput'
 import SearchAutocomplete from '@/components/ui/SearchAutocomplete'
 import PriceList from '@/components/ui/PriceList'
+import ServiceHours from '@/components/forms/ServiceHours'
 import InfoTip from '@/components/ui/InfoTip'
 import type { ServiceTypeOption } from '@/components/ui/ServiceItemEditor'
 
@@ -78,6 +80,18 @@ interface Props {
 
 export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub = true }: Props) {
   const [categories, setCategories] = useState<Category[]>([])
+  const [radiusExpanded, setRadiusExpanded] = useState(false)
+  // Krokovaný průchod: 1 Karta → 2 Ceník → 3 Kdy máte čas → 4 Zveřejnění.
+  // V režimu úprav začínáme rovnou u karty, ale všechny kroky jsou odemčené.
+  const [krok, setKrok] = useState(1)
+  // Vlastní podkategorie („Nevidím svou službu")
+  const [ownSubOpen, setOwnSubOpen] = useState(false)
+  const [ownSubName, setOwnSubName] = useState('')
+  const [ownSubSaving, setOwnSubSaving] = useState(false)
+  const [ownSubErr, setOwnSubErr] = useState('')
+  // Vlastní podkategorie přidané v tomhle sezení — ať je vidět hned,
+  // než se překreslí seznam z databáze.
+  const [ownSubs, setOwnSubs] = useState<{ id: string; name: string }[]>([])
   const [loadingCats, setLoadingCats] = useState(true)
   const [submitState, setSubmitState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState('')
@@ -182,11 +196,44 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
     setValue('subcategory_id', next[0] ?? '')
   }
 
+  // Podkategorie vybrané na kartě → skupiny v ceníku. Systémové i vlastní.
+  const subcatsForPriceList = [
+    ...(activeCat?.subcategories ?? [])
+      .filter(sub => selectedSubIds.includes(sub.id))
+      .map(sub => ({ id: sub.id, name: sub.name, isOwn: false })),
+    ...ownSubs
+      .filter(o => selectedSubIds.includes(o.id))
+      .map(o => ({ id: o.id, name: o.name, isOwn: true })),
+  ]
+
   // Typy služeb nabídnuté z vybraných podkategorií — vstup do ceníku (našeptávač názvu).
   const serviceTypesForItems: ServiceTypeOption[] = (activeCat?.subcategories ?? [])
     .filter(sub => selectedSubIds.includes(sub.id))
     .flatMap(sub => sub.service_types ?? [])
     .map(st => ({ id: st.id, name: st.name }))
+
+  // ── Vlastní podkategorie („Nevidím svou službu") ──
+  // Vytvoří se jako NESCHVÁLENÁ: na kartě funguje hned, do zákaznického
+  // vyhledávání spadne, až ji projdeme v adminu.
+  const saveOwnSub = async () => {
+    const cat = activeCat
+    if (!cat) { setOwnSubErr('Vyberte nejdřív kategorii.'); return }
+    const name = ownSubName.trim()
+    if (name.length < 3) { setOwnSubErr('Napište název — aspoň tři znaky.'); return }
+
+    setOwnSubSaving(true); setOwnSubErr('')
+    const res = await createOwnSubcategory({ category_id: cat.id, name })
+    setOwnSubSaving(false)
+
+    if (!res.success) { setOwnSubErr(res.error); return }
+
+    // Rovnou ji zaškrtneme, ať nemusí klikat dvakrát.
+    setOwnSubs(prev => prev.some(o => o.id === res.id) ? prev : [...prev, { id: res.id, name: res.name }])
+    const next = selectedSubIds.includes(res.id) ? selectedSubIds : [...selectedSubIds, res.id]
+    setValue('subcategory_ids', next)
+    setValue('subcategory_id', next[0] ?? '')
+    setOwnSubName(''); setOwnSubOpen(false)
+  }
 
   // ── Uložení KARTY ──
   const onSubmit = async (data: FormValues) => {
@@ -197,14 +244,14 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
 
     if (result.success) {
       setSubmitState('success')
-      setServiceId(result.id)       // fáze 2 se otevře, ceník se načte
+      setServiceId(result.id)
       onSuccess?.(result.id)
       setTimeout(() => setSubmitState('idle'), 2500)
-      // Po prvním uložení sroluj k ceníku
+      // Karta má id → posuneme se rovnou na ceník. Bez tohohle kroku
+      // řemeslník uložil a nevěděl, že má pokračovat.
       if (mode === 'create') {
-        setTimeout(() => {
-          document.getElementById('cenik')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        }, 200)
+        setKrok(2)
+        window.scrollTo({ top: 0, behavior: 'smooth' })
       }
     } else {
       setSubmitState('error'); setErrorMsg(result.error); setTimeout(() => setSubmitState('idle'), 4000)
@@ -255,6 +302,65 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
     },
   } as any
 
+  // ── Kdy je krok hotový ────────────────────────────────────────
+  // Podle toho se odemykají další kroky a mění spodní lišta.
+  const wPopis = watch('description') ?? ''
+  const krok1Hotovy =
+    (watch('title') ?? '').trim().length >= 5 &&
+    wPopis.trim().length >= 20 &&
+    !!selectedCategory &&
+    selectedSubIds.length > 0
+  const krok2Hotovy = items.length > 0 && items.some(i => i.is_active)
+
+  // Krok 3 (dostupnost) navštívil? Pak dostane fajfku. ServiceHours si dny
+  // řídí sám a ven je nedává, tak neblokujeme — dostupnost není nutná k tomu,
+  // aby karta existovala (bez ní chodí jen poptávky). Jen navádíme.
+  const [krok3Navstiven, setKrok3Navstiven] = useState(mode === 'edit')
+
+  const KROKY = [
+    { c: 1, nadpis: 'Vaše karta', hotovo: krok1Hotovy, pruchozi: krok1Hotovy },
+    { c: 2, nadpis: 'Ceník', hotovo: krok2Hotovy, pruchozi: krok2Hotovy },
+    { c: 3, nadpis: 'Kdy máte čas', hotovo: krok3Navstiven, pruchozi: true },
+    { c: 4, nadpis: 'Zveřejnění', hotovo: false, pruchozi: false },
+  ]
+  // Dopředu jen přes průchozí kroky; v režimu úprav je vše odemčené.
+  const lzeNaKrok = (c: number) =>
+    mode === 'edit' || c === 1 || KROKY.slice(0, c - 1).every(k => k.pruchozi)
+
+  const naKrok = (c: number) => {
+    if (!lzeNaKrok(c)) return
+    if (c === 3) setKrok3Navstiven(true)
+    setKrok(c)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const rail = (
+    <div className="mb-6 flex gap-1.5">
+      {KROKY.map(k => {
+        const now = krok === k.c
+        const lze = lzeNaKrok(k.c)
+        return (
+          <button
+            key={k.c}
+            type="button"
+            onClick={() => naKrok(k.c)}
+            disabled={!lze}
+            className={`flex-1 border-t-[3px] pt-2 text-left text-xs transition ${
+              now ? 'border-slate-900 font-bold text-slate-900'
+                : k.hotovo ? 'border-emerald-500 font-semibold text-emerald-700'
+                : 'border-slate-200 font-semibold text-slate-400'
+            } ${lze ? 'cursor-pointer' : 'cursor-not-allowed opacity-55'}`}
+          >
+            <span className={`block text-[10px] font-bold uppercase tracking-wider ${now ? 'text-slate-500' : 'text-slate-300'}`}>
+              Krok {k.c}
+            </span>
+            {k.nadpis}{k.hotovo && ' ✓'}
+          </button>
+        )
+      })}
+    </div>
+  )
+
   const preview = (
     <div className="xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto xl:pb-2">
       <p className="mb-2.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
@@ -292,6 +398,11 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
         transition={{ duration: 0.4 }}
         className="min-w-0 space-y-6 xl:order-1"
       >
+        {rail}
+
+        {/* ══ KROK 1 — VAŠE KARTA ══ */}
+        <div className={krok === 1 ? 'space-y-6' : 'hidden'}>
+
         {/* Tip */}
         <div className="flex items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
           <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
@@ -404,7 +515,81 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
                           </button>
                         )
                       })}
+
+                      {/* Vlastní podkategorie přidané v tomhle sezení */}
+                      {ownSubs.map(o => {
+                        const isSelected = selectedSubIds.includes(o.id)
+                        return (
+                          <button
+                            key={o.id}
+                            type="button"
+                            onClick={() => toggleSub(o.id)}
+                            title="Vaše vlastní — zákazníci ji ve vyhledávání uvidí po schválení"
+                            className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm transition-all ${
+                              isSelected
+                                ? 'border-amber-400 bg-amber-50 font-semibold text-amber-800'
+                                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                            }`}
+                          >
+                            <span className={`flex h-3.5 w-3.5 items-center justify-center rounded border ${isSelected ? 'border-amber-500 bg-amber-500 text-white' : 'border-slate-300'}`}>
+                              {isSelected && <span className="text-[9px] leading-none">✓</span>}
+                            </span>
+                            {o.name}
+                            <Sparkles className="h-3 w-3 text-amber-500" />
+                          </button>
+                        )
+                      })}
+
+                      {/* Nevidím svou službu */}
+                      <button
+                        type="button"
+                        onClick={() => { setOwnSubOpen(v => !v); setOwnSubErr('') }}
+                        className="flex items-center gap-1.5 rounded-xl border border-dashed border-slate-300 px-3 py-1.5 text-sm text-slate-500 transition-all hover:border-emerald-400 hover:text-emerald-700"
+                      >
+                        <Plus className="h-3.5 w-3.5" /> Nevidím svou službu
+                      </button>
                     </div>
+
+                    {/* Formulář vlastní podkategorie */}
+                    <AnimatePresence>
+                      {ownSubOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="mt-2.5 overflow-hidden"
+                        >
+                          <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+                            <p className="text-xs leading-relaxed text-amber-900">
+                              <strong>Napište službu odborně</strong> — tak, jak ji zná zákazník.
+                              Hned si ji dáte na kartu a můžete přijímat objednávky. Ve vyhledávání
+                              se ukáže, jakmile ji zařadíme mezi ostatní.
+                            </p>
+                            <div className="mt-2 flex gap-2">
+                              <input
+                                value={ownSubName}
+                                onChange={e => { setOwnSubName(e.target.value); setOwnSubErr('') }}
+                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveOwnSub() } }}
+                                maxLength={60}
+                                placeholder="např. Renovace parket"
+                                className="form-input flex-1 bg-white"
+                                autoFocus
+                              />
+                              <button
+                                type="button"
+                                onClick={saveOwnSub}
+                                disabled={ownSubSaving || ownSubName.trim().length < 3}
+                                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50"
+                              >
+                                {ownSubSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                                Přidat
+                              </button>
+                            </div>
+                            {ownSubErr && <p className="mt-1.5 text-xs font-semibold text-red-600">{ownSubErr}</p>}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -412,16 +597,6 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
           )}
           {errors.category && <p className="form-error">{errors.category.message}</p>}
         </div>
-
-        {selectedCategory && (
-          <p className="-mt-2 text-xs text-slate-400">
-            Nevidíte svůj obor?{' '}
-            <a href="mailto:podpora@propojo.cz?subject=Chybejici%20obor" className="font-semibold text-emerald-600 hover:underline">
-              Napište nám
-            </a>{' '}
-            a doplníme ho.
-          </p>
-        )}
 
         {/* 5. KDE VYKONÁVÁTE */}
         <div className="space-y-3">
@@ -533,7 +708,14 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
         {/* 7. DOJEZD */}
         <AnimatePresence>
           {locationType !== 'u_poskytovatele' && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-1.5 overflow-hidden">
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              // overflow-hidden ořezával bublinu InfoTipu. Během animace ho držíme
+              // skrytý (kvůli plynulému rozbalení výšky), po dokončení uvolníme.
+              onAnimationComplete={() => setRadiusExpanded(true)}
+              className={`space-y-1.5 ${radiusExpanded ? 'overflow-visible' : 'overflow-hidden'}`}>
               <label className="form-label flex items-center justify-between gap-1">
                 <span>Dojezdová vzdálenost (km)</span>
                 <InfoTip>
@@ -618,7 +800,10 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
            : 'Uložit kartu a pokračovat k ceníku'}
         </button>
 
-        {/* ── CENÍK (fáze 2) ── */}
+        </div>{/* konec kroku 1 */}
+
+        {/* ══ KROK 2 — CENÍK ══ */}
+        <div className={krok === 2 ? 'space-y-6' : 'hidden'}>
         <AnimatePresence>
           {serviceId && (
             <motion.div
@@ -632,7 +817,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
                   <ListChecks className="h-4 w-4 text-emerald-600" /> Ceník úkonů
                 </label>
                 <p className="text-xs text-slate-400">
-                  Každý úkon má vlastní cenu, délku i zálohu. Zákazník si objedná konkrétní úkon, ne celou kartu.
+                  Podle podkategorií, které jste vybrali výše, jsme vám připravili skupiny. Doplňte cenu a délku — a kde nabízíte víc variant, přidejte další úkon.
                 </p>
               </div>
 
@@ -645,42 +830,131 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
                   serviceId={serviceId}
                   items={items}
                   serviceTypes={serviceTypesForItems}
+                  subcategories={subcatsForPriceList}
                   onChanged={loadItems}
                 />
               )}
 
-              {/* Dostupnost — žije na vlastní stránce, tady je jen rozcestník.
-                  Otevírací doba se mění jindy než popis a fotky a formulář je
-                  už dost dlouhý. */}
-              <Link
-                href={`/dashboard/dostupnost/${serviceId}`}
-                className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 transition-all hover:border-emerald-300 hover:bg-emerald-50/40"
-              >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100">
-                  <CalendarDays className="h-5 w-5 text-emerald-600" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-bold text-slate-900">Dostupnost a otevírací doba</span>
-                  <span className="block text-xs leading-relaxed text-slate-500">
-                    Vyplňte, kdy máte otevřeno, a zákazníci si u vás rovnou vyberou konkrétní termín.
-                    Bez toho vám budou chodit poptávky bez času.
-                  </span>
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
-              </Link>
-
-              {mode === 'create' && (
-                <button
-                  type="button"
-                  onClick={finish}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
-                >
-                  <CheckCircle2 className="h-4 w-4" /> Hotovo — přejít na Moje nabídky
-                </button>
-              )}
             </motion.div>
           )}
         </AnimatePresence>
+        </div>{/* konec kroku 2 */}
+
+        {/* ══ KROK 3 — KDY MÁTE ČAS ══ */}
+        {/* Dostupnost byla na vlastní stránce a řemeslníci ji přeskakovali.
+            Teď je součástí formuláře — bez ní chodí jen poptávky bez času. */}
+        <div className={krok === 3 ? 'space-y-4' : 'hidden'}>
+          <div>
+            <label className="form-label flex items-center gap-1.5">
+              <CalendarDays className="h-4 w-4 text-emerald-600" /> Kdy máte otevřeno
+            </label>
+            <p className="text-xs text-slate-400">
+              Zákazník uvidí jen termíny, které vám sedí. Kdykoli to změníte — i zablokujete dovolenou.
+            </p>
+          </div>
+
+          {serviceId && krok === 3 && (
+            <ServiceHours
+              serviceId={serviceId}
+              isTravelCard={locationType === 'u_zakaznika'}
+            />
+          )}
+
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
+            <p className="text-sm font-bold text-slate-900">Tohle je jen rámec</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-slate-600">
+              Konkrétní volné termíny vypíšete jedním klepnutím po zveřejnění. Právě ty vás
+              v seznamu posunou nahoru — zákazníci hledají hlavně podle toho, kdo je vezme nejdřív.
+            </p>
+          </div>
+        </div>
+
+        {/* ══ KROK 4 — ZVEŘEJNĚNÍ ══ */}
+        <div className={krok === 4 ? 'space-y-4' : 'hidden'}>
+          <div>
+            <label className="form-label">Zkontrolujte a zveřejněte</label>
+            <p className="text-xs text-slate-400">Takhle vás uvidí zákazník v seznamu nabídek.</p>
+          </div>
+
+          <div className="pointer-events-none max-w-sm select-none">
+            <ServiceCard
+              service={previewService}
+              categoryName={activeCat?.name}
+              subcatNames={previewSubNames}
+              preview
+            />
+          </div>
+
+          <dl className="overflow-hidden rounded-2xl border border-slate-200 bg-white text-sm">
+            {[
+              ['Název', wTitle.trim() || '—'],
+              ['Co děláte', previewSubNames.join(', ') || 'nevybráno'],
+              ['Kde', locationType === 'u_poskytovatele'
+                ? `U vás — ${wCity || '—'}`
+                : `Výjezd do ${watch('radius_km') ?? '—'} km od ${wCity || '—'}`],
+              ['Ceník', activeItems.length > 0
+                ? `${activeItems.length} ${activeItems.length === 1 ? 'úkon' : activeItems.length < 5 ? 'úkony' : 'úkonů'}`
+                : 'chybí ceny'],
+            ].map(([dt, dd]) => (
+              <div key={dt} className="flex gap-3 border-b border-slate-100 px-4 py-2.5 last:border-0">
+                <dt className="w-28 shrink-0 text-slate-500">{dt}</dt>
+                <dd className="flex-1 font-semibold text-slate-800">{dd}</dd>
+              </div>
+            ))}
+          </dl>
+
+          {!hasActiveSub && (
+            <div className="flex gap-2.5 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+              <span>💳</span>
+              <p className="text-xs leading-relaxed text-blue-900">
+                <strong>Kartu máme uloženou, zveřejní se po zaplacení předplatného.</strong>{' '}
+                Zákazníci ji uvidí, jakmile bude aktivní. Do té doby si ji můžete v klidu dopilovat.
+              </p>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={finish}
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+          >
+            <CheckCircle2 className="h-4 w-4" />
+            {hasActiveSub ? 'Hotovo — přejít na Moje nabídky' : 'Uložit a přejít k předplatnému'}
+          </button>
+        </div>
+
+        {/* ══ SPODNÍ NAVIGACE ══ */}
+        {serviceId && (
+          <div className="flex items-center gap-3 border-t border-slate-100 pt-4">
+            {krok > 1 && (
+              <button type="button" onClick={() => naKrok(krok - 1)}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">
+                Zpět
+              </button>
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-slate-900">
+                {krok === 1 ? (krok1Hotovy ? 'Karta je vyplněná' : 'Rozpracováno')
+                  : krok === 2 ? (krok2Hotovy ? 'Ceník hotový' : 'Chybí ceny')
+                  : krok === 3 ? 'Rozvrh' : 'Připraveno'}
+              </p>
+              <p className="text-xs text-slate-500">
+                {krok === 1 ? (krok1Hotovy ? 'Teď ceník — u každé služby cena a délka.' : 'Doplňte název, popis a co děláte.')
+                  : krok === 2 ? (krok2Hotovy ? 'Zbývá říct, kdy máte čas.' : 'Bez ceny si u vás zákazník nemůže objednat.')
+                  : krok === 3 ? 'Pak už jen zkontrolovat a zveřejnit.'
+                  : 'Zkontrolujte souhrn a kartu zveřejněte.'}
+              </p>
+            </div>
+            {krok < 4 && (
+              <button type="button" onClick={() => naKrok(krok + 1)}
+                disabled={!lzeNaKrok(krok + 1)}
+                className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40">
+                Pokračovat
+              </button>
+            )}
+          </div>
+        )}
+
       </motion.form>
     </div>
   )

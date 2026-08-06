@@ -15,6 +15,7 @@ const itemSchema = z.object({
   id: z.string().uuid().optional(),
   service_id: z.string().uuid(),
   service_type_id: z.string().uuid().nullable().optional(),
+  subcategory_id: z.string().uuid().nullable().optional(),
   name: z.string().min(2, 'Zadejte název úkonu.').max(100),
   payment_model: z.enum(['A', 'B'] as const),
   price_type: z.enum(['fixed', 'range', 'on_agreement'] as const),
@@ -23,9 +24,10 @@ const itemSchema = z.object({
   price_max: z.number().min(0).max(999999).nullable().optional(),
   duration_minutes: z.number().int().min(0).max(100000).nullable().optional(),
   deposit_amount: z.number().min(0).max(999999).nullable().optional(),
-  deposit_type: z.enum(['zaloha', 'plna_platba'] as const).optional(),
+  deposit_type: z.enum(['zaloha', 'plna_platba', 'bez_platby'] as const).optional(),
   no_show_fee: z.number().min(0).max(999999).nullable().optional(),
-  price_includes_material: z.boolean().optional(),
+  fee_mode: z.enum(['noshow', 'storno', 'zadny'] as const).optional(),
+  price_includes_material: z.boolean().nullable().optional(),
   price_note: z.string().max(200).nullable().optional(),
   is_active: z.boolean().optional(),
   sort_order: z.number().int().min(0).max(100000).optional(),
@@ -43,7 +45,7 @@ type ItemParsed = z.infer<typeof itemSchema>
 function normalizeItem(d: ItemParsed): ItemParsed {
   const out: ItemParsed = { ...d }
   out.name = out.name.trim()
-  if (out.price_includes_material == null) out.price_includes_material = true
+  if (out.price_includes_material === undefined) out.price_includes_material = true
   if (out.is_active == null) out.is_active = true
 
   if (out.payment_model === 'B') {
@@ -53,7 +55,8 @@ function normalizeItem(d: ItemParsed): ItemParsed {
     out.deposit_amount = null
     out.deposit_type = 'zaloha'
     out.no_show_fee = null
-    out.price_includes_material = true
+    out.fee_mode = 'noshow'
+    out.price_includes_material = null
     out.price_note = out.price_note?.trim() || null
   } else {
     // U pevné ceny výjezdové podmínky nedávají smysl — nulujeme,
@@ -68,12 +71,18 @@ function normalizeItem(d: ItemParsed): ItemParsed {
     }
     if (out.price_type !== 'range') out.price_max = null
     if (out.deposit_type == null) out.deposit_type = 'zaloha'
-    if (out.deposit_type === 'plna_platba') {
+    if (out.deposit_type === 'bez_platby') {
+      out.deposit_amount = null
+      out.no_show_fee = null
+      out.fee_mode = 'zadny'
+    } else if (out.deposit_type === 'plna_platba') {
       out.deposit_amount = null   // platí se celá cena, záloha se neřeší
     } else {
       if (out.deposit_amount != null && out.deposit_amount < 200) out.deposit_amount = 200
       if (out.deposit_amount == null) out.deposit_amount = 200
     }
+    if (out.fee_mode == null) out.fee_mode = 'noshow'
+    if (out.fee_mode === 'zadny') out.no_show_fee = null
     if (out.no_show_fee != null && out.no_show_fee <= 0) out.no_show_fee = null
     out.price_note = out.price_note?.trim() || null
   }

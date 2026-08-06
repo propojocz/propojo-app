@@ -22,11 +22,33 @@ export default async function AdminKategoriePage() {
     { data: linkRows },
   ] = await Promise.all([
     admin.from('categories').select('id, slug, name, icon, color, sort_order').order('sort_order'),
-    admin.from('subcategories').select('id, category_id, slug, name').order('name'),
+    // is_approved / created_by / suggested_note přibyly ve vrstvě 13 — nesou
+    // podkategorie navržené poskytovateli, které čekají na schválení.
+    admin.from('subcategories')
+      .select('id, category_id, slug, name, is_approved, created_by, suggested_note')
+      .order('name'),
     admin.from('service_types').select('id, subcategory_id, name').order('name'),
     admin.from('services').select('id, category'),
     admin.from('service_subcategories').select('subcategory_id'),
   ])
+
+  // Jména navrhovatelů — ať víte, koho se případně zeptat.
+  const authorIds = Array.from(new Set(
+    (subcategories ?? [])
+      .map((s: any) => s.created_by)
+      .filter(Boolean)
+  )) as string[]
+
+  const authorNames: Record<string, string> = {}
+  if (authorIds.length > 0) {
+    const { data: profs } = await admin
+      .from('profiles')
+      .select('id, display_name, company_name, full_name')
+      .in('id', authorIds)
+    for (const p of (profs ?? []) as any[]) {
+      authorNames[p.id] = p.display_name || p.company_name || p.full_name || 'Poskytovatel'
+    }
+  }
 
   // Počty využití pro bezpečné mazání a informaci
   const categoryUsage: Record<string, number> = {}
@@ -42,10 +64,11 @@ export default async function AdminKategoriePage() {
   return (
     <KategorieManager
       categories={categories ?? []}
-      subcategories={subcategories ?? []}
+      subcategories={(subcategories ?? []) as any}
       serviceTypes={serviceTypes ?? []}
       categoryUsage={categoryUsage}
       subcatUsage={subcatUsage}
+      authorNames={authorNames}
     />
   )
 }

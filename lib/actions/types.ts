@@ -40,7 +40,7 @@ export type ServiceFormValues = {
   // ── Cenová pole (LEGACY) — po přestavbě je nese ceník (service_items). ──
   price?: number
   price_unit?: PriceUnit
-  price_includes_material?: boolean
+  price_includes_material?: boolean | null
   price_note?: string | null
   payment_model?: PaymentModel
   price_type?: PriceType
@@ -67,7 +67,7 @@ export type ServiceItemFormValues = {
   price_max?: number | null
   duration_minutes?: number | null
   deposit_amount?: number | null
-  price_includes_material?: boolean
+  price_includes_material?: boolean | null
   price_note?: string | null
   is_active?: boolean
   sort_order?: number

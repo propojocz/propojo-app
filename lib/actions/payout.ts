@@ -490,3 +490,85 @@ export async function autoReleaseStaleDeposits(): Promise<{ released: number; fa
 
   return { released, failed }
 }
+
+// ── AUTOMATICKÉ VYŘÍZENÍ NEDOSTAVENÍ ──────────────────────
+// Poskytovatel označil „nedorazil", zákazník dostal upozornění a 24 hodin na
+// námitku. Když se neozval, appka vyřídí sama — nikdo nic neposuzuje:
+//   · storno poplatek (zmrazený na objednávce) jde poskytovateli,
+//   · zbytek zaplacené částky se vrátí zákazníkovi.
+// Ozval-li se (status 'spor'), tahle funkce se ho ani nedotkne.
+const NO_SHOW_HOURS = 24
+
+export async function autoResolveNoShows(): Promise<{ resolved: number; failed: number }> {
+  const admin = getAdminClient()
+  const cutoff = new Date(Date.now() - NO_SHOW_HOURS * 3600 * 1000).toISOString()
+
+  const { data: rows } = await admin
+    .from('orders')
+    .select('id, provider_id, customer_id, deposit_amount, no_show_fee_amount, stripe_payment_intent_id, status, profiles!orders_provider_id_fkey(stripe_account_id)')
+    .eq('attendance', 'nedorazil')
+    .eq('deposit_status', 'paid')
+    .neq('status', 'spor')
+    .neq('status', 'zruseno')
+    .lt('no_show_marked_at', cutoff) as { data: any[] | null }
+
+  let resolved = 0
+  let failed = 0
+
+  for (const o of rows ?? []) {
+    const zaplaceno = Number(o.deposit_amount ?? 0)
+    const noShowFee = Math.min(Number(o.no_show_fee_amount ?? 0), zaplaceno)
+    const vratka = Math.max(0, zaplaceno - noShowFee)
+    const providerAccount = o.profiles?.stripe_account_id
+
+    try {
+      // 1) Storno poskytovateli
+      if (noShowFee > 0 && providerAccount) {
+        const ok = await doTransfer(o.stripe_payment_intent_id, noShowFee, providerAccount)
+        if (!ok) { failed++; continue }
+      }
+
+      // 2) Zbytek zpět zákazníkovi
+      if (vratka > 0 && o.stripe_payment_intent_id) {
+        await stripe.refunds.create({
+          payment_intent: o.stripe_payment_intent_id,
+          amount: Math.round(vratka * 100),
+        })
+      }
+
+      await (admin.from('orders') as any)
+        .update({ status: 'dokonceno', deposit_status: noShowFee > 0 ? 'released' : 'refunded' })
+        .eq('id', o.id)
+
+      try {
+        await createNotification({
+          userId: o.provider_id,
+          type: 'status_change',
+          orderId: o.id,
+          actorId: o.provider_id,
+          title: noShowFee > 0 ? 'Poplatek za nedostavení vyřízen' : 'Nedostavení uzavřeno',
+          preview: noShowFee > 0
+            ? `${noShowFee.toLocaleString('cs-CZ')} Kč je na cestě na váš účet.`
+            : 'U tohoto úkonu nemáte nastavený poplatek za nedostavení.',
+        })
+        await createNotification({
+          userId: o.customer_id,
+          type: 'status_change',
+          orderId: o.id,
+          actorId: o.provider_id,
+          title: 'Nedostavení vyřízeno',
+          preview: vratka > 0
+            ? `Vráceno ${vratka.toLocaleString('cs-CZ')} Kč${noShowFee > 0 ? `, poplatek ${noShowFee.toLocaleString('cs-CZ')} Kč si nechal poskytovatel.` : '.'}`
+            : `Poplatek ${noShowFee.toLocaleString('cs-CZ')} Kč za nedostavení si nechal poskytovatel.`,
+        })
+      } catch { /* notifikace není kritická */ }
+
+      resolved++
+    } catch (err) {
+      console.error('[autoResolveNoShows] chyba u', o.id, err)
+      failed++
+    }
+  }
+
+  return { resolved, failed }
+}

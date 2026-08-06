@@ -9,7 +9,7 @@
 
 import { useState, type MouseEvent } from 'react'
 import { motion } from 'framer-motion'
-import { MapPin, Star, ShieldCheck, Zap, Sparkles, ChevronLeft, ChevronRight, ListChecks } from 'lucide-react'
+import { MapPin, Star, ShieldCheck, Zap, Sparkles, ChevronLeft, ChevronRight, ListChecks, CalendarClock } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
 import type { ServiceWithProvider } from '@/types/database'
@@ -23,6 +23,9 @@ interface ServiceCardProps {
   subcatNames?: string[]
   /** Má TATO karta do budoucna vypsané volné okno? Ukáže štítek „Last minute". */
   hasFreeSlot?: boolean
+  /** Nejbližší volný termín (ISO). Podle něj se marketplace řadí — zákazník
+   *  chce vědět, kdo ho vezme nejdřív. null = karta jede z poptávek. */
+  nextFreeSlot?: string | null
   isFavorited?: boolean
   isLoggedIn?: boolean
   /** Náhled ve formuláři — vypne odkazy a oblíbené, karta je jen k prohlédnutí. */
@@ -39,7 +42,7 @@ const DEFAULT_META = { label: 'Služba', emoji: '🔧' }
 const MAX_CARD_PHOTOS = 5
 
 export default function ServiceCard({
-  service, index = 0, categoryName, subcatNames = [], hasFreeSlot = false,
+  service, index = 0, categoryName, subcatNames = [], hasFreeSlot = false, nextFreeSlot = null,
   isFavorited = false, isLoggedIn = false, preview = false,
   minItemPrice = null, itemCount = 0, gallery = [],
 }: ServiceCardProps) {
@@ -86,6 +89,21 @@ export default function ServiceCard({
     e.stopPropagation()
     setPhotoIdx((prev) => (prev + dir + frames) % frames)
   }
+
+  // Nejbližší volno — nejsilnější údaj na kartě. Dnes a zítra pojmenujeme,
+  // dál stačí zkrácený den, ať se to vejde na jeden řádek.
+  const volnoText = (() => {
+    if (!nextFreeSlot) return null
+    const d = new Date(nextFreeSlot)
+    const cas = new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(d)
+    const den = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(d)
+    const dnes = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date())
+    const zitra = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' })
+      .format(new Date(Date.now() + 86400000))
+    if (den === dnes) return `Dnes ${cas}`
+    if (den === zitra) return `Zítra ${cas}`
+    return `${new Intl.DateTimeFormat('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' }).format(d)} ${cas}`
+  })()
 
   const shownSubs = subcatNames.slice(0, 3)
   const moreSubs = subcatNames.length - shownSubs.length
@@ -214,6 +232,20 @@ export default function ServiceCard({
             <span className="inline-flex items-center gap-1 text-emerald-700"><ShieldCheck className="h-3.5 w-3.5" /> Ověřeno</span>
           )}
         </div>
+
+        {/* Nejbližší volno — hlavní důvod, proč si zákazník vybere zrovna tuhle
+            kartu. Kdo nemá vypsáno, není mrtvý: jede z poptávek. */}
+        {volnoText ? (
+          <div className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-700">
+            <Zap className="h-3.5 w-3.5 fill-emerald-500 text-emerald-500" />
+            Nejbližší volno: {volnoText}
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 px-0.5 text-xs text-slate-400">
+            <CalendarClock className="h-3.5 w-3.5" />
+            Termín domluvíte v poptávce
+          </div>
+        )}
 
         {/* Cena z ceníku + počet úkonů */}
         <div className="mt-auto flex items-end justify-between gap-2 border-t border-slate-100 pt-3">

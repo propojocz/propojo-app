@@ -117,6 +117,7 @@ export default function OrderItemModal({
   const dur = showDuration ? formatDuration(item.duration_minutes) : null
   const depositType = ((item as any).deposit_type as 'zaloha' | 'plna_platba' | undefined) ?? 'zaloha'
   const noShowFee = (item as any).no_show_fee != null ? Number((item as any).no_show_fee) : 0
+  const feeMode = ((item as any).fee_mode as 'noshow' | 'storno' | 'zadny' | undefined) ?? 'noshow'
   // Známe pevnou konečnou cenu? Jen tehdy má smysl ukazovat rozklad záloha/doplatek.
   const hasFixedPrice = !isModelB && item.price_type !== 'on_agreement' && item.price != null && Number(item.price) > 0
   const isFullPayment = !isModelB && depositType === 'plna_platba' && hasFixedPrice
@@ -368,12 +369,13 @@ export default function OrderItemModal({
                 )}
 
                 {/* Storno poplatek — zákazník musí vědět předem, na čem je. */}
-                {!isModelB && noShowFee > 0 && (
+                {!isModelB && noShowFee > 0 && feeMode !== 'zadny' && (
                   <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-2 text-[11px] leading-relaxed text-amber-800">
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
                     <span>
-                      Když se nedostavíte a termín nezrušíte včas, poskytovatel si účtuje
-                      storno <strong>{noShowFee.toLocaleString('cs-CZ')} Kč</strong>.
+                      {feeMode === 'storno'
+                        ? <>Když termín zrušíte příliš pozdě, poskytovatel si účtuje <strong>{noShowFee.toLocaleString('cs-CZ')} Kč</strong>.</>
+                        : <>Když nedorazíte a neozvete se, poskytovatel si účtuje <strong>{noShowFee.toLocaleString('cs-CZ')} Kč</strong>.</>}
                     </span>
                   </p>
                 )}

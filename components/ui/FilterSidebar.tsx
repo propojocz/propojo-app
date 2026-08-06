@@ -1,15 +1,15 @@
 'use client'
 // components/ui/FilterSidebar.tsx
- 
+
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { useTransition, useState, useEffect } from 'react'
-import { Star, X, Check } from 'lucide-react'
- 
+import { Star, X, Check, Zap } from 'lucide-react'
+
 interface Subcategory {
   id: string
   name: string
 }
- 
+
 interface Category {
   id: string
   slug: string
@@ -17,7 +17,7 @@ interface Category {
   icon: string
   color: string
 }
- 
+
 interface Props {
   categories: Category[]
   subcategories?: Subcategory[]
@@ -28,8 +28,10 @@ interface Props {
   currentSubcats?: string
   currentCity?: string
   currentDosah?: string
+  /** 'dnes' | 'tyden' — filtr podle vypsaného volna */
+  currentVolno?: string
 }
- 
+
 export default function FilterSidebar({
   categories,
   subcategories = [],
@@ -40,26 +42,27 @@ export default function FilterSidebar({
   currentSubcats,
   currentCity,
   currentDosah,
+  currentVolno,
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const [isPending, startTransition] = useTransition()
- 
+
   const [min, setMin] = useState(currentPriceMin ?? '')
   const [max, setMax] = useState(currentPriceMax ?? '')
   useEffect(() => setMin(currentPriceMin ?? ''), [currentPriceMin])
   useEffect(() => setMax(currentPriceMax ?? ''), [currentPriceMax])
- 
+
   const selectedSubs = (currentSubcats ?? '').split(',').filter(Boolean)
- 
+
   const setParam = (key: string, value?: string) => {
     const params = new URLSearchParams(searchParams.toString())
     if (value) params.set(key, value)
     else params.delete(key)
     startTransition(() => router.push(`${pathname}?${params.toString()}`, { scroll: false }))
   }
- 
+
   const selectCategory = (slug?: string) => {
     const params = new URLSearchParams(searchParams.toString())
     if (slug) params.set('category', slug)
@@ -67,14 +70,14 @@ export default function FilterSidebar({
     params.delete('subcats')
     startTransition(() => router.push(`${pathname}?${params.toString()}`, { scroll: false }))
   }
- 
+
   const toggleSub = (id: string) => {
     const next = selectedSubs.includes(id)
       ? selectedSubs.filter((x) => x !== id)
       : [...selectedSubs, id]
     setParam('subcats', next.length ? next.join(',') : undefined)
   }
- 
+
   const applyPrice = () => {
     const params = new URLSearchParams(searchParams.toString())
     if (min) params.set('priceMin', min)
@@ -83,22 +86,31 @@ export default function FilterSidebar({
     else params.delete('priceMax')
     startTransition(() => router.push(`${pathname}?${params.toString()}`, { scroll: false }))
   }
- 
+
   const clearFilters = () => {
     const params = new URLSearchParams(searchParams.toString())
-    ;['category', 'subcats', 'priceMin', 'priceMax', 'minRating', 'dosah'].forEach((k) => params.delete(k))
+    ;['category', 'subcats', 'priceMin', 'priceMax', 'minRating', 'dosah', 'volno'].forEach((k) => params.delete(k))
     startTransition(() => router.push(`${pathname}?${params.toString()}`, { scroll: false }))
   }
- 
+
   const ratingOpts = [
     { value: '', label: 'Vše' },
     { value: '4', label: '4,0 a více' },
     { value: '4.5', label: '4,5 a více' },
   ]
- 
+
+  // Dostupnost je první filtr — je to hlavní důvod, proč sem zákazník chodí.
+  // „Kdykoli" nic nefiltruje, aby zůstali vidět i ti, co jedou z poptávek.
+  const volnoOpts = [
+    { value: '', label: 'Kdykoli' },
+    { value: 'dnes', label: 'Volno dnes' },
+    { value: 'tyden', label: 'Volno do týdne' },
+  ]
+
   const hasFilters =
-    !!activeCategory || !!currentSubcats || !!currentPriceMin || !!currentPriceMax || !!currentMinRating || !!currentDosah
- 
+    !!activeCategory || !!currentSubcats || !!currentPriceMin || !!currentPriceMax ||
+    !!currentMinRating || !!currentDosah || !!currentVolno
+
   return (
     <div
       className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-opacity ${
@@ -116,7 +128,37 @@ export default function FilterSidebar({
           </button>
         )}
       </div>
- 
+
+      {/* Dostupnost */}
+      <div className="mb-6">
+        <h3 className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+          <Zap className="h-3.5 w-3.5 text-emerald-500" /> Dostupnost
+        </h3>
+        <div className="space-y-1">
+          {volnoOpts.map((opt) => {
+            const active = (currentVolno ?? '') === opt.value
+            return (
+              <button
+                key={opt.label}
+                onClick={() => setParam('volno', opt.value || undefined)}
+                className={`block w-full rounded-lg px-3 py-2 text-left text-sm transition ${
+                  active
+                    ? 'bg-emerald-50 font-semibold text-emerald-700'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {opt.label}
+              </button>
+            )
+          })}
+        </div>
+        {currentVolno && (
+          <p className="mt-2 text-xs text-slate-400">
+            Ukazujeme jen karty s vypsaným volným termínem. Ostatní se domlouvají přes poptávku.
+          </p>
+        )}
+      </div>
+
       {/* Kategorie */}
       <div className="mb-6">
         <h3 className="mb-3 text-sm font-semibold text-slate-800">Kategorie</h3>
@@ -145,7 +187,7 @@ export default function FilterSidebar({
                 >
                   <span>{cat.icon}</span> {cat.name}
                 </button>
- 
+
                 {active && subcategories.length > 0 && (
                   <div className="mt-1 space-y-0.5 border-l-2 border-emerald-100 pl-3">
                     {subcategories.map((sub) => {
@@ -176,7 +218,7 @@ export default function FilterSidebar({
           })}
         </div>
       </div>
- 
+
       {/* Cena */}
       <div className="mb-6">
         <h3 className="mb-3 text-sm font-semibold text-slate-800">Cena (Kč)</h3>
@@ -204,7 +246,7 @@ export default function FilterSidebar({
           />
         </div>
       </div>
- 
+
       {/* Hodnocení */}
       <div>
         <h3 className="mb-3 text-sm font-semibold text-slate-800">Hodnocení</h3>

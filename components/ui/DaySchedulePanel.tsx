@@ -9,9 +9,9 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  CalendarDays, Check, Clock, Wallet, Ban, Loader2, Plus, X, Sparkles, User, ChevronLeft, ChevronRight,
+  CalendarDays, Check, Clock, Wallet, Ban, Loader2, Plus, X, Sparkles, User, ChevronLeft, ChevronRight, UserX, ArrowLeftRight,
 } from 'lucide-react'
-import { markArrived, blockTime, unblockTime, type DayEntry } from '@/lib/actions/day-schedule'
+import { setAttendance, blockTime, unblockTime, type DayEntry, type Attendance } from '@/lib/actions/day-schedule'
 
 interface Props {
   /** 'YYYY-MM-DD' zobrazeného dne */
@@ -53,10 +53,10 @@ export default function DaySchedulePanel({ date, entries }: Props) {
     router.push(`/dashboard/terminy?den=${shiftDate(date, delta)}`)
   }
 
-  const toggleArrived = (orderId: string, current: boolean) => {
+  const pickAttendance = (orderId: string, value: Attendance) => {
     setBusyId(orderId)
     startTransition(async () => {
-      const res = await markArrived(orderId, !current)
+      const res = await setAttendance(orderId, value)
       setBusyId(null)
       if (!res.success) { setError(res.error); return }
       router.refresh()
@@ -120,7 +120,7 @@ export default function DaySchedulePanel({ date, entries }: Props) {
               return (
                 <li key={e.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                   <Ban className="h-4 w-4 shrink-0 text-slate-400" />
-                  <span className="w-24 shrink-0 text-sm font-bold tabular-nums text-slate-500">
+                  <span className="shrink-0 whitespace-nowrap text-sm font-bold tabular-nums text-slate-500">
                     {fmtTime(e.start)}–{fmtTime(e.end)}
                   </span>
                   <span className="flex-1 text-sm text-slate-500">{e.title}</span>
@@ -139,13 +139,13 @@ export default function DaySchedulePanel({ date, entries }: Props) {
               <li key={e.id} className={`flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3 sm:flex-nowrap ${
                 paying ? 'border-amber-200 bg-amber-50/60' : 'border-slate-200 bg-white'
               }`}>
-                <span className="w-24 shrink-0 text-sm font-black tabular-nums text-slate-800">
+                <span className="shrink-0 whitespace-nowrap text-sm font-black tabular-nums text-slate-800">
                   {fmtTime(e.start)}–{fmtTime(e.end)}
                 </span>
 
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="font-bold text-slate-900">{e.customerName}</span>
+                    <span className="truncate font-bold text-slate-900">{e.customerName}</span>
                     {e.firstVisit && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-1.5 py-0.5 text-[11px] font-bold text-blue-600">
                         <Sparkles className="h-3 w-3" /> poprvé u vás
@@ -167,23 +167,36 @@ export default function DaySchedulePanel({ date, entries }: Props) {
                 ) : null}
 
                 {/* Dorazil? — jen u zaplacených, ať se neodškrtává rozdělaná platba */}
-                {paid && (
-                  <button
-                    type="button"
-                    onClick={() => e.orderId && toggleArrived(e.orderId, !!e.arrived)}
-                    disabled={busyId === e.orderId}
-                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition ${
-                      e.arrived
-                        ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                        : 'border-slate-200 text-slate-500 hover:border-emerald-300 hover:text-emerald-700'
-                    } disabled:opacity-50`}
-                  >
-                    {busyId === e.orderId
-                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      : <Check className="h-3.5 w-3.5" />}
-                    {e.arrived ? 'Dorazil' : 'Dorazil?'}
-                  </button>
-                )}
+                {paid && (() => {
+                  const a = e.attendance ?? null
+                  const btn = (val: Attendance, label: string, Icon: any, onCls: string, offCls: string) => (
+                    <button
+                      type="button"
+                      onClick={() => e.orderId && pickAttendance(e.orderId, val)}
+                      disabled={busyId === e.orderId}
+                      title={label}
+                      className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition disabled:opacity-50 ${a === val ? onCls : offCls}`}
+                    >
+                      {busyId === e.orderId && a === val
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : <Icon className="h-3.5 w-3.5" />}
+                      {label}
+                    </button>
+                  )
+                  return (
+                    <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                      {btn('dorazil', 'Dorazil', Check,
+                        'border-emerald-300 bg-emerald-50 text-emerald-700',
+                        'border-slate-200 text-slate-500 hover:border-emerald-300 hover:text-emerald-700')}
+                      {btn('jinak', 'Domluvili jsme se jinak', ArrowLeftRight,
+                        'border-blue-300 bg-blue-50 text-blue-700',
+                        'border-slate-200 text-slate-400 hover:border-blue-300 hover:text-blue-600')}
+                      {btn('nedorazil', 'Nedorazil', UserX,
+                        'border-red-300 bg-red-50 text-red-700',
+                        'border-slate-200 text-slate-400 hover:border-red-300 hover:text-red-600')}
+                    </div>
+                  )
+                })()}
               </li>
             )
           })}

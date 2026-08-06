@@ -11,7 +11,7 @@
 
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Info, Loader2, X, Truck } from 'lucide-react'
+import { Info, Loader2, X, Truck, Tag } from 'lucide-react'
 import { PRICE_UNIT_LABELS } from '@/types/database'
 import InfoTip from '@/components/ui/InfoTip'
 import type { PaymentModel, PriceType, PriceUnit } from '@/types/database'
@@ -23,9 +23,15 @@ export interface ServiceTypeOption {
 }
 
 // Hodnoty jedné položky, se kterými editor pracuje.
+// Strop poplatku za nedostavení/zrušení — ochrana zákazníka. Jedno místo
+// pro celou platformu; kdyby se měl měnit, měň tady.
+const MAX_NO_SHOW_FEE = 1000
+
 export interface ServiceItemValues {
   id?: string                      // vyplněné jen u existující položky (režim úpravy)
   service_type_id: string | null
+  /** Ke které podkategorii karty úkon patří (vrstva 13). */
+  subcategory_id: string | null
   name: string
   payment_model: PaymentModel
   price_type: PriceType
@@ -34,9 +40,10 @@ export interface ServiceItemValues {
   price_max: number | null
   duration_minutes: number | null
   deposit_amount: number | null
-  deposit_type: 'zaloha' | 'plna_platba'
+  deposit_type: 'zaloha' | 'plna_platba' | 'bez_platby'
   no_show_fee: number | null
-  price_includes_material: boolean
+  fee_mode: 'noshow' | 'storno' | 'zadny'
+  price_includes_material: boolean | null
   price_note: string | null
   is_active: boolean
   // Podmínky výjezdu — jen model B
@@ -49,6 +56,8 @@ export interface ServiceItemValues {
 interface Props {
   initial?: Partial<ServiceItemValues>
   serviceTypes: ServiceTypeOption[]
+  /** Název podkategorie, pod kterou úkon spadá — jen k zobrazení. */
+  subcategoryName?: string | null
   saving?: boolean
   onSave: (values: ServiceItemValues) => void
   onCancel: () => void
@@ -58,6 +67,7 @@ const PRICE_UNITS: PriceUnit[] = ['ukon', 'hod', 'kus', 'm2', 'bm', 'den', 'proj
 
 const EMPTY: ServiceItemValues = {
   service_type_id: null,
+  subcategory_id: null,
   name: '',
   payment_model: 'A',
   price_type: 'fixed',
@@ -68,6 +78,7 @@ const EMPTY: ServiceItemValues = {
   deposit_amount: 200,
   deposit_type: 'zaloha',
   no_show_fee: null,
+  fee_mode: 'noshow',
   price_includes_material: true,
   price_note: null,
   is_active: true,
@@ -79,7 +90,7 @@ const EMPTY: ServiceItemValues = {
 
 const numOrNull = (v: string): number | null => (v === '' || v == null ? null : Number(v))
 
-export default function ServiceItemEditor({ initial, serviceTypes, saving = false, onSave, onCancel }: Props) {
+export default function ServiceItemEditor({ initial, serviceTypes, subcategoryName = null, saving = false, onSave, onCancel }: Props) {
   const [v, setV] = useState<ServiceItemValues>({ ...EMPTY, ...initial })
   const [error, setError] = useState<string | null>(null)
 
@@ -88,17 +99,12 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
 
   const isB = v.payment_model === 'B'
   const isOnAgreement = v.price_type === 'on_agreement'
-
-  // Výběr typu z katalogu předvyplní název (jde přepsat).
-  const pickType = (id: string) => {
-    if (id === '__custom__') {
-      set('service_type_id', null)
-      return
-    }
-    const t = serviceTypes.find(s => s.id === id)
-    set('service_type_id', id)
-    if (t && (!v.name || v.name.trim() === '')) set('name', t.name)
-  }
+  // Záloha vyšší než cena úkonu (jen pevná cena) — blokuje uložení.
+  const zalohaMoc =
+    v.deposit_type === 'zaloha' &&
+    v.price_type === 'fixed' &&
+    (v.price ?? 0) > 0 &&
+    (v.deposit_amount ?? 0) > (v.price ?? 0)
 
   const switchModel = (m: PaymentModel) => {
     if (m === 'B') {
@@ -113,7 +119,11 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
     if (!isB && !isOnAgreement && (v.price == null || v.price <= 0)) {
       setError('Zadejte cenu, nebo zvolte „Po domluvě".'); return
     }
-    if (v.duration_minutes == null || v.duration_minutes <= 0) {
+    // Délka je povinná jen tam, kde se objednává čas (pevná cena za úkon/hodinu).
+    // U m², bm, dne, projektu, u modelu B i u ceny dohodou se délka neřeší.
+    const potrebaDelku = !isB && v.price_type === 'fixed'
+      && (v.price_unit === 'ukon' || v.price_unit === 'hod')
+    if (potrebaDelku && (v.duration_minutes == null || v.duration_minutes <= 0)) {
       setError('Zadejte délku úkonu — podle ní se v kalendáři počítá termín.'); return
     }
     setError(null)
@@ -127,18 +137,33 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
       out.deposit_amount = null
       out.deposit_type = 'zaloha'
       out.no_show_fee = null
+      out.fee_mode = 'noshow'
       out.price_includes_material = true
       out.price_note = out.price_note?.trim() || null
     } else {
       if (isOnAgreement) { out.price = null; out.price_max = null }
       if (out.price_type !== 'range') out.price_max = null
-      if (out.deposit_type === 'plna_platba') {
+      if (out.deposit_type === 'bez_platby') {
+        // Platí se až po službě — žádná záloha, a tím pádem ani poplatek
+        // (není z čeho ho strhnout).
+        out.deposit_amount = null
+        out.no_show_fee = null
+        out.fee_mode = 'zadny'
+      } else if (out.deposit_type === 'plna_platba') {
         out.deposit_amount = null   // platí se celá cena, záloha se neřeší
       } else {
         if (out.deposit_amount != null && out.deposit_amount < 200) out.deposit_amount = 200
         if (out.deposit_amount == null) out.deposit_amount = 200
+        // Záloha nikdy vyšší než cena úkonu (jen u pevné ceny, jinde cenu neznáme).
+        if (out.price_type === 'fixed' && out.price != null && out.price > 0
+            && out.deposit_amount != null && out.deposit_amount > out.price) {
+          out.deposit_amount = out.price
+        }
       }
+      if (out.fee_mode == null) out.fee_mode = 'noshow'
+      if (out.fee_mode === 'zadny') out.no_show_fee = null
       if (out.no_show_fee != null && out.no_show_fee <= 0) out.no_show_fee = null
+      if (out.no_show_fee != null && out.no_show_fee > MAX_NO_SHOW_FEE) out.no_show_fee = MAX_NO_SHOW_FEE
       out.price_note = out.price_note?.trim() || null
       // Výjezdové podmínky patří jen k naceňovacímu úkonu.
       out.quote_fee = null
@@ -167,23 +192,13 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
           </button>
         </div>
 
-        {/* Výběr z katalogu */}
-        <div className="space-y-1.5">
-          <label className="form-label">Vyberte úkon z katalogu</label>
-          <select
-            value={v.service_type_id ?? '__custom__'}
-            onChange={e => pickType(e.target.value)}
-            className="form-input bg-white"
-          >
-            <option value="__custom__">Vlastní úkon (nenajdu ho v seznamu)</option>
-            {serviceTypes.map(t => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </select>
-          <p className="text-xs text-slate-400">
-            Nabízíme jen úkony z podkategorií vaší karty. Název pak můžete přepsat.
+        {/* Kam úkon patří — plyne z podkategorií vybraných na kartě, nevybírá se znovu. */}
+        {subcategoryName && (
+          <p className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+            <Tag className="h-3.5 w-3.5 text-slate-400" />
+            Úkon v podkategorii <strong className="text-slate-700">{subcategoryName}</strong>
           </p>
-        </div>
+        )}
 
         {/* Název na kartě */}
         <div className="space-y-1.5">
@@ -302,29 +317,50 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
 
             {/* Pevná cena */}
             {v.price_type === 'fixed' && (
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="form-label">Cena (Kč) *</label>
-                  <input type="number" min={0} placeholder="600"
-                    value={v.price ?? ''}
-                    onChange={e => set('price', numOrNull(e.target.value))}
-                    className="form-input bg-white" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="form-label flex items-center justify-between gap-1">
-                    <span>Délka (min) *</span>
-                    <InfoTip>
-                      Jak dlouho úkon trvá. Podle toho poznáme, <strong>do kterých volných oken se vejde</strong> —
-                      a když je úkon kratší než okno, zabere jen svůj čas.
-                      <strong> Zbytek okna zůstane volný</strong> pro dalšího zákazníka.
-                    </InfoTip>
-                  </label>
-                  <input type="number" min={0} placeholder="45"
-                    value={v.duration_minutes ?? ''}
-                    onChange={e => set('duration_minutes', numOrNull(e.target.value))}
-                    className="form-input bg-white" />
-                </div>
-              </div>
+              (() => {
+                // Délka slouží ke skládání termínů v kalendáři — má smysl jen tam,
+                // kde se objednává ČAS (za úkon, za hodinu). U ceny za m², bm, den,
+                // projekt nebo kus dopředu nikdo neví, jak dlouho to zabere, tak
+                // délku vůbec nenabízíme (jinde matla — „mytí střech za m²" a délka min).
+                const casovaJednotka = v.price_unit === 'ukon' || v.price_unit === 'hod'
+                return casovaJednotka ? (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="form-label">Cena (Kč) *</label>
+                      <input type="number" min={0} placeholder="600"
+                        value={v.price ?? ''}
+                        onChange={e => set('price', numOrNull(e.target.value))}
+                        className="form-input bg-white" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="form-label flex items-center justify-between gap-1">
+                        <span>Délka (min) *</span>
+                        <InfoTip>
+                          Jak dlouho úkon trvá. Podle toho poznáme, <strong>do kterých volných oken se vejde</strong> —
+                          a když je úkon kratší než okno, zabere jen svůj čas.
+                          <strong> Zbytek okna zůstane volný</strong> pro dalšího zákazníka.
+                        </InfoTip>
+                      </label>
+                      <input type="number" min={0} placeholder="45"
+                        value={v.duration_minutes ?? ''}
+                        onChange={e => set('duration_minutes', numOrNull(e.target.value))}
+                        className="form-input bg-white" />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <label className="form-label">Cena (Kč) *</label>
+                    <input type="number" min={0} placeholder="600"
+                      value={v.price ?? ''}
+                      onChange={e => set('price', numOrNull(e.target.value))}
+                      className="form-input bg-white" />
+                    <p className="text-xs text-slate-400">
+                      U ceny {PRICE_UNIT_LABELS[v.price_unit]} se délka neřeší — u téhle karty
+                      domluvíte termín v poptávce, ne přes pevné okno.
+                    </p>
+                  </div>
+                )
+              })()
             )}
 
             {/* Rozmezí */}
@@ -385,10 +421,11 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
                     kde materiál zahrnutý je — a vypadali byste dráž, než jste.
                   </InfoTip>
                 </label>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   {([
                     { value: true,  title: 'Včetně materiálu', desc: 'Zákazník nic nedoplácí' },
                     { value: false, title: 'Jen práce',        desc: 'Materiál účtuji zvlášť' },
+                    { value: null,  title: 'Neřeším',          desc: 'Výuka, poradenství, IT' },
                   ] as const).map(opt => {
                     const sel = v.price_includes_material === opt.value
                     return (
@@ -397,7 +434,7 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
                         type="button"
                         onClick={() => set('price_includes_material', opt.value)}
                         className={`rounded-xl border-2 p-3 text-left transition-all ${
-                          sel ? 'border-emerald-500 bg-white' : 'border-slate-200 bg-white hover:border-emerald-300'
+                          sel ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-emerald-300'
                         }`}
                       >
                         <p className="text-sm font-extrabold text-slate-900">{opt.title}</p>
@@ -419,53 +456,117 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
                   přes Propojo a uvolní se vám po provedení práce.
                 </InfoTip>
               </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <button type="button"
                   onClick={() => set('deposit_type', 'zaloha')}
-                  className={`rounded-xl border-2 px-3 py-2.5 text-left transition ${v.deposit_type !== 'plna_platba' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
+                  className={`rounded-xl border-2 px-2 py-2.5 text-left transition ${v.deposit_type === 'zaloha' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
                   <span className="block text-sm font-bold text-slate-900">Záloha</span>
                   <span className="block text-xs text-slate-500">zbytek na místě</span>
                 </button>
                 <button type="button"
                   onClick={() => set('deposit_type', 'plna_platba')}
-                  className={`rounded-xl border-2 px-3 py-2.5 text-left transition ${v.deposit_type === 'plna_platba' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
-                  <span className="block text-sm font-bold text-slate-900">Celá cena předem</span>
+                  className={`rounded-xl border-2 px-2 py-2.5 text-left transition ${v.deposit_type === 'plna_platba' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
+                  <span className="block text-sm font-bold text-slate-900">Celá předem</span>
                   <span className="block text-xs text-slate-500">na místě nic</span>
+                </button>
+                <button type="button"
+                  onClick={() => set('deposit_type', 'bez_platby')}
+                  className={`rounded-xl border-2 px-2 py-2.5 text-left transition ${v.deposit_type === 'bez_platby' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
+                  <span className="block text-sm font-bold text-slate-900">Až po službě</span>
+                  <span className="block text-xs text-slate-500">nic předem</span>
                 </button>
               </div>
 
-              {v.deposit_type !== 'plna_platba' && (
-                <div className="mt-2 space-y-1.5">
-                  <label className="form-label"><span>Výše zálohy (Kč)</span></label>
-                  <input type="number" min={200} placeholder="200"
-                    value={v.deposit_amount ?? ''}
-                    onChange={e => set('deposit_amount', numOrNull(e.target.value))}
-                    className="form-input bg-white" />
-                  <p className="text-xs text-slate-400">Minimálně 200 Kč. Záloha se započítá do konečné ceny.</p>
-                </div>
-              )}
+              {v.deposit_type === 'zaloha' && (() => {
+                // Záloha nemůže být vyšší než cena úkonu — zákazník by zaplatil
+                // předem víc, než služba stojí. Hlídáme jen u pevné ceny (u „od–do"
+                // a „dohodou" cenu neznáme, tam strop nedává smysl).
+                const cena = v.price_type === 'fixed' ? (v.price ?? 0) : 0
+                const zaloha = v.deposit_amount ?? 0
+                const moc = cena > 0 && zaloha > cena
+                return (
+                  <div className="mt-2 space-y-1.5">
+                    <label className="form-label"><span>Výše zálohy (Kč)</span></label>
+                    <input type="number" min={200} max={cena > 0 ? cena : undefined} placeholder="200"
+                      value={v.deposit_amount ?? ''}
+                      onChange={e => set('deposit_amount', numOrNull(e.target.value))}
+                      className={`form-input bg-white ${moc ? 'border-red-300 focus:border-red-400 focus:ring-red-100' : ''}`} />
+                    {moc ? (
+                      <p className="text-xs font-semibold text-red-600">
+                        Záloha nemůže být vyšší než cena úkonu ({cena.toLocaleString('cs-CZ')} Kč). Snižte ji.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-slate-400">
+                        {cena > 0
+                          ? `Minimálně 200 Kč, nejvýš ${cena.toLocaleString('cs-CZ')} Kč. Doporučujeme kolem třetiny ceny.`
+                          : 'Minimálně 200 Kč. Záloha se započítá do konečné ceny.'}
+                      </p>
+                    )}
+                  </div>
+                )
+              })()}
               {v.deposit_type === 'plna_platba' && (
                 <p className="mt-1 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
                   Zákazník zaplatí celou cenu úkonu předem. Na místě už nic nedoplácí.
                 </p>
               )}
+              {v.deposit_type === 'bez_platby' && (
+                <p className="mt-1 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                  Zákazník předem neplatí nic — zaplatí až po službě na místě. Bez zálohy
+                  nejde nastavit poplatek za nedostavení.
+                </p>
+              )}
             </div>
 
-            {/* Storno poplatek pro no-show */}
+            {/* Poplatek jen když je něco zaplaceno předem — u „až po službě" není
+                z čeho ho strhnout, tak ho vůbec nenabízíme. */}
+            {v.deposit_type !== 'bez_platby' && (
             <div className="space-y-1.5">
               <label className="form-label flex items-center justify-between gap-1">
-                <span>Storno poplatek při nedostavení <span className="font-normal text-slate-400">(volitelné)</span></span>
+                <span>Poplatek, když zákazník nepřijde</span>
                 <InfoTip>
-                  Kolik si necháte, když zákazník nedorazí (no-show). Zákazník ho uvidí předem,
-                  ať ví, na čem je. Necháte-li prázdné, žádný poplatek se neúčtuje.
+                  Dvě různé situace, vyberte jednu. <strong>Nedostavení</strong> = zákazník
+                  se neozve a nepřijde. <strong>Zrušení předem</strong> = dá vědět včas, ale
+                  pozdě. Zákazník poplatek vidí předem u objednávky.
                 </InfoTip>
               </label>
-              <input type="number" min={0} placeholder="např. 300"
-                value={v.no_show_fee ?? ''}
-                onChange={e => set('no_show_fee', numOrNull(e.target.value))}
-                className="form-input bg-white" />
-              <p className="text-xs text-slate-400">Zákazníkovi se zobrazí v objednávce. Prázdné = bez poplatku.</p>
+
+              <div className="grid grid-cols-3 gap-2">
+                <button type="button"
+                  onClick={() => set('fee_mode', 'zadny')}
+                  className={`rounded-xl border-2 px-2 py-2 text-center text-xs font-bold transition ${v.fee_mode === 'zadny' ? 'border-emerald-500 bg-emerald-50 text-slate-900' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}>
+                  Žádný
+                </button>
+                <button type="button"
+                  onClick={() => set('fee_mode', 'noshow')}
+                  className={`rounded-xl border-2 px-2 py-2 text-center text-xs font-bold transition ${v.fee_mode === 'noshow' ? 'border-emerald-500 bg-emerald-50 text-slate-900' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}>
+                  Za nedostavení
+                </button>
+                <button type="button"
+                  onClick={() => set('fee_mode', 'storno')}
+                  className={`rounded-xl border-2 px-2 py-2 text-center text-xs font-bold transition ${v.fee_mode === 'storno' ? 'border-emerald-500 bg-emerald-50 text-slate-900' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}>
+                  Za zrušení předem
+                </button>
+              </div>
+
+              {v.fee_mode !== 'zadny' && (
+                <div className="mt-2">
+                  <input type="number" min={0} placeholder="např. 300"
+                    value={v.no_show_fee ?? ''}
+                    onChange={e => set('no_show_fee', numOrNull(e.target.value))}
+                    className="form-input bg-white" />
+                  <p className="mt-1 text-xs text-slate-400">
+                    {v.fee_mode === 'noshow'
+                      ? `Kč (max ${MAX_NO_SHOW_FEE}), které si necháte, když zákazník nedorazí a neozve se.`
+                      : 'Kč, které si necháte, když zákazník zruší příliš pozdě.'}
+                  </p>
+                </div>
+              )}
+              {v.fee_mode === 'zadny' && (
+                <p className="text-xs text-slate-400">Bez poplatku — při zrušení i nedostavení se záloha vrací.</p>
+              )}
             </div>
+            )}
 
             {/* Poznámka k ceně */}
             <div className="space-y-1.5">
@@ -558,15 +659,20 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
           </>
         )}
 
-        {/* Zveřejnit */}
-        <label className="flex cursor-pointer items-center gap-2.5">
+        {/* Nabízet zákazníkům — dřív nejasné „Zveřejnit v ceníku". */}
+        <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50 p-3">
           <input
             type="checkbox"
             checked={v.is_active}
             onChange={e => set('is_active', e.target.checked)}
-            className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
           />
-          <span className="text-sm font-semibold text-slate-700">Zveřejnit v ceníku</span>
+          <span>
+            <span className="block text-sm font-semibold text-slate-800">Nabízet zákazníkům</span>
+            <span className="block text-xs leading-relaxed text-slate-500">
+              Vypněte, když úkon dočasně neděláte — zůstane vám uložený, ale v ceníku ho nikdo neuvidí.
+            </span>
+          </span>
         </label>
 
         {error && (
@@ -577,7 +683,7 @@ export default function ServiceItemEditor({ initial, serviceTypes, saving = fals
           <button type="button" onClick={onCancel} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:border-slate-300">
             Zrušit
           </button>
-          <button type="button" onClick={handleSave} disabled={saving} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:opacity-60">
+          <button type="button" onClick={handleSave} disabled={saving || zalohaMoc} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:opacity-60">
             {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Ukládám…</> : 'Uložit úkon'}
           </button>
         </div>

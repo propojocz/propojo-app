@@ -55,7 +55,7 @@ export default function TimePreferenceForm({ orderId, initialFrom, initialTo, in
         Zadejte přibližné okno — poskytovatel podle něj navrhne konkrétní časy.
       </p>
 
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-end">
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600">Od</label>
           <input
@@ -63,7 +63,7 @@ export default function TimePreferenceForm({ orderId, initialFrom, initialTo, in
             value={from}
             min={todayStr()}
             onChange={(e) => { setFrom(e.target.value); setSaved(false) }}
-            className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400"
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400"
           />
         </div>
         <div>
@@ -73,15 +73,15 @@ export default function TimePreferenceForm({ orderId, initialFrom, initialTo, in
             value={to}
             min={from || todayStr()}
             onChange={(e) => { setTo(e.target.value); setSaved(false) }}
-            className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400"
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400"
           />
         </div>
-        <div>
+        <div className="col-span-2 sm:col-auto">
           <label className="mb-1 block text-xs font-semibold text-slate-600">Denní doba</label>
           <select
             value={timePref}
             onChange={(e) => { setTimePref(e.target.value as TimePref); setSaved(false) }}
-            className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400"
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400"
           >
             {TIME_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
@@ -90,7 +90,7 @@ export default function TimePreferenceForm({ orderId, initialFrom, initialTo, in
           type="button"
           onClick={submit}
           disabled={busy || !from || !to}
-          className="flex items-center gap-1.5 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50"
+          className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50 sm:col-auto"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <Check className="h-4 w-4" /> : null}
           {saved ? 'Uloženo' : 'Uložit'}

@@ -170,8 +170,9 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
         />
       )}
 
-      {/* Preference zákazníka (od–do + denní doba) — nad chatem, dokud není termín. */}
-      {isCustomer && !order.scheduled_at && order.status === 'cekajici' && (
+      {/* Preference zákazníka (od–do + denní doba) — jen dokud poskytovatel
+          nenavrhl konkrétní časy. Jakmile jsou návrhy, zákazník už jen vybírá. */}
+      {isCustomer && !order.scheduled_at && order.status === 'cekajici' && proposals.length === 0 && (
         <TimePreferenceForm
           orderId={order.id}
           initialFrom={(order as any).pref_date_from ?? null}

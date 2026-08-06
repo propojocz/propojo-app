@@ -9,6 +9,7 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { createNotification } from '@/lib/actions/notifications'
 
 function getAdminClient() {
   return createAdminClient(
@@ -16,6 +17,8 @@ function getAdminClient() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
 }
+
+export type Attendance = 'dorazil' | 'jinak' | 'nedorazil' | null
 
 export type DayEntry = {
   kind: 'booking' | 'block'
@@ -29,8 +32,8 @@ export type DayEntry = {
   depositAmount?: number | null
   /** Do kdy běží zámek při placení (ISO) */
   holdUntil?: string | null
-  /** Označil poskytovatel, že zákazník dorazil? */
-  arrived?: boolean
+  /** Jak termín dopadl: 'dorazil' | 'jinak' | 'nedorazil' | null (neoznačeno) */
+  attendance?: Attendance
   /** Je to zákazníkova první dokončená zakázka u tohoto poskytovatele? */
   firstVisit?: boolean
   orderId?: string
@@ -69,7 +72,7 @@ export async function getDaySchedule(dateStr?: string): Promise<DaySchedule> {
   // ── Rezervace s termínem ───────────────────────────────────
   const { data: orderRows } = await admin
     .from('orders')
-    .select('id, customer_id, status, scheduled_at, scheduled_end, deposit_status, deposit_amount, hold_expires_at, arrived_at, service_items(name), services(title)')
+    .select('id, customer_id, status, scheduled_at, scheduled_end, deposit_status, deposit_amount, hold_expires_at, arrived_at, attendance, service_items(name), services(title)')
     .eq('provider_id', user.id)
     .neq('status', 'zruseno')
     .not('scheduled_at', 'is', null)
@@ -132,7 +135,7 @@ export async function getDaySchedule(dateStr?: string): Promise<DaySchedule> {
       depositStatus: o.deposit_status ?? 'none',
       depositAmount: o.deposit_amount != null ? Number(o.deposit_amount) : null,
       holdUntil: o.deposit_status === 'pending' ? o.hold_expires_at : null,
-      arrived: !!o.arrived_at,
+      attendance: (o.attendance ?? null) as Attendance,
       firstVisit: firstVisitOf[o.customer_id] === true,
     })
   }
@@ -154,28 +157,90 @@ export async function getDaySchedule(dateStr?: string): Promise<DaySchedule> {
 
 type Result = { success: true } | { success: false; error: string }
 
-/** Odškrtnout, že zákazník dorazil (nebo přišel omylem — přepínač). */
-export async function markArrived(orderId: string, arrived: boolean): Promise<Result> {
+/**
+ * Označit, jak termín dopadl. Tři stavy v jednom poli, ať se nemůže stát,
+ * že je zákazník zároveň „dorazil" i „nedorazil".
+ *   dorazil   — přišel, vše proběhlo
+ *   jinak     — domluvili se jinak (přeloženo, jiný rozsah); BEZ postihu
+ *   nedorazil — no-show; podklad pro poplatek za nedostavení u úkonu
+ * Poslání stejné hodnoty znovu označení zruší (přepínač).
+ */
+export async function setAttendance(orderId: string, value: Attendance, customFee?: number | null): Promise<Result> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Nejste přihlášeni.' }
 
   const admin = getAdminClient()
   const { data: order } = await admin
-    .from('orders').select('provider_id').eq('id', orderId).single() as { data: any }
+    .from('orders').select('provider_id, attendance').eq('id', orderId).single() as { data: any }
   if (!order || order.provider_id !== user.id) {
     return { success: false, error: 'K této objednávce nemáte přístup.' }
   }
 
-  const { error } = await (admin.from('orders') as any)
-    .update({ arrived_at: arrived ? new Date().toISOString() : null })
-    .eq('id', orderId)
-  if (error) {
-    // Sloupec arrived_at nemusí existovat, když neproběhlo SQL vrstvy 5.
-    console.error('[markArrived]', error)
-    return { success: false, error: 'Nepodařilo se uložit. Proběhlo SQL vrstvy 5?' }
+  // Kliknutí na už zvolený stav ho zruší.
+  const next = order.attendance === value ? null : value
+
+  // U „nedorazil" si poznamenáme okamžik — od něj běží 24 h na námitku zákazníka.
+  // Poplatek zmrazíme na objednávce, ať se o částce nedá později vést spor.
+  let extra: Record<string, any> = { no_show_marked_at: null }
+  if (next === 'nedorazil') {
+    const { data: full } = await admin
+      .from('orders')
+      .select('no_show_fee_amount, service_items(no_show_fee)')
+      .eq('id', orderId)
+      .single() as { data: any }
+    // Nastavená výše poplatku u úkonu (strop, který poskytovatel nesmí překročit).
+    const nastaveno = Number(full?.no_show_fee_amount ?? full?.service_items?.no_show_fee ?? 0)
+    // Poskytovatel může v modalu částku SNÍŽIT (stálému klientovi odpustit),
+    // ne však zvýšit nad nastavenou hodnotu. customFee undefined = bere nastavené.
+    let fee = nastaveno
+    if (customFee != null) {
+      fee = Math.max(0, Math.min(Number(customFee), nastaveno))
+    }
+    extra = {
+      no_show_marked_at: new Date().toISOString(),
+      no_show_fee_amount: fee > 0 ? fee : null,
+    }
   }
 
+  const { error } = await (admin.from('orders') as any)
+    .update({
+      attendance: next,
+      // arrived_at držíme dál jako časový záznam příchodu (doklad při sporu).
+      arrived_at: next === 'dorazil' ? new Date().toISOString() : null,
+      ...extra,
+    })
+    .eq('id', orderId)
+
+  if (error) {
+    console.error('[setAttendance]', error)
+    return { success: false, error: 'Nepodařilo se uložit. Proběhlo SQL vrstvy 10?' }
+  }
+
+  // Zákazník musí vědět, co se děje a do kdy se může ozvat. Tohle je jádro toho,
+  // aby platforma nemusela nic posuzovat: informuje jasně a lhůta běží sama.
+  if (next === 'nedorazil') {
+    try {
+      const { data: o } = await admin
+        .from('orders').select('customer_id, no_show_fee_amount, service_items(name)')
+        .eq('id', orderId).single() as { data: any }
+      const fee = Number(o?.no_show_fee_amount ?? 0)
+      await createNotification({
+        userId: o.customer_id,
+        type: 'status_change',
+        orderId,
+        actorId: user.id,
+        title: 'Poskytovatel označil, že jste nedorazil(a)',
+        preview: fee > 0
+          ? `Poplatek za nedostavení ${fee.toLocaleString('cs-CZ')} Kč se strhne za 24 hodin. Nesouhlasíte? Ozvěte se v objednávce.`
+          : 'Nesouhlasíte? Ozvěte se do 24 hodin v objednávce.',
+      })
+    } catch (err) {
+      console.error('[setAttendance] notifikace:', err)
+    }
+  }
+
+  revalidatePath(`/dashboard/objednavky/${orderId}`)
   revalidatePath('/dashboard/terminy')
   return { success: true }
 }

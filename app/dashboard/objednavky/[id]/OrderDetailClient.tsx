@@ -242,7 +242,10 @@ export default function OrderDetailClient({
     </div>
   )
 
-  const canCustomerCancel = isCustomer && ['cekajici', 'prijato', 'v_procesu'].includes(order.status)
+  // Zrušit NEJDE, když poskytovatel označil nedostavení — jinak by si zákazník
+  // dvojím pohybem vzal zpět zálohu, která má jako storno jít poskytovateli.
+  const noShowMarked = (order as any).attendance === 'nedorazil'
+  const canCustomerCancel = isCustomer && !noShowMarked && ['cekajici', 'prijato', 'v_procesu'].includes(order.status)
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
@@ -369,7 +372,7 @@ export default function OrderDetailClient({
           {/* Akce poskytovatele */}
           {isProvider && (
             <div className="mt-5 border-t border-slate-100 pt-5">
-              <OrderStatusButton orderId={order.id} currentStatus={order.status} depositStatus={order.deposit_status} />
+              <OrderStatusButton orderId={order.id} currentStatus={order.status} depositStatus={order.deposit_status} scheduledAt={order.scheduled_at} attendance={(order as any).attendance ?? null} noShowFee={(order as any).no_show_fee_amount ?? (order as any).service_items?.no_show_fee ?? null} />
             </div>
           )}
 

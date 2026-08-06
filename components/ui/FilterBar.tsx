@@ -12,14 +12,17 @@ interface FilterBarProps {
   currentQ?: string
 }
 
+// „Nejdřív volno" je první a výchozí — zákazník se rozhoduje podle toho,
+// kdo ho vezme nejdřív, ne podle toho, kdo se přidal naposled.
 const SORT_OPTIONS = [
+  { value: 'volno', label: '⚡ Nejdřív volno' },
   { value: 'nejnovejsi', label: 'Nejnovější' },
   { value: 'nejlevnejsi', label: 'Nejlevnější' },
   { value: 'nejdrazsi', label: 'Nejdražší' },
   { value: 'hodnoceni', label: '⭐ Hodnocení' },
 ]
 
-export default function FilterBar({ currentCity, currentSort = 'nejnovejsi', currentQ }: FilterBarProps) {
+export default function FilterBar({ currentCity, currentSort = 'volno', currentQ }: FilterBarProps) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -78,7 +81,7 @@ export default function FilterBar({ currentCity, currentSort = 'nejnovejsi', cur
                   onClick={() => updateParams({ sort: opt.value })}
                   className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
                     currentSort === opt.value
-                      ? 'bg-indigo-600 text-white shadow-sm'
+                      ? 'bg-emerald-600 text-white shadow-sm'
                       : 'text-slate-600 hover:bg-slate-100'
                   }`}
                 >
