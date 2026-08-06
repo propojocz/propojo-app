@@ -18,6 +18,10 @@ export const metadata: Metadata = {
   keywords: ['živnostník', 'řemeslník', 'elektrikář', 'instalatér', 'malíř', 'marketplace', 'česká republika'],
   authors: [{ name: 'Propojo', url: APP_URL }],
   creator: 'Propojo',
+  icons: {
+    icon: '/propojo-favicon.png',
+    apple: '/apple-touch-icon.png',
+  },
   publisher: 'Propojo',
   openGraph: {
     type: 'website',

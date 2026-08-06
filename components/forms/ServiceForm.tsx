@@ -36,6 +36,7 @@ import PriceList from '@/components/ui/PriceList'
 import ServiceHours from '@/components/forms/ServiceHours'
 import InfoTip from '@/components/ui/InfoTip'
 import type { ServiceTypeOption } from '@/components/ui/ServiceItemEditor'
+import BrandPicker from '@/components/ui/BrandPicker'
 
 const schema = z.object({
   title: z.string().min(5, 'Název musí mít alespoň 5 znaků').max(100),
@@ -884,6 +885,8 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
               preview
             />
           </div>
+
+          {serviceId && <BrandPicker serviceId={serviceId} />}
 
           <dl className="overflow-hidden rounded-2xl border border-slate-200 bg-white text-sm">
             {[

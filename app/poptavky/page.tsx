@@ -11,6 +11,8 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Link from 'next/link'
 import { MapPin, Clock, Lock, Phone, Mail, Send, Megaphone, CalendarClock } from 'lucide-react'
 
+import IncomingHandoffsPanel from '@/components/ui/IncomingHandoffsPanel'
+
 export const metadata = { title: 'Poptávky zákazníků | Propojo' }
 export const dynamic = 'force-dynamic'
 
@@ -88,6 +90,8 @@ export default async function PoptavkyPage() {
           <Send className="h-4 w-4" /> Zanechat poptávku
         </Link>
       </div>
+
+      <IncomingHandoffsPanel />
 
       {/* Výzva pro řemeslníky bez předplatného */}
       {user && !canSeeContact && list.length > 0 && (
