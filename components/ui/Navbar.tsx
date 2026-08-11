@@ -76,7 +76,7 @@ export default async function Navbar() {
               <img
                 src="/propojo-logo-full.png"
                 alt="Propojo"
-                className="h-16 w-auto object-contain md:h-20"
+                className="mt-1 h-12 w-auto object-contain md:mt-0 md:h-14"
               />
             </Link>
           </div>
