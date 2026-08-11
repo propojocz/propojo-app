@@ -12,7 +12,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Menu, X, Home, ShoppingBag, PlusCircle, LogIn, LogOut, User,
   LayoutDashboard, Package, CalendarDays, Inbox, Star, CreditCard,
-  Landmark, Heart, ShieldCheck, Megaphone,
+  Landmark, Heart, ShieldCheck, Megaphone, Building2, QrCode,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
@@ -62,17 +62,18 @@ export default function MobileNav({
   const ACCOUNT_LINKS: { href: string; label: string; icon: any; big?: boolean; badge?: number }[] = user ? [
     { href: '/dashboard', label: 'Přehled', icon: LayoutDashboard, big: true },
     ...(isProvider ? [{ href: '/dashboard/nabidky', label: 'Moje nabídky', icon: Package }] : []),
+    ...(isProvider ? [{ href: '/dashboard/znacka', label: 'Značka', icon: Building2 }] : []),
+    ...(isProvider ? [{ href: '/dashboard/qr', label: 'QR kód', icon: QrCode }] : []),
     ...(isProvider ? [{ href: '/dashboard/terminy', label: 'Termíny', icon: CalendarDays }] : []),
     { href: '/dashboard/objednavky', label: 'Objednávky', icon: Inbox },
-    // Odznak u recenzí ZRUŠEN — odpovídání je dobrovolné, dvojka otravovala.
-    ...(isProvider ? [{ href: '/dashboard/recenze', label: 'Moje recenze', icon: Star }] : []),
+    ...(isProvider ? [{ href: '/dashboard/recenze', label: 'Moje recenze', icon: Star, badge: unansweredReviews }] : []),
     ...(isProvider ? [{ href: '/dashboard/predplatne', label: 'Předplatné', icon: CreditCard }] : []),
     ...(isProvider ? [{ href: '/dashboard/vyplaty', label: 'Výplaty', icon: Landmark }] : []),
     { href: '/dashboard/oblibene', label: 'Oblíbené', icon: Heart },
     { href: '/dashboard/profil', label: 'Můj profil', icon: User },
   ] : []
 
-  const totalBadge = (isAdmin ? disputeCount : 0)
+  const totalBadge = unansweredReviews + (isAdmin ? disputeCount : 0)
 
   const drawer = (
     <AnimatePresence>

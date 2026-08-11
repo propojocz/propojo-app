@@ -12,7 +12,7 @@ export default function Footer() {
             <img
               src="/propojo-logo-full.png"
               alt="Propojo"
-              className="h-22 w-auto object-contain"
+              className="h-14 w-auto object-contain"
             />
           </Link>
 
