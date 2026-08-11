@@ -2,7 +2,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Link from 'next/link'
-import Image from 'next/image'
 import NotificationBadge from './NotificationBadge'
 import MobileNav from './MobileNav'
 import SuspendedTopBar from './SuspendedTopBar'
@@ -69,17 +68,24 @@ export default async function Navbar() {
             takže logo drží vlevo a zvoneček s pilulkou vpravo. */}
         <nav className="mx-auto grid h-[60px] max-w-7xl grid-cols-[1fr_auto_1fr] items-center px-3 sm:px-6 lg:px-8">
 
-          {/* VLEVO — logo */}
+          {/* VLEVO — logo: symbol jako obrázek + název v Poppins */}
           <div className="flex justify-start">
-            <Link href="/" className="flex items-center">
-              <Image
-                src="/propojo-logo.png"
+            <Link href="/" className="flex items-center gap-2">
+              { /* Obyčejný <img> — obchází Next.js optimalizaci obrázků,
+                   která tohle logo na produkci nenačítala. */ }
+              <img
+                src="/propojo-symbol-sm.png"
                 alt="Propojo"
-                width={120}
-                height={40}
-                priority
-                className="h-8 w-auto object-contain [filter:saturate(1.25)] md:h-9"
+                width={118}
+                height={80}
+                className="h-7 w-auto object-contain md:h-8"
               />
+              <span
+                className="text-xl font-extrabold tracking-tight text-slate-900 md:text-2xl"
+                style={{ fontFamily: 'Poppins, system-ui, sans-serif' }}
+              >
+                Propojo
+              </span>
             </Link>
           </div>
 
