@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Link from 'next/link'
-import { LayoutDashboard, Package, ShoppingBag, User, LogOut, ChevronRight, ShieldCheck, CreditCard, Landmark, CalendarDays, Star, Building2, QrCode } from 'lucide-react'
+import { LayoutDashboard, Package, ShoppingBag, User, LogOut, ChevronRight, ShieldCheck, CreditCard, Landmark, CalendarDays, Star, Building2 } from 'lucide-react'
 import { logout } from '@/lib/actions/auth'
 import MobileDashboardNav from './MobileDashboardNav'
 import Avatar from '@/components/ui/Avatar'
@@ -47,7 +47,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
     { href: '/dashboard', label: 'Přehled', icon: 'LayoutDashboard' },
     ...(isProvider ? [{ href: '/dashboard/nabidky', label: 'Moje nabídky', icon: 'Package' }] : []),
     ...(isProvider ? [{ href: '/dashboard/znacka', label: 'Značka', icon: 'Building2' }] : []),
-    ...(isProvider ? [{ href: '/dashboard/qr', label: 'QR kód', icon: 'QrCode' }] : []),
     ...(isProvider ? [{ href: '/dashboard/terminy', label: 'Termíny', icon: 'CalendarDays' }] : []),
     { href: '/dashboard/objednavky', label: 'Objednávky', icon: 'ShoppingBag' },
     ...(isProvider ? [{ href: '/dashboard/recenze', label: 'Moje recenze', icon: 'Star', badge: unansweredReviews }] : []),
@@ -88,7 +87,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
                   {item.icon === 'LayoutDashboard' && <LayoutDashboard className="h-4 w-4 shrink-0" />}
                   {item.icon === 'Package' && <Package className="h-4 w-4 shrink-0" />}
                   {item.icon === 'Building2' && <Building2 className="h-4 w-4 shrink-0" />}
-                  {item.icon === 'QrCode' && <QrCode className="h-4 w-4 shrink-0" />}
                   {item.icon === 'CalendarDays' && <CalendarDays className="h-4 w-4 shrink-0" />}
                   {item.icon === 'ShoppingBag' && <ShoppingBag className="h-4 w-4 shrink-0" />}
                   {item.icon === 'Star' && <Star className="h-4 w-4 shrink-0" />}
