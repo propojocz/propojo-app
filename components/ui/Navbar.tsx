@@ -66,7 +66,7 @@ export default async function Navbar() {
         {/* Mřížka o třech sloupcích na VŠECH velikostech.
             Prostřední sloupec je vždy vyplněný (na mobilu aspoň Marketplace),
             takže logo drží vlevo a zvoneček s pilulkou vpravo. */}
-        <nav className="mx-auto grid h-[60px] max-w-7xl grid-cols-[1fr_auto_1fr] items-center px-3 sm:px-6 lg:px-8">
+        <nav className="mx-auto grid h-[76px] max-w-7xl grid-cols-[1fr_auto_1fr] items-center px-3 sm:px-6 lg:px-8">
 
           {/* VLEVO — logo: symbol jako obrázek + název v Poppins */}
           <div className="flex justify-start">
@@ -76,7 +76,7 @@ export default async function Navbar() {
               <img
                 src="/propojo-logo-full.png"
                 alt="Propojo"
-                className="h-9 w-auto object-contain md:h-10"
+                className="h-12 w-auto object-contain md:h-14"
               />
             </Link>
           </div>
