@@ -51,7 +51,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="cs" suppressHydrationWarning>
       <head>
-        <link rel="icon" href="/favicon.ico" sizes="any" />
       </head>
       <body className="flex min-h-screen flex-col bg-slate-50 antialiased">
         <SiteChrome navbar={<Navbar />} footer={<Footer />}>
