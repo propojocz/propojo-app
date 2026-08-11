@@ -70,22 +70,14 @@ export default async function Navbar() {
 
           {/* VLEVO — logo: symbol jako obrázek + název v Poppins */}
           <div className="flex justify-start">
-            <Link href="/" className="flex items-center gap-2">
-              { /* Obyčejný <img> — obchází Next.js optimalizaci obrázků,
-                   která tohle logo na produkci nenačítala. */ }
+            <Link href="/" className="flex items-center">
+              { /* Celé logo s nápisem. Obyčejný <img> obchází Next.js
+                   optimalizaci, která obrázek na produkci nenačítala. */ }
               <img
-                src="/propojo-symbol-sm.png"
+                src="/propojo-logo-full.png"
                 alt="Propojo"
-                width={118}
-                height={80}
-                className="h-7 w-auto object-contain md:h-8"
+                className="h-9 w-auto object-contain md:h-10"
               />
-              <span
-                className="text-xl font-extrabold tracking-tight text-slate-900 md:text-2xl"
-                style={{ fontFamily: 'Poppins, system-ui, sans-serif' }}
-              >
-                Propojo
-              </span>
             </Link>
           </div>
 
