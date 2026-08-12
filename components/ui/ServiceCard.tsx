@@ -1,15 +1,19 @@
 'use client'
 // components/ui/ServiceCard.tsx
-// Karta v modelu „karta + ceník". Cena se bere z CENÍKU (minItemPrice) jako „od X Kč",
-// ne z legacy services.price. Titulní foto + galerie: prvních 5 fotek se prolistuje
-// přímo na kartě, za pátou je dlaždice „Zobrazit další →" na profil karty.
+// Karta v modelu „karta + ceník". Cena se bere z CENÍKU (minItemPrice) jako „od X Kč".
+// Titulní foto + galerie: prvních 5 fotek se prolistuje přímo na kartě.
+//
+// SPODNÍ LIŠTA je rozhodovací: cena vlevo, nejbližší termín uprostřed, akce vpravo.
+// Hlavní tlačítko je „Volné termíny" — rezervace je to, co má zákazník udělat.
+// Když karta žádné vypsané okno nemá, zbyde jen „Zobrazit kartu", ať nenabízíme
+// tlačítko, které nikam nevede.
 //
 // Používá se v marketplace, na hlavní stránce a v živém náhledu ve formuláři.
 // V náhledu (preview) jsou odkazy vypnuté.
 
 import { useState, type MouseEvent } from 'react'
 import { motion } from 'framer-motion'
-import { MapPin, Star, ShieldCheck, Zap, Sparkles, ChevronLeft, ChevronRight, ListChecks, CalendarClock } from 'lucide-react'
+import { MapPin, Star, ShieldCheck, Zap, ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
 import type { ServiceWithProvider } from '@/types/database'
@@ -21,17 +25,21 @@ interface ServiceCardProps {
   index?: number
   categoryName?: string
   subcatNames?: string[]
-  /** Má TATO karta do budoucna vypsané volné okno? Ukáže štítek „Last minute". */
+  /** Má TATO karta do budoucna vypsané volné okno? */
   hasFreeSlot?: boolean
-  /** Nejbližší volný termín (ISO). Podle něj se marketplace řadí — zákazník
-   *  chce vědět, kdo ho vezme nejdřív. null = karta jede z poptávek. */
+  /** Nejbližší volný termín (ISO). Když je, ukáže se ve spodní liště. */
   nextFreeSlot?: string | null
+  /** Volná okna (ISO) — na kartě ukážeme první dvě a „a další…". Zákazník
+      tak vidí, kdy se dostane na řadu, aniž by kartu rozklikával. */
+  freeSlots?: string[]
   isFavorited?: boolean
   isLoggedIn?: boolean
   /** Náhled ve formuláři — vypne odkazy a oblíbené, karta je jen k prohlédnutí. */
   preview?: boolean
   /** Nejnižší cena zveřejněného úkonu (model A). null = jen dohodou/nacenění. */
   minItemPrice?: number | null
+  /** Jednotka nejlevnějšího úkonu (m², hod, úkon…) — do „od 500 Kč/m²". */
+  minItemUnit?: string | null
   /** Počet zveřejněných úkonů v ceníku. */
   itemCount?: number
   /** Fotky pro prolistování na kartě (titulní bývá první; bere se max 5). */
@@ -40,228 +48,239 @@ interface ServiceCardProps {
 
 const DEFAULT_META = { label: 'Služba', emoji: '🔧' }
 const MAX_CARD_PHOTOS = 5
+const MAX_TAGS = 3
+
+// Zkratky jednotek do ceny — „od 500 Kč/m²"
+const UNIT_LABEL: Record<string, string> = {
+  ukon: '', hodina: '/hod', m2: '/m²', bm: '/bm', den: '/den', kus: '/ks', projekt: '',
+}
+
+// „Pátek 14.08.2026 10:35" — plné datum, ať zákazník hned ví, o kterém dni je řeč.
+function formatSlot(iso: string): string {
+  const d = new Date(iso)
+  const den = new Intl.DateTimeFormat('cs-CZ', { weekday: 'long' }).format(d)
+  const datum = new Intl.DateTimeFormat('cs-CZ', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(d).replace(/\s/g, '')
+  const cas = new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(d)
+  return `${den.charAt(0).toUpperCase()}${den.slice(1)} ${datum} ${cas}`
+}
 
 export default function ServiceCard({
-  service, index = 0, categoryName, subcatNames = [], hasFreeSlot = false, nextFreeSlot = null,
-  isFavorited = false, isLoggedIn = false, preview = false,
-  minItemPrice = null, itemCount = 0, gallery = [],
+  service, index = 0, categoryName, subcatNames = [], hasFreeSlot = false,
+  nextFreeSlot = null, freeSlots = [], isFavorited = false, isLoggedIn = false, preview = false,
+  minItemPrice = null, minItemUnit = null, itemCount = 0, gallery = [],
 }: ServiceCardProps) {
   const meta = (CATEGORY_META as Record<string, { label: string; emoji: string }>)[service.category] ?? DEFAULT_META
   const p = service.profiles as any
 
   const rating = p?.rating ?? 0
+  const reviewCount = Number(p?.review_count ?? 0)
   const hasRating = rating > 0
   const providerId = p?.id ?? service.provider_id
-
   const providerName = p?.display_name || p?.company_name || p?.full_name || 'Poskytovatel'
-  const initial = providerName.charAt(0).toUpperCase()
 
   const obor = categoryName ?? meta.label
   const verified = p?.ico_verified === true
 
   const detailHref = preview ? '#' : `/sluzby/${service.id}`
-  const profilHref = preview ? '#' : `/profil/${providerId}`
+  // Tlačítko „Volné termíny" míří rovnou na blok s termíny na detailu karty.
+  const terminyHref = preview ? '#' : `/sluzby/${service.id}#volne-terminy`
 
-  // ── Cena z ceníku ──
-  // „od X Kč" když je aspoň jeden ceněný úkon; jinak dohodou/nacenění.
-  const hasPrice = minItemPrice != null && minItemPrice > 0
-  const priceMain = hasPrice
-    ? `od ${minItemPrice!.toLocaleString('cs-CZ')} Kč`
-    : 'Ceník na kartě'
-
-  // ── Fotky na kartě ──
-  // Sestavíme z titulní fotky + galerie, ořízneme na 5. Pokud je fotek víc, poslední
-  // slot je dlaždice „Zobrazit další". Duplikáty (titulní = první v galerii) odfiltrujeme.
-  const allPhotos: string[] = Array.from(new Set([
-    ...(service.image_url ? [service.image_url] : []),
-    ...gallery,
-  ]))
-  const cardPhotos = allPhotos.slice(0, MAX_CARD_PHOTOS)
-  const hasMore = allPhotos.length > MAX_CARD_PHOTOS
+  // Fotky
+  const photos = (gallery.length > 0 ? gallery : (service.image_url ? [service.image_url] : []))
+    .slice(0, MAX_CARD_PHOTOS)
   const [photoIdx, setPhotoIdx] = useState(0)
-  // Kolik „snímků" má listování: fotky + případná dlaždice „další"
-  const frames = cardPhotos.length + (hasMore ? 1 : 0)
-  const canSwipe = frames > 1 && !preview
-  const isMoreTile = hasMore && photoIdx === cardPhotos.length
-
-  const go = (dir: -1 | 1, e: MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setPhotoIdx((prev) => (prev + dir + frames) % frames)
+  const listuj = (e: MouseEvent, smer: 1 | -1) => {
+    e.preventDefault(); e.stopPropagation()
+    setPhotoIdx(i => (i + smer + photos.length) % photos.length)
   }
 
-  // Nejbližší volno — nejsilnější údaj na kartě. Dnes a zítra pojmenujeme,
-  // dál stačí zkrácený den, ať se to vejde na jeden řádek.
-  const volnoText = (() => {
-    if (!nextFreeSlot) return null
-    const d = new Date(nextFreeSlot)
-    const cas = new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(d)
-    const den = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(d)
-    const dnes = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date())
-    const zitra = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' })
-      .format(new Date(Date.now() + 86400000))
-    if (den === dnes) return `Dnes ${cas}`
-    if (den === zitra) return `Zítra ${cas}`
-    return `${new Intl.DateTimeFormat('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' }).format(d)} ${cas}`
-  })()
+  // Volné termíny — přednost má seznam, jinak jeden nejbližší.
+  const terminy = freeSlots.length > 0
+    ? freeSlots
+    : (nextFreeSlot ? [nextFreeSlot] : [])
+  const maVolno = terminy.length > 0 || hasFreeSlot
+  const ukazane = terminy.slice(0, 2)
+  const dalsi = terminy.length - ukazane.length
 
-  const shownSubs = subcatNames.slice(0, 3)
-  const moreSubs = subcatNames.length - shownSubs.length
+  // Cena
+  const jednotka = minItemUnit ? (UNIT_LABEL[minItemUnit] ?? '') : ''
+
+  // Štítky — podkategorie, přebytek jako „+2"
+  const viditelneTagy = subcatNames.slice(0, MAX_TAGS)
+  const skryteTagy = subcatNames.length - viditelneTagy.length
 
   return (
     <motion.article
-      initial={preview ? false : { opacity: 0, y: 16 }}
-      animate={preview ? undefined : { opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, delay: index * 0.05, ease: [0.22, 1, 0.36, 1] }}
-      className="group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-md"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay: Math.min(index * 0.04, 0.3) }}
+      className="group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md"
     >
-      {/* Foto / galerie */}
-      <div className="relative h-36 bg-gradient-to-br from-emerald-50 to-blue-50">
-        {cardPhotos.length > 0 ? (
-          isMoreTile ? (
-            <Link href={detailHref} className="flex h-full w-full items-center justify-center bg-slate-900/80 text-white">
-              <span className="text-sm font-semibold">Zobrazit další →</span>
-            </Link>
-          ) : (
+      {/* ── FOTKA ── */}
+      <div className="relative aspect-[4/3] w-full shrink-0 overflow-hidden bg-slate-100">
+        {photos.length > 0 ? (
+          <>
             <Link href={detailHref} className="block h-full w-full">
               <Image
-                src={cardPhotos[photoIdx]}
+                src={photos[photoIdx]}
                 alt={service.title}
                 fill
-                className="object-cover"
-                sizes="(max-width:640px) 100vw, 320px"
+                sizes="(max-width: 768px) 100vw, 380px"
+                className="object-cover transition-transform duration-300 group-hover:scale-[1.03]"
               />
             </Link>
-          )
+            {photos.length > 1 && (
+              <>
+                <button onClick={(e) => listuj(e, -1)} aria-label="Předchozí fotka"
+                  className="absolute left-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-white/85 text-slate-700 opacity-0 shadow transition group-hover:opacity-100 hover:bg-white">
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <button onClick={(e) => listuj(e, 1)} aria-label="Další fotka"
+                  className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-white/85 text-slate-700 opacity-0 shadow transition group-hover:opacity-100 hover:bg-white">
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+                <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 gap-1">
+                  {photos.map((_, i) => (
+                    <span key={i} className={`h-1.5 rounded-full transition-all ${i === photoIdx ? 'w-4 bg-white' : 'w-1.5 bg-white/60'}`} />
+                  ))}
+                </div>
+              </>
+            )}
+          </>
         ) : (
-          <Link href={detailHref} className="flex h-full w-full items-center justify-center text-5xl">
-            {meta.emoji}
+          <Link href={detailHref} className="flex h-full w-full items-center justify-center bg-gradient-to-br from-emerald-50 to-blue-50">
+            <span className="text-6xl">{meta.emoji}</span>
           </Link>
         )}
 
-        {/* Prolistování */}
-        {canSwipe && (
-          <>
-            <button
-              type="button"
-              onClick={(e) => go(-1, e)}
-              aria-label="Předchozí fotka"
-              className="absolute left-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-white/85 text-slate-700 opacity-0 shadow-sm backdrop-blur-sm transition group-hover:opacity-100"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={(e) => go(1, e)}
-              aria-label="Další fotka"
-              className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full bg-white/85 text-slate-700 opacity-0 shadow-sm backdrop-blur-sm transition group-hover:opacity-100"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-            {/* Tečky */}
-            <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 gap-1">
-              {Array.from({ length: frames }).map((_, i) => (
-                <span key={i} className={`h-1.5 w-1.5 rounded-full ${i === photoIdx ? 'bg-white' : 'bg-white/50'}`} />
-              ))}
-            </div>
-          </>
+        {/* Last minute štítek */}
+        {maVolno && (
+          <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-emerald-500 px-2.5 py-1 text-xs font-bold text-white shadow">
+            <Zap className="h-3.5 w-3.5 fill-white" /> Volno
+          </span>
         )}
 
-        {hasFreeSlot && (
-          <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-emerald-500 px-2.5 py-1 text-xs font-bold text-white shadow-md ring-2 ring-white/60">
-            <Zap className="h-3.5 w-3.5 fill-white" /> Last minute
-          </span>
+        {/* Oblíbené */}
+        {!preview && (
+          <div className="absolute right-3 top-3">
+            <FavoriteButton providerId={providerId} initialFavorited={isFavorited} isLoggedIn={isLoggedIn} variant="icon" />
+          </div>
         )}
       </div>
 
-      <div className="flex flex-1 flex-col gap-2 p-4">
-        {/* Název karty */}
-        <div className="flex items-start justify-between gap-2">
-          <Link href={detailHref} className="min-w-0 flex-1">
-            <h3 className="truncate font-semibold leading-tight text-slate-900 transition-colors group-hover:text-emerald-700">
+      {/* ── TĚLO ── */}
+      <div className="flex flex-1 flex-col gap-2.5 p-4">
+        <div>
+          <Link href={detailHref} className="block">
+            <h3 className="text-lg font-extrabold leading-snug tracking-tight text-slate-900 transition-colors group-hover:text-emerald-700">
               {service.title}
             </h3>
-            {(service as any).subtitle && (
-              <p className="truncate text-xs text-slate-400">{(service as any).subtitle}</p>
-            )}
           </Link>
-          {!preview && (
-            <div className="shrink-0" title="Uložit poskytovatele do oblíbených">
-              <FavoriteButton providerId={providerId} initialFavorited={isFavorited} isLoggedIn={isLoggedIn} variant="icon" />
-            </div>
+          {(service as any).subtitle && (
+            <p className="mt-0.5 line-clamp-1 text-sm text-slate-500">{(service as any).subtitle}</p>
           )}
         </div>
 
-        {/* Poskytovatel */}
-        <Link href={profilHref} className="-mt-1 flex items-center gap-1.5">
-          <div className="relative h-6 w-6 shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-emerald-50 to-blue-50">
-            {p?.avatar_url ? (
-              <Image src={p.avatar_url} alt={providerName} fill className="object-cover" sizes="24px" />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-[10px] font-semibold text-emerald-600">{initial}</div>
-            )}
-          </div>
-          <span className="truncate text-xs text-slate-500 transition-colors hover:text-emerald-700">{providerName}</span>
-        </Link>
-
-        {/* Obor + podkategorie */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
-            <span>{meta.emoji}</span> {obor}
-          </span>
-          {shownSubs.map((name) => (
-            <span key={name} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{name}</span>
-          ))}
-          {moreSubs > 0 && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">+{moreSubs}</span>}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-500">
+        {/* Důvěra: hodnocení · ověřeno */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           {hasRating ? (
-            <span className="flex items-center gap-1">
-              <Star className="h-3.5 w-3.5 fill-emerald-500 text-emerald-500" />
-              <span className="font-semibold text-slate-700">{rating.toFixed(1)}</span>
-              <span className="text-slate-400">({p?.review_count ?? 0})</span>
+            <span className="inline-flex items-center gap-1 font-semibold text-slate-700">
+              <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+              {Number(rating).toFixed(1)}
+              <span className="font-normal text-slate-400">
+                ({reviewCount} {reviewCount === 1 ? 'hodnocení' : reviewCount < 5 ? 'hodnocení' : 'hodnocení'})
+              </span>
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 font-semibold text-amber-700">
-              <Sparkles className="h-3 w-3" /> Nové
-            </span>
+            <span className="text-slate-400">Zatím bez hodnocení</span>
           )}
-          <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5 text-slate-400" /> {service.city}</span>
           {verified && (
-            <span className="inline-flex items-center gap-1 text-emerald-700"><ShieldCheck className="h-3.5 w-3.5" /> Ověřeno</span>
+            <span className="inline-flex items-center gap-1 text-slate-500">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" /> Ověřený profil
+            </span>
           )}
         </div>
 
-        {/* Nejbližší volno — hlavní důvod, proč si zákazník vybere zrovna tuhle
-            kartu. Kdo nemá vypsáno, není mrtvý: jede z poptávek. */}
-        {volnoText ? (
-          <div className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-700">
-            <Zap className="h-3.5 w-3.5 fill-emerald-500 text-emerald-500" />
-            Nejbližší volno: {volnoText}
+        {/* Místo */}
+        <div className="flex items-center gap-1.5 text-sm text-slate-500">
+          <MapPin className="h-4 w-4 shrink-0 text-slate-400" />
+          <span className="truncate">{service.city}</span>
+        </div>
+
+        {/* Štítky podkategorií */}
+        {viditelneTagy.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {viditelneTagy.map(name => (
+              <span key={name} className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600">
+                {name}
+              </span>
+            ))}
+            {skryteTagy > 0 && (
+              <span className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium text-slate-400">
+                +{skryteTagy}
+              </span>
+            )}
           </div>
-        ) : (
-          <div className="flex items-center gap-1.5 px-0.5 text-xs text-slate-400">
-            <CalendarClock className="h-3.5 w-3.5" />
-            Termín domluvíte v poptávce
+        )}
+      </div>
+
+      {/* ── SPODNÍ ROZHODOVACÍ LIŠTA ── */}
+      <div className="mt-auto border-t border-slate-100 p-4">
+
+        {/* Volné termíny rovnou na kartě — ať zákazník nemusí proklikávat,
+            aby zjistil, že nejbližší volno je až za tři týdny. */}
+        {ukazane.length > 0 && (
+          <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2.5">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700">
+              <CalendarDays className="h-3.5 w-3.5" /> Nejbližší termín
+            </p>
+            <p className="mt-0.5 text-sm font-extrabold text-slate-900">
+              {formatSlot(ukazane[0])}
+            </p>
+            {(ukazane.length > 1 || dalsi > 0) && (
+              <p className="mt-0.5 text-xs text-slate-500">
+                {ukazane.length > 1 && <span>a {formatSlot(ukazane[1])}</span>}
+                {dalsi > 0 && <span>{ukazane.length > 1 ? ' · ' : ''}a další…</span>}
+              </p>
+            )}
           </div>
         )}
 
-        {/* Cena z ceníku + počet úkonů */}
-        <div className="mt-auto flex items-end justify-between gap-2 border-t border-slate-100 pt-3">
+        {/* Cena a akce na jednom řádku */}
+        <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className={`font-semibold text-slate-900 ${hasPrice ? 'text-lg' : 'text-sm'}`}>{priceMain}</div>
-            {itemCount > 0 && (
-              <div className="flex items-center gap-1 text-xs text-slate-400">
-                <ListChecks className="h-3.5 w-3.5" />
-                {itemCount} {itemCount === 1 ? 'úkon' : itemCount < 5 ? 'úkony' : 'úkonů'} v ceníku
-              </div>
+            {minItemPrice != null && minItemPrice > 0 ? (
+              <>
+                <p className="text-lg font-extrabold leading-none text-slate-900">
+                  od {Number(minItemPrice).toLocaleString('cs-CZ')} Kč<span className="text-sm font-bold text-slate-500">{jednotka}</span>
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-400">
+                  {itemCount > 1 ? `${itemCount} úkonů v ceníku` : 'Cena od'}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-bold leading-none text-slate-700">Cena dohodou</p>
+                <p className="mt-0.5 text-[11px] text-slate-400">Podle rozsahu práce</p>
+              </>
             )}
           </div>
-          <Link href={detailHref} className="whitespace-nowrap rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600">
-            Zobrazit
+
+          <Link
+            href={maVolno ? terminyHref : detailHref}
+            className={`inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-bold transition ${
+              maVolno
+                ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            {maVolno ? <><Zap className="h-4 w-4" /> Volné termíny</> : 'Zobrazit kartu'}
           </Link>
         </div>
+
+        {!maVolno && (
+          <p className="mt-2 text-[11px] text-slate-400">Termín domluvíte v poptávce</p>
+        )}
       </div>
     </motion.article>
   )

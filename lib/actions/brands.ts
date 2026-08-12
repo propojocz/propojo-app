@@ -14,6 +14,7 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { createNotification } from './notifications'
 
 function getAdminClient() {
   return createAdminClient(
@@ -44,6 +45,72 @@ const brandSchema = z.object({
   address: z.string().max(200).optional().nullable(),
   logo_url: z.string().url().optional().nullable(),
 })
+
+// ═══════════════════════════════════════════════════════════════
+// OZNÁMENÍ — ať se pozvaný i majitel dozví, že se něco děje.
+// Selhání oznámení nikdy neshodí samotnou akci (pozvánka platí i tak).
+// ═══════════════════════════════════════════════════════════════
+
+async function oznamPozvanku(admin: any, brandId: string, providerId: string, ownerId: string) {
+  try {
+    const { data: brand } = await admin
+      .from('brands').select('name').eq('id', brandId).maybeSingle()
+    const { data: majitel } = await admin
+      .from('profiles').select('full_name, company_name').eq('id', ownerId).maybeSingle()
+    const kdo = majitel?.company_name || majitel?.full_name || 'Poskytovatel'
+    await createNotification({
+      userId: providerId,
+      type: 'brand_invite',
+      actorId: ownerId,
+      title: `Pozvánka do značky ${brand?.name ?? ''}`.trim(),
+      preview: `${kdo} vás zve, abyste své nabídky zobrazoval pod jménem ${brand?.name ?? 'značky'}. Vaše karty, ceník i kalendář zůstávají vaše.`,
+      url: '/dashboard/znacka',
+    })
+  } catch (e) {
+    console.error('[oznamPozvanku]', e)
+  }
+}
+
+async function oznamZadost(admin: any, brandId: string, zadatelId: string) {
+  try {
+    const { data: brand } = await admin
+      .from('brands').select('name, owner_id').eq('id', brandId).maybeSingle()
+    if (!brand?.owner_id) return
+    const { data: zadatel } = await admin
+      .from('profiles').select('full_name, company_name').eq('id', zadatelId).maybeSingle()
+    const kdo = zadatel?.company_name || zadatel?.full_name || 'Poskytovatel'
+    await createNotification({
+      userId: brand.owner_id,
+      type: 'brand_request',
+      actorId: zadatelId,
+      title: 'Nová žádost o připojení ke značce',
+      preview: `${kdo} žádá o připojení ke značce ${brand.name ?? ''}. Schválit můžete ve správě značky.`.trim(),
+      url: '/dashboard/znacka',
+    })
+  } catch (e) {
+    console.error('[oznamZadost]', e)
+  }
+}
+
+async function oznamRozhodnuti(admin: any, brandId: string, komuId: string, prijato: boolean) {
+  try {
+    const { data: brand } = await admin
+      .from('brands').select('name').eq('id', brandId).maybeSingle()
+    await createNotification({
+      userId: komuId,
+      type: 'brand_accepted',
+      title: prijato
+        ? `Jste členem značky ${brand?.name ?? ''}`.trim()
+        : 'Žádost o připojení nebyla schválena',
+      preview: prijato
+        ? 'Své nabídky teď můžete zobrazovat pod jménem značky. Nastavíte to u každé karty zvlášť.'
+        : null,
+      url: '/dashboard/znacka',
+    })
+  } catch (e) {
+    console.error('[oznamRozhodnuti]', e)
+  }
+}
 
 // ── Založit značku ──────────────────────────────────────────────
 export async function createBrand(input: {
@@ -168,6 +235,7 @@ export async function inviteMember(brandId: string, providerId: string, roleLabe
     await (admin.from('brand_members') as any)
       .update({ status: 'pozvan', role_label: roleLabel ?? null, invited_by: user.id, decided_at: null })
       .eq('id', existing.id)
+    await oznamPozvanku(admin, brandId, providerId, user.id)
     revalidatePath('/dashboard/znacka')
     return { success: true }
   }
@@ -180,6 +248,7 @@ export async function inviteMember(brandId: string, providerId: string, roleLabe
     console.error('[inviteMember]', error)
     return { success: false, error: 'Nepodařilo se odeslat pozvánku.' }
   }
+  await oznamPozvanku(admin, brandId, providerId, user.id)
   revalidatePath('/dashboard/znacka')
   return { success: true }
 }
@@ -218,6 +287,7 @@ export async function requestJoin(brandId: string): Promise<Result> {
     console.error('[requestJoin]', error)
     return { success: false, error: 'Nepodařilo se odeslat žádost.' }
   }
+  await oznamZadost(admin, brandId, user.id)
   revalidatePath('/dashboard/znacka')
   return { success: true }
 }
@@ -251,6 +321,10 @@ export async function respondMembership(memberId: string, accept: boolean): Prom
   if (error) {
     console.error('[respondMembership]', error)
     return { success: false, error: 'Nepodařilo se uložit rozhodnutí.' }
+  }
+  // Majitel rozhodl o žádosti → dáme vědět žadateli.
+  if (m.status === 'zadost') {
+    await oznamRozhodnuti(admin, m.brand_id, m.provider_id, accept)
   }
   revalidatePath('/dashboard/znacka')
   return { success: true }
@@ -503,4 +577,23 @@ export async function getBrandPickerData(serviceId: string): Promise<{
   }
 
   return { currentBrandId: svc?.brand_id ?? null, myBrands }
+}
+
+// ── Značka karty (pro zobrazení na detailu služby) ─────────────
+// Vrátí značku, pod kterou karta patří, nebo null. Pro veřejný proklik
+// „patří pod salon X" na detailu nabídky.
+export async function getServiceBrand(serviceId: string): Promise<{
+  id: string; name: string; slug: string; city: string | null; logo_url: string | null
+} | null> {
+  const admin = getAdminClient()
+  const { data: svc } = await admin
+    .from('services').select('brand_id').eq('id', serviceId).maybeSingle() as { data: { brand_id: string | null } | null }
+  if (!svc?.brand_id) return null
+
+  const { data: brand } = await admin
+    .from('brands').select('id, name, slug, city, logo_url, is_active')
+    .eq('id', svc.brand_id).maybeSingle() as { data: any }
+  if (!brand || brand.is_active === false) return null
+
+  return { id: brand.id, name: brand.name, slug: brand.slug, city: brand.city, logo_url: brand.logo_url }
 }

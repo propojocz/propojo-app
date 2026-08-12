@@ -28,11 +28,13 @@ export type NotificationRow = {
 // Selže tiše — oznámení nikdy nesmí shodit hlavní akci (zprávu/změnu stavu).
 export async function createNotification(params: {
   userId: string
-  type: 'new_message' | 'status_change'
+  type: 'new_message' | 'status_change' | 'brand_invite' | 'brand_request' | 'brand_accepted'
   orderId?: string | null
   actorId?: string | null
   title: string
   preview?: string | null
+  /** Kam oznámení vede. Když se nevyplní, míří na objednávku (výchozí chování). */
+  url?: string | null
 }): Promise<void> {
   try {
     const admin = getAdminClient()
@@ -56,9 +58,11 @@ export async function createNotification(params: {
       userId: params.userId,
       title: params.title,
       body: params.preview ?? undefined,
-      url: params.orderId
-        ? `/dashboard/objednavky/${params.orderId}`
-        : '/dashboard/objednavky',
+      url: params.url
+        ? params.url
+        : params.orderId
+          ? `/dashboard/objednavky/${params.orderId}`
+          : '/dashboard/objednavky',
       tag: params.orderId ?? undefined,
     })
   } catch (err) {

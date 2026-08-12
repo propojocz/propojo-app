@@ -5,6 +5,7 @@ import Link from 'next/link'
 import NotificationBadge from './NotificationBadge'
 import MobileNav from './MobileNav'
 import SuspendedTopBar from './SuspendedTopBar'
+import { getCustomerTodoCount } from '@/lib/actions/order-alerts'
 
 function getAdminClient() {
   return createAdminClient(
@@ -21,7 +22,7 @@ export default async function Navbar() {
   if (user) {
     const { data } = await supabase
       .from('profiles')
-      .select('full_name, company_name, avatar_url, is_provider, is_admin')
+      .select('full_name, company_name, avatar_url, is_provider, is_admin, reviews_seen_at')
       .eq('id', user.id)
       .single() as { data: any }
     profile = data
@@ -37,12 +38,17 @@ export default async function Navbar() {
   if (isProvider || isAdmin) {
     const admin = getAdminClient()
     if (isProvider) {
-      const { count } = await admin
+      // Odznak ukazuje jen recenze, které přišly OD POSLEDNÍHO otevření
+      // stránky s recenzemi — po návštěvě tedy zhasne.
+      let dotaz = admin
         .from('reviews')
         .select('id', { count: 'exact', head: true })
         .eq('provider_id', user!.id)
-        .is('provider_response', null)
         .is('reported_at', null)
+      if (profile?.reviews_seen_at) {
+        dotaz = dotaz.gt('created_at', profile.reviews_seen_at)
+      }
+      const { count } = await dotaz
       unansweredReviews = count ?? 0
     }
     if (isAdmin) {
@@ -53,6 +59,10 @@ export default async function Navbar() {
       disputeCount = count ?? 0
     }
   }
+
+  // Objednávky čekající na akci zákazníka (platba, potvrzení) — ať mu
+  // rezervace nepropadne jen proto, že ji nenašel.
+  const todoCount = user ? await getCustomerTodoCount() : 0
 
   // Světlé postranní tlačítko (Poptávky, Objednávky) — jen na desktopu
   const sideBtn =
@@ -76,7 +86,7 @@ export default async function Navbar() {
               <img
                 src="/propojo-logo-full.png"
                 alt="Propojo"
-                className="h-14 w-auto object-contain md:h-20"
+                className="h-14 w-auto object-contain md:h-16"
               />
             </Link>
           </div>
@@ -97,9 +107,14 @@ export default async function Navbar() {
 
             <Link
               href={user ? '/dashboard/objednavky' : '/prihlasit?next=/dashboard/objednavky'}
-              className={sideBtn}
+              className={`${sideBtn} relative`}
             >
               Objednávky
+              {todoCount > 0 && (
+                <span className="ml-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-bold text-white">
+                  {todoCount}
+                </span>
+              )}
             </Link>
           </div>
 
@@ -114,6 +129,7 @@ export default async function Navbar() {
               isAdmin={isAdmin}
               unansweredReviews={unansweredReviews}
               disputeCount={disputeCount}
+              todoCount={todoCount}
             />
           </div>
         </nav>

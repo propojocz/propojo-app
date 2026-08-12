@@ -2,7 +2,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { ChevronRight, CalendarDays } from 'lucide-react'
+import { CalendarDays, AlertCircle } from 'lucide-react'
 
 export const metadata = { title: 'Objednávky | Dashboard' }
 
@@ -19,13 +19,34 @@ const STATUS_COLORS: Record<string, string> = {
   spor: 'bg-orange-100 text-orange-700 border-orange-200',
 }
 
-function OrderCard({ o, role, otherName }: { o: any; role: 'provider' | 'customer'; otherName: string }) {
+// Co po zákazníkovi objednávka chce? Vrací text výzvy, nebo null když nic.
+// Díky tomu rezervace nezapadne — nedodělané jdou nahoru a je vidět proč.
+function customerTodo(o: any): string | null {
+  if (o.status === 'zruseno' || o.status === 'dokonceno') return null
+  if (o.deposit_status === 'pending') {
+    return o.location_address
+      ? 'Zaplaťte, aby termín platil'
+      : 'Doplňte adresu a zaplaťte'
+  }
+  if (o.status === 'ceka_potvrzeni') return 'Potvrďte dokončení a ohodnoťte'
+  return null
+}
+
+function OrderCard({ o, role, otherName, todo }: { o: any; role: 'provider' | 'customer'; otherName: string; todo?: string | null }) {
   return (
     <Link
       href={`/dashboard/objednavky/${o.id}`}
-      className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md hover:border-emerald-200"
+      className={`block rounded-2xl border bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${
+        todo ? 'border-amber-300 ring-1 ring-amber-200' : 'border-slate-200 hover:border-emerald-200'
+      }`}
     >
-      <div className="flex-1 min-w-0">
+      <div className="min-w-0">
+        {/* Výzva k akci — nejdřív ze všeho, ať je jasné, co se po mně chce */}
+        {todo && (
+          <p className="mb-1.5 inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800">
+            <AlertCircle className="h-3.5 w-3.5" /> {todo}
+          </p>
+        )}
         <div className="flex items-center gap-2 mb-1 flex-wrap">
           <h3 className="font-bold text-slate-900">{o.services?.title ?? 'Neznámá služba'}</h3>
           <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[o.status] ?? 'bg-slate-100 text-slate-500'}`}>
@@ -45,7 +66,6 @@ function OrderCard({ o, role, otherName }: { o: any; role: 'provider' | 'custome
           {(o.services?.price ?? 0) > 0 && <span>💰 {Number(o.services.price).toLocaleString('cs-CZ')} Kč/{o.services.price_unit}</span>}
         </div>
       </div>
-      <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" />
     </Link>
   )
 }
@@ -87,14 +107,20 @@ export default async function ObjednavkyPage() {
   const nameMap = Object.fromEntries((otherProfiles ?? []).map((p: any) => [p.id, p.full_name]))
 
   const provOrders = asProvider ?? []
-  const custOrders = asCustomer ?? []
-  const nothing = provOrders.length === 0 && custOrders.length === 0
+  const custOrdersRaw = asCustomer ?? []
+
+  // Rozdělíme: co po mně něco chce (platba, potvrzení) jde NAHORU. Bez toho
+  // zákazník po rezervaci odejde a objednávku pak nenajde.
+  const custTodo = custOrdersRaw.filter((o: any) => customerTodo(o) !== null)
+  const custOstatni = custOrdersRaw.filter((o: any) => customerTodo(o) === null)
+
+  const nothing = provOrders.length === 0 && custOrdersRaw.length === 0
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-black text-slate-900">Objednávky</h1>
-        <p className="mt-0.5 text-sm text-slate-500">{provOrders.length + custOrders.length} celkem</p>
+        <p className="mt-0.5 text-sm text-slate-500">{provOrders.length + custOrdersRaw.length} celkem</p>
       </div>
 
       {nothing && (
@@ -105,25 +131,52 @@ export default async function ObjednavkyPage() {
         </div>
       )}
 
-      {/* Sekce: objednávky, kde jsem poskytovatel */}
-      {isProvider && provOrders.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500">Objednávky u mě ({provOrders.length})</h2>
-          {provOrders.map((o: any) => (
-            <OrderCard key={o.id} o={o} role="provider" otherName={nameMap[o.customer_id] ?? 'Zákazník'} />
-          ))}
-        </section>
-      )}
+      {/* TŘI SLOUPCE VEDLE SEBE — na mobilu pod sebou.
+          Vlevo co čeká na mě, uprostřed práce u mě, vpravo co jsem si objednal. */}
+      <div className="grid gap-6 lg:grid-cols-3">
 
-      {/* Sekce: co jsem si objednal */}
-      {custOrders.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500">Co jsem si objednal ({custOrders.length})</h2>
-          {custOrders.map((o: any) => (
-            <OrderCard key={o.id} o={o} role="customer" otherName={nameMap[o.provider_id] ?? 'Živnostník'} />
-          ))}
-        </section>
-      )}
+        {/* 1) ČEKÁ NA VÁS — nedokončené, rezervace zatím neplatí */}
+        {custTodo.length > 0 && (
+          <section className="space-y-3">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-amber-900">
+                <AlertCircle className="h-4 w-4" /> Čeká na vás ({custTodo.length})
+              </h2>
+              <p className="mt-0.5 text-xs leading-relaxed text-amber-800">
+                Dokud tyhle objednávky nedokončíte, termín pro vás není závazně zamluvený.
+              </p>
+            </div>
+            {custTodo.map((o: any) => (
+              <OrderCard key={o.id} o={o} role="customer" otherName={nameMap[o.provider_id] ?? 'Živnostník'} todo={customerTodo(o)} />
+            ))}
+          </section>
+        )}
+
+        {/* 2) OBJEDNÁVKY U MĚ — práce, kterou mám udělat */}
+        {isProvider && provOrders.length > 0 && (
+          <section className="space-y-3">
+            <h2 className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700">
+              Objednávky u mě ({provOrders.length})
+            </h2>
+            {provOrders.map((o: any) => (
+              <OrderCard key={o.id} o={o} role="provider" otherName={nameMap[o.customer_id] ?? 'Zákazník'} />
+            ))}
+          </section>
+        )}
+
+        {/* 3) CO JSEM SI OBJEDNAL — bez těch, co čekají na akci */}
+        {custOstatni.length > 0 && (
+          <section className="space-y-3">
+            <h2 className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700">
+              Co jsem si objednal ({custOstatni.length})
+            </h2>
+            {custOstatni.map((o: any) => (
+              <OrderCard key={o.id} o={o} role="customer" otherName={nameMap[o.provider_id] ?? 'Živnostník'} />
+            ))}
+          </section>
+        )}
+      </div>
+
     </div>
   )
 }

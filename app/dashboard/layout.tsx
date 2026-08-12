@@ -9,6 +9,7 @@ import MobileDashboardNav from './MobileDashboardNav'
 import Avatar from '@/components/ui/Avatar'
 import SuspendedBanner from '@/components/ui/SuspendedBanner'
 import ConnectBanner from '@/components/ui/ConnectBanner'
+import { getCustomerTodoCount } from '@/lib/actions/order-alerts'
 
 function getAdminClient() {
   return createAdminClient(
@@ -24,9 +25,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('full_name, avatar_url, is_provider, is_admin')
+    .select('full_name, avatar_url, is_provider, is_admin, reviews_seen_at')
     .eq('id', user.id)
-    .single() as { data: { full_name: string; avatar_url: string | null; is_provider: boolean; is_admin: boolean } | null }
+    .single() as { data: { full_name: string; avatar_url: string | null; is_provider: boolean; is_admin: boolean; reviews_seen_at: string | null } | null }
 
   const isProvider = profile?.is_provider === true
   const isAdmin = profile?.is_admin === true
@@ -40,8 +41,26 @@ export default async function DashboardLayout({ children }: { children: React.Re
     disputeCount = count ?? 0
   }
 
-  // Odznak u recenzí ZRUŠEN — odpovídání na recenze je dobrovolné, ne upomínka.
-  const unansweredReviews = 0
+  // Odznak = recenze, které přišly OD POSLEDNÍHO otevření stránky s recenzemi.
+  // Po návštěvě zhasne (stránka zapíše čas), rozsvítí se až u nové recenze.
+  let unansweredReviews = 0
+  if (isProvider) {
+    const admin = getAdminClient()
+    let dotaz = admin
+      .from('reviews')
+      .select('id', { count: 'exact', head: true })
+      .eq('provider_id', user.id)
+      .is('reported_at', null)
+    if (profile?.reviews_seen_at) {
+      dotaz = dotaz.gt('created_at', profile.reviews_seen_at)
+    }
+    const { count } = await dotaz
+    unansweredReviews = count ?? 0
+  }
+
+  // Kolik objednávek čeká na moji akci (platba, potvrzení) — odznak u Objednávek,
+  // ať zákazník nemusí rezervaci hledat a nepropadne mu.
+  const todoCount = await getCustomerTodoCount()
 
   const NAV = [
     { href: '/dashboard', label: 'Přehled', icon: 'LayoutDashboard' },
@@ -49,7 +68,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     ...(isProvider ? [{ href: '/dashboard/znacka', label: 'Značka', icon: 'Building2' }] : []),
     ...(isProvider ? [{ href: '/dashboard/qr', label: 'QR kód', icon: 'QrCode' }] : []),
     ...(isProvider ? [{ href: '/dashboard/terminy', label: 'Termíny', icon: 'CalendarDays' }] : []),
-    { href: '/dashboard/objednavky', label: 'Objednávky', icon: 'ShoppingBag' },
+    { href: '/dashboard/objednavky', label: 'Objednávky', icon: 'ShoppingBag', badge: todoCount },
     ...(isProvider ? [{ href: '/dashboard/recenze', label: 'Moje recenze', icon: 'Star', badge: unansweredReviews }] : []),
     ...(isProvider ? [{ href: '/dashboard/predplatne', label: 'Předplatné', icon: 'CreditCard' }] : []),
     ...(isProvider ? [{ href: '/dashboard/vyplaty', label: 'Výplaty', icon: 'Landmark' }] : []),

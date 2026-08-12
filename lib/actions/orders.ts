@@ -274,28 +274,28 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   const isProvider = ordCheck.provider_id === user.id
   const isCustomer = ordCheck.customer_id === user.id
 
+  // Kolik se u téhle objednávky očekává zaplatit. Používá se na dvou místech —
+  // při přijetí (zapnutí platby) a při uzavírání (kontrola, že peníze dorazily).
+  const itX = ordCheck.service_items
+  const svcX = ordCheck.services
+  const modelX = itX?.payment_model ?? svcX?.payment_model
+  const fullPayX = modelX !== 'B' && (itX as any)?.deposit_type === 'plna_platba'
+  const ocekavanaCastka = modelX === 'B'
+    ? Number(itX?.quote_fee ?? svcX?.quote_fee ?? 0)      // poplatek za nacenění
+    : fullPayX
+      ? Number((itX as any)?.price ?? 0)                   // celá cena předem
+      : Number(itX?.deposit_amount ?? svcX?.deposit_amount ?? 0)  // záloha
+
   // Při PŘIJETÍ: nastavíme deposit_status='pending' když je co platit
   let extraUpdate: Record<string, any> = {}
   if (status === 'prijato') {
     // Přijmout (a spustit platbu) jde jen s domluveným termínem. Bez něj by
     // vznikla zaplacená objednávka bez času → spory. Poskytovatel musí nejdřív
     // navrhnout termín (panel návrhu), zákazník ho přijme a tím vznikne scheduled_at.
-    const model0 = ordCheck.service_items?.payment_model ?? ordCheck.services?.payment_model
-    if (!ordCheck.scheduled_at && model0 !== 'B') {
+    if (!ordCheck.scheduled_at && modelX !== 'B') {
       return { success: false, error: 'Nejdřív zákazníkovi navrhněte termín — bez domluveného času nejde objednávku přijmout ani platit.' }
     }
-    const svc = ordCheck.services
-    const it = ordCheck.service_items
-    // Model určuje úkon (má-li ho objednávka), jinak karta.
-    const model = it?.payment_model ?? svc?.payment_model
-    // U plné platby předem se platí CELÁ cena úkonu, ne záloha.
-    const fullPay = model !== 'B' && (it as any)?.deposit_type === 'plna_platba'
-    const amount = model === 'B'
-      ? Number(it?.quote_fee ?? svc?.quote_fee ?? 0)      // poplatek za nacenění
-      : fullPay
-        ? Number((it as any)?.price ?? 0)                  // celá cena předem
-        : Number(it?.deposit_amount ?? svc?.deposit_amount ?? 0)  // záloha
-    if (amount > 0) extraUpdate = { deposit_status: 'pending', deposit_amount: amount }
+    if (ocekavanaCastka > 0) extraUpdate = { deposit_status: 'pending', deposit_amount: ocekavanaCastka }
   }
 
   // Do 'v_procesu' jen když je záloha zaplacená (nebo žádná není potřeba)
@@ -307,9 +307,15 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   // po které se záloha uvolní i bez potvrzení zákazníka (autoReleaseStaleDeposits).
   // (status as string) — hodnotu 'ceka_potvrzeni' zatím nemusí znát typ OrderStatus.
   if ((status as string) === 'ceka_potvrzeni') {
-    // Uzavřít jde jen zaplacenou zakázku — jinak by výplata neměla z čeho vyjít.
-    if (ordCheck.deposit_status === 'pending') {
-      return { success: false, error: 'Zakázku lze uzavřít až po úhradě od zákazníka.' }
+    // Uzavřít jde jen ZAPLACENOU zakázku — jinak by výplata neměla z čeho vyjít.
+    //
+    // Neptáme se JEN na deposit_status === 'pending'. Ten se totiž nastavuje až
+    // při přijetí objednávky, a když objednávka vznikla jinou cestou (zákazník
+    // si vzal volné okno), zůstane prázdný — a kontrola by prošla i bez platby.
+    // Proto rozhodujeme podle očekávané částky: má-li se platit, musí být zaplaceno.
+    const zaplaceno = ordCheck.deposit_status === 'paid' || ordCheck.deposit_status === 'released'
+    if (ocekavanaCastka > 0 && !zaplaceno) {
+      return { success: false, error: 'Zakázku lze uzavřít až po úhradě od zákazníka. Zatím nedorazila platba.' }
     }
     extraUpdate = { ...extraUpdate, completed_at: new Date().toISOString() }
   }

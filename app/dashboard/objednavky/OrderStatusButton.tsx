@@ -10,7 +10,6 @@
 import { useState } from 'react'
 import { Loader2, CheckCircle2, XCircle, Wallet } from 'lucide-react'
 import { updateOrderStatus } from '@/lib/actions/orders'
-import HandoffButton from '@/components/ui/HandoffButton'
 
 const NEXT_STATUS: Record<string, { status: string; label: string; icon: any; color: string }[]> = {
   cekajici: [
@@ -52,9 +51,11 @@ export default function OrderStatusButton({
     const waitingForDeposit = depositStatus === 'pending'
 
     if (waitingForDeposit) {
+      // Stav „čeká se na úhradu" hlásí už pruh nad tlačítky (OrderDetailClient),
+      // tady bychom ho psali podruhé. Zobrazíme jen to, co má poskytovatel udělat.
       return (
         <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-500">
-          Čeká se na úhradu zálohy od zákazníka. Jakmile zaplatí, budete moct zakázku po dokončení uzavřít.
+          Zakázku půjde uzavřít, jakmile zákazník zaplatí. Do té doby není z čeho vyplatit.
         </p>
       )
     }
@@ -117,7 +118,6 @@ export default function OrderStatusButton({
             {action.label}
           </button>
         ))}
-        {currentStatus === 'cekajici' && <HandoffButton orderId={orderId} />}
       </div>
       {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
     </div>

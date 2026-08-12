@@ -24,11 +24,13 @@ interface MobileNavProps {
   isAdmin?: boolean
   unansweredReviews?: number
   disputeCount?: number
+  /** Objednávky čekající na akci zákazníka (platba, potvrzení). */
+  todoCount?: number
 }
 
 export default function MobileNav({
   user, displayName, avatarUrl, isProvider, isAdmin,
-  unansweredReviews = 0, disputeCount = 0,
+  unansweredReviews = 0, disputeCount = 0, todoCount = 0,
 }: MobileNavProps) {
   const [open, setOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
@@ -65,7 +67,7 @@ export default function MobileNav({
     ...(isProvider ? [{ href: '/dashboard/znacka', label: 'Značka', icon: Building2 }] : []),
     ...(isProvider ? [{ href: '/dashboard/qr', label: 'QR kód', icon: QrCode }] : []),
     ...(isProvider ? [{ href: '/dashboard/terminy', label: 'Termíny', icon: CalendarDays }] : []),
-    { href: '/dashboard/objednavky', label: 'Objednávky', icon: Inbox },
+    { href: '/dashboard/objednavky', label: 'Objednávky', icon: Inbox, badge: todoCount },
     ...(isProvider ? [{ href: '/dashboard/recenze', label: 'Moje recenze', icon: Star, badge: unansweredReviews }] : []),
     ...(isProvider ? [{ href: '/dashboard/predplatne', label: 'Předplatné', icon: CreditCard }] : []),
     ...(isProvider ? [{ href: '/dashboard/vyplaty', label: 'Výplaty', icon: Landmark }] : []),
@@ -73,7 +75,7 @@ export default function MobileNav({
     { href: '/dashboard/profil', label: 'Můj profil', icon: User },
   ] : []
 
-  const totalBadge = unansweredReviews + (isAdmin ? disputeCount : 0)
+  const totalBadge = unansweredReviews + todoCount + (isAdmin ? disputeCount : 0)
 
   const drawer = (
     <AnimatePresence>

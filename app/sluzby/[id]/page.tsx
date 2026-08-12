@@ -16,11 +16,12 @@ import { CATEGORY_META } from '@/types/database'
 import type { ServiceItem } from '@/types/database'
 import Image from 'next/image'
 import Link from 'next/link'
-import { MapPin, Star, ArrowLeft, ShieldCheck, ListChecks, Zap, ChevronRight } from 'lucide-react'
+import { MapPin, Star, ArrowLeft, ShieldCheck, ListChecks, Zap, ChevronRight, Building2 } from 'lucide-react'
 import Avatar from '@/components/ui/Avatar'
 import PriceListPublic from '@/components/ui/PriceListPublic'
 import ServiceMap from '@/components/ui/ServiceMap'
 import ServiceGallery from '@/components/ui/ServiceGallery'
+import { getServiceBrand } from '@/lib/actions/brands'
 import type { Metadata } from 'next'
 
 interface Props { params: { id: string } }
@@ -128,6 +129,9 @@ export default async function ServiceDetailPage({ params }: Props) {
     .from('categories').select('name').eq('slug', s.category).single() as { data: { name: string } | null }
   const categoryName = catRow?.name ?? meta.label
 
+  // Značka (salon/firma), pod kterou karta patří. Bez značky je null.
+  const brand = await getServiceBrand(s.id)
+
   // Podkategorie
   const { data: subcatLinks } = await supabase
     .from('service_subcategories').select('subcategories(name)').eq('service_id', s.id)
@@ -231,7 +235,7 @@ export default async function ServiceDetailPage({ params }: Props) {
 
             {/* ── VOLNÉ TERMÍNY (last-minute) ── */}
             {freeSlots.length > 0 && (
-              <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/70 p-5">
+              <div id="volne-terminy" className="scroll-mt-24 rounded-2xl border-2 border-emerald-200 bg-emerald-50/70 p-5">
                 <h2 className="flex items-center gap-2 text-lg font-black text-slate-900">
                   <Zap className="h-5 w-5 fill-emerald-500 text-emerald-500" /> Volné termíny
                 </h2>
@@ -314,6 +318,23 @@ export default async function ServiceDetailPage({ params }: Props) {
                   {showLegalName && s.profiles.ico && <span className="text-slate-300">·</span>}
                   {s.profiles.ico && <span>IČO {s.profiles.ico}</span>}
                 </p>
+              )}
+
+              {/* Značka (salon/firma), pod kterou karta patří */}
+              {brand && (
+                <Link
+                  href={`/znacka/${brand.slug}`}
+                  className="mt-2.5 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 transition hover:border-emerald-300 hover:bg-emerald-50"
+                >
+                  <Building2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-bold text-slate-800">{brand.name}</span>
+                    <span className="block text-xs text-slate-500">
+                      Součást značky{brand.city ? ` · ${brand.city}` : ''}
+                    </span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+                </Link>
               )}
 
               {s.profiles.bio && <p className="mt-3 text-sm leading-relaxed text-slate-600 line-clamp-4">{s.profiles.bio}</p>}
