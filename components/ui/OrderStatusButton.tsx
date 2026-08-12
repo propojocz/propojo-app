@@ -23,10 +23,17 @@ export default function OrderStatusButton({
   orderId,
   currentStatus,
   depositStatus = null,
+  scheduledAt = null,
+  durationMinutes = null,
 }: {
   orderId: string
   currentStatus: string
   depositStatus?: string | null
+  /** Domluvený termín — dřív než nastane, nemá smysl zakázku uzavírat. */
+  scheduledAt?: string | null
+  /** Délka úkonu v minutách — uzavírat jde až po jejím uplynutí,
+      ne hned na začátku termínu (barvení trvá 90 minut). */
+  durationMinutes?: number | null
 }) {
   const [loading, setLoading] = useState<string | null>(null)
   const [err, setErr] = useState('')
@@ -49,17 +56,55 @@ export default function OrderStatusButton({
   // Výrazná zelená výzva, ať je jasné, že tohle spouští výplatu.
   if (currentStatus === 'prijato') {
     const waitingForDeposit = depositStatus === 'pending'
+    // Uzavřít dává smysl až v den a hodinu, kdy se má služba odehrát.
+    // Dřív by poskytovatel uzavíral práci, která ještě neproběhla.
+    // Počítáme KONEC služby, ne začátek — jinak by šlo uzavřít barvení
+    // ve chvíli, kdy zákaznice teprve usedla do křesla.
+    const konecSluzby = scheduledAt
+      ? new Date(new Date(scheduledAt).getTime() + (durationMinutes ?? 0) * 60_000)
+      : null
+    const terminNastal = !konecSluzby || konecSluzby.getTime() <= Date.now()
+    const terminText = konecSluzby
+      ? new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' }).format(konecSluzby)
+      : null
 
     if (waitingForDeposit) {
+      // Stav „čeká se na úhradu" hlásí už pruh nad tlačítky (OrderDetailClient),
+      // tady bychom ho psali podruhé. Zobrazíme jen to, co má poskytovatel udělat.
       return (
         <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-500">
-          Čeká se na úhradu zálohy od zákazníka. Jakmile zaplatí, budete moct zakázku po dokončení uzavřít.
+          Zakázku půjde uzavřít, jakmile zákazník zaplatí. Do té doby není z čeho vyplatit.
         </p>
       )
     }
 
+    if (!terminNastal) {
+      return (
+        <div className="w-full">
+          <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
+            Zakázku uzavřete <strong className="text-slate-800">po skončení služby</strong>
+            {terminText ? <> — {terminText}</> : null}. Do té doby není co potvrzovat.
+          </p>
+          <button
+            onClick={() => handleAction('zruseno')}
+            disabled={!!loading}
+            className="mt-2 flex items-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-60"
+          >
+            {loading === 'zruseno' ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+            Zrušit zakázku
+          </button>
+          {depositStatus === 'paid' && (
+            <p className="mt-1 text-xs text-slate-400">Při zrušení se zákazníkovi vrátí zaplacená částka.</p>
+          )}
+          {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
+        </div>
+      )
+    }
+
     return (
+
       <div className="w-full">
+
         <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-4">
           <p className="mb-0.5 text-sm font-bold text-slate-900">Až budete s prací hotovi</p>
           <p className="mb-3 text-xs leading-relaxed text-slate-600">
@@ -75,7 +120,7 @@ export default function OrderStatusButton({
               : <><Wallet className="h-4 w-4" /> Potvrdit pro uvolnění výplaty</>}
           </button>
           <p className="mt-2 text-center text-[11px] leading-relaxed text-slate-400">
-            Pošleme peníze na váš účet. Když zákazník potvrdí, převod se spustí hned — jinak nejpozději do 7 dnů.
+            Pošleme peníze na váš účet. Když zákazník potvrdí, převod se spustí hned — jinak automaticky do 2 dnů.
           </p>
         </div>
 

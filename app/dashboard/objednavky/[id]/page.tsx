@@ -45,7 +45,9 @@ type OrderRow = {
   scheduled_end: string | null
   service_item_id: string | null
   services: ServiceLite | null
-  service_items: { name: string | null; deposit_amount: number | null; payment_model: string | null } | null
+  // duration_minutes: kvůli tomu, aby šlo zakázku uzavřít až po SKONČENÍ
+  // služby, ne hned na začátku termínu.
+  service_items: { name: string | null; deposit_amount: number | null; payment_model: string | null; duration_minutes: number | null } | null
 }
 
 type ProfileLite = {
@@ -74,7 +76,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
 
   const { data: order, error } = await supabase
     .from('orders')
-    .select('*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee, location_type), service_items(name, deposit_amount, payment_model)')
+    .select('*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee, location_type), service_items(name, deposit_amount, payment_model, duration_minutes)')
     .eq('id', params.id)
     .single() as { data: OrderRow | null; error: any }
 

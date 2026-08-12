@@ -109,6 +109,7 @@ export async function releaseDeposit(orderId: string): Promise<Result> {
     .from('orders')
     .select(`
       id, customer_id, provider_id, status, deposit_status, deposit_amount, stripe_payment_intent_id,
+      scheduled_at, service_items(duration_minutes),
       profiles!orders_provider_id_fkey(stripe_account_id, stripe_payouts_enabled)
     `)
     .eq('id', orderId)
@@ -118,8 +119,25 @@ export async function releaseDeposit(orderId: string): Promise<Result> {
   if (order.customer_id !== user.id) {
     return { success: false, error: 'Potvrdit může jen zákazník objednávky.' }
   }
+  // Potvrdit smí zákazník ve dvou situacích:
+  //  a) poskytovatel označil hotovo (ceka_potvrzeni) — kdykoli,
+  //  b) poskytovatel to udělat zapomněl (prijato) — až PO SKONČENÍ služby.
+  // Bez (b) by objednávka visela donekonečna, kdyby řemeslník na tlačítko
+  // zapomněl: zákazník by nemohl zaplatit ani ohodnotit.
   if (order.status !== 'ceka_potvrzeni') {
-    return { success: false, error: 'Objednávka není připravená k potvrzení.' }
+    if (order.status !== 'prijato' && order.status !== 'v_procesu') {
+      return { success: false, error: 'Objednávka není připravená k potvrzení.' }
+    }
+    const delka = Number(order.service_items?.duration_minutes ?? 0)
+    const konec = order.scheduled_at
+      ? new Date(new Date(order.scheduled_at).getTime() + delka * 60_000)
+      : null
+    if (!konec) {
+      return { success: false, error: 'U objednávky zatím není domluvený termín.' }
+    }
+    if (konec.getTime() > Date.now()) {
+      return { success: false, error: 'Potvrdit můžete až po skončení služby.' }
+    }
   }
 
   const admin = getAdminClient()
@@ -216,7 +234,7 @@ export async function reportDispute(orderId: string, reason: string): Promise<Re
 
   const { data: order } = await supabase
     .from('orders')
-    .select('id, customer_id, provider_id, status')
+    .select('id, customer_id, provider_id, status, scheduled_at, service_items(duration_minutes)')
     .eq('id', orderId)
     .single() as { data: any }
 
@@ -224,8 +242,20 @@ export async function reportDispute(orderId: string, reason: string): Promise<Re
   if (order.customer_id !== user.id) {
     return { success: false, error: 'Problém může nahlásit jen zákazník objednávky.' }
   }
+  // Stejně jako u potvrzení: nahlásit jde i když poskytovatel neklikl,
+  // ale až po skončení služby. Jinak by zákazník neměl kam jít, kdyby
+  // řemeslník nedorazil a pak se ani neozval.
   if (order.status !== 'ceka_potvrzeni') {
-    return { success: false, error: 'Problém lze nahlásit jen u zakázky čekající na potvrzení.' }
+    if (order.status !== 'prijato' && order.status !== 'v_procesu') {
+      return { success: false, error: 'Problém lze nahlásit jen u probíhající zakázky.' }
+    }
+    const delka = Number((order as any).service_items?.duration_minutes ?? 0)
+    const konec = (order as any).scheduled_at
+      ? new Date(new Date((order as any).scheduled_at).getTime() + delka * 60_000)
+      : null
+    if (!konec || konec.getTime() > Date.now()) {
+      return { success: false, error: 'Problém můžete nahlásit až po termínu služby.' }
+    }
   }
 
   const admin = getAdminClient()
@@ -426,7 +456,7 @@ export async function adminMessageToOrder(orderId: string, content: string, imag
   return { success: true, message: inserted }
 }
 // ── AUTOMATICKÉ UVOLNĚNÍ PO 7 DNECH MLČENÍ ────────────────
-// Když zákazník po dokončení nereaguje, poskytovatel nemá čekat věčně. Po 7 dnech
+// Když zákazník po dokončení nereaguje, poskytovatel nemá čekat věčně. Po 2 dnech
 // od okamžiku, kdy poskytovatel označil zakázku za hotovou (ceka_potvrzeni),
 // se záloha uvolní sama — stejně jako by ji zákazník potvrdil.
 //
@@ -435,13 +465,13 @@ export async function adminMessageToOrder(orderId: string, content: string, imag
 //
 // Bezpečné pustit opakovaně: bere jen status 'ceka_potvrzeni' + deposit 'paid',
 // a po zpracování stav změní, takže se stejná objednávka podruhé nechytí.
-const AUTO_RELEASE_DAYS = 7
+const AUTO_RELEASE_DAYS = 2
 
 export async function autoReleaseStaleDeposits(): Promise<{ released: number; failed: number }> {
   const admin = getAdminClient()
   const cutoff = new Date(Date.now() - AUTO_RELEASE_DAYS * 24 * 3600 * 1000).toISOString()
 
-  // Objednávky čekající na potvrzení déle než 7 dnů. Rozhoduje okamžik, kdy
+  // Objednávky čekající na potvrzení déle než AUTO_RELEASE_DAYS. Rozhoduje okamžik, kdy
   // poskytovatel označil hotovo — ukládáme ho do completed_at (viz níže);
   // starší objednávky bez něj poznáme podle updated_at jako záloha.
   const { data: stale } = await admin
@@ -479,7 +509,19 @@ export async function autoReleaseStaleDeposits(): Promise<{ released: number; fa
           orderId: order.id,
           actorId: order.provider_id,
           title: nominal > 0 ? 'Záloha vám byla automaticky uvolněna' : 'Zakázka byla automaticky uzavřena',
-          preview: 'Zákazník do 7 dnů nepotvrdil, uzavřeno automaticky.',
+          preview: 'Zákazník nic nenamítl, uzavřeno automaticky po 2 dnech.',
+        })
+        // Zákazník se to musí dozvědět taky — jinak zjistí až z výpisu,
+        // že peníze odešly, a nebude vědět proč.
+        await createNotification({
+          userId: order.customer_id,
+          type: 'status_change',
+          orderId: order.id,
+          actorId: order.provider_id,
+          title: 'Objednávka byla uzavřena',
+          preview: nominal > 0
+            ? 'Nenamítli jste nic do 2 dnů, platba odešla poskytovateli.'
+            : 'Nenamítli jste nic do 2 dnů, zakázka je uzavřená.',
         })
       } catch { /* notifikace není kritická */ }
     } catch (err) {

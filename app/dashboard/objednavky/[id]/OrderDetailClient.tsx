@@ -11,6 +11,7 @@ import ChatThread from '@/components/ui/ChatThread'
 import Avatar from '@/components/ui/Avatar'
 import AddressInput from '@/components/ui/AddressInput'
 import ServiceMap from '@/components/ui/ServiceMap'
+import OrderTimeline from '@/components/ui/OrderTimeline'
 
 type ServiceLite = {
   id: string
@@ -153,6 +154,17 @@ export default function OrderDetailClient({
   // Vratka se zákazníkovi dřív ukázala jen v notifikaci, která zapadne.
   // Tady zůstane natrvalo, ať je dohledatelná i za měsíc.
   const isRefunded = order.deposit_status === 'refunded'
+  // Konec služby = termín + délka úkonu. Po něm smí zakázku uzavřít i zákazník,
+  // kdyby na to poskytovatel zapomněl — jinak objednávka visí donekonečna.
+  const sluzbaSkoncila = (() => {
+    if (!order.scheduled_at) return false
+    const delka = Number((order as any).service_items?.duration_minutes ?? 0)
+    return new Date(order.scheduled_at).getTime() + delka * 60_000 <= Date.now()
+  })()
+  const muzePotvrdit = isCustomer && (
+    order.status === 'ceka_potvrzeni' ||
+    ((order.status === 'prijato' || order.status === 'v_procesu') && sluzbaSkoncila && isPaid)
+  )
   const hasDeposit = depositAmount > 0
   const hasAddress = !!order.location_address || addrSaved
   const atCustomer = order.service_location
@@ -362,7 +374,7 @@ export default function OrderDetailClient({
           {/* Akce poskytovatele */}
           {isProvider && (
             <div className="mt-5 border-t border-slate-100 pt-5">
-              <OrderStatusButton orderId={order.id} currentStatus={order.status} depositStatus={order.deposit_status} />
+              <OrderStatusButton orderId={order.id} currentStatus={order.status} depositStatus={order.deposit_status} scheduledAt={order.scheduled_at} durationMinutes={(order as any).service_items?.duration_minutes ?? null} />
             </div>
           )}
 
@@ -516,15 +528,21 @@ export default function OrderDetailClient({
         )}
 
         {/* ── POTVRZENÍ DOKONČENÍ (jen zákazník, stav ceka_potvrzeni) ── */}
-        {isCustomer && order.status === 'ceka_potvrzeni' && (
+        {muzePotvrdit && (
           <div className="rounded-2xl border border-purple-200 bg-white p-6 shadow-sm">
             <div className="mb-1 flex items-center gap-2">
               <Flag className="h-5 w-5 text-purple-600" />
-              <h2 className="font-black text-slate-900">Poskytovatel označil zakázku jako splněnou</h2>
+              <h2 className="font-black text-slate-900">
+                {order.status === 'ceka_potvrzeni'
+                  ? 'Poskytovatel označil zakázku jako splněnou'
+                  : 'Proběhlo všechno v pořádku?'}
+              </h2>
             </div>
             <p className="mb-4 text-sm text-slate-500">
-              Pokud {isModelB ? 'výjezd a nacenění proběhly' : 'řemeslník dorazil a plní zakázku'}, potvrďte to.
-              {hasDeposit && ' Tím se mu uvolní zaplacená záloha.'}
+              {order.status === 'ceka_potvrzeni'
+                ? <>Pokud {isModelB ? 'výjezd a nacenění proběhly' : 'řemeslník dorazil a plní zakázku'}, potvrďte to.</>
+                : <>Termín už proběhl. Potvrďte, že {isModelB ? 'výjezd a nacenění proběhly' : 'práce proběhla'} — nemusíte čekat, až to udělá řemeslník.</>}
+              {hasDeposit && ' Tím se mu uvolní zaplacená částka.'}
               {' '}Další domluva o ceně a postupu probíhá přímo s řemeslníkem.
             </p>
             <ConfirmCompletionButton orderId={order.id} hasDeposit={hasDeposit} />
@@ -585,8 +603,20 @@ export default function OrderDetailClient({
         </div>
       </div>
 
-      {/* Pravý sloupec: druhá strana */}
+      {/* Pravý sloupec: průběh + druhá strana */}
       <div className="space-y-4">
+
+        {/* Kde v procesu jsme a co bude dál */}
+        <OrderTimeline
+          status={order.status}
+          depositStatus={order.deposit_status}
+          createdAt={order.created_at}
+          scheduledAt={order.scheduled_at}
+          completedAt={(order as any).completed_at ?? null}
+          hasDeposit={hasDeposit}
+          isCustomer={isCustomer}
+        />
+
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="mb-4 text-xs font-semibold uppercase tracking-wide text-slate-400">{otherLabel}</h3>
 
