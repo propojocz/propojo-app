@@ -150,6 +150,9 @@ export default function OrderDetailClient({
   const paidTitle = isModelB ? 'Poplatek za výjezd uhrazen' : 'Rezervační záloha uhrazena'
   const notPaidLabel = isModelB ? 'Poplatek za výjezd zatím nebyl uhrazen.' : 'Rezervační záloha zatím nebyla uhrazena.'
   const isPaid = order.deposit_status === 'paid' || order.deposit_status === 'released'
+  // Vratka se zákazníkovi dřív ukázala jen v notifikaci, která zapadne.
+  // Tady zůstane natrvalo, ať je dohledatelná i za měsíc.
+  const isRefunded = order.deposit_status === 'refunded'
   const hasDeposit = depositAmount > 0
   const hasAddress = !!order.location_address || addrSaved
   const atCustomer = order.service_location
@@ -293,6 +296,24 @@ export default function OrderDetailClient({
                 : isPaid
                   ? `${paidTitle} (${Number(order.deposit_amount ?? depositAmount).toLocaleString('cs-CZ')} Kč) – drží se přes Propojo`
                   : `Čeká se na úhradu (${depositAmount.toLocaleString('cs-CZ')} Kč) od zákazníka`}
+            </div>
+          )}
+
+          {/* VRÁCENÁ ZÁLOHA — vidí obě strany, zůstává dohledatelné */}
+          {isRefunded && (
+            <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+              <RotateCcw className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+              <div className="text-sm">
+                <p className="font-bold text-emerald-900">
+                  {isCustomer ? 'Peníze jsme vám vrátili' : 'Záloha byla zákazníkovi vrácena'}
+                </p>
+                <p className="mt-0.5 leading-relaxed text-emerald-800">
+                  {Number(order.deposit_amount ?? depositAmount ?? 0).toLocaleString('cs-CZ')} Kč
+                  {isCustomer
+                    ? ' se vrací na kartu, ze které jste platili. U banky se částka objeví zpravidla do několika pracovních dnů.'
+                    : ' byla vrácena zpět zákazníkovi.'}
+                </p>
+              </div>
             </div>
           )}
 

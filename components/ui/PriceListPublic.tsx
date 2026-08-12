@@ -7,7 +7,8 @@
 // jen vlastník v /dashboard.
 
 import { useState } from 'react'
-import { ListChecks, Clock, Wallet, ChevronRight, Tag } from 'lucide-react'
+import Link from 'next/link'
+import { ListChecks, Clock, Wallet, ChevronRight, Tag, Send } from 'lucide-react'
 import type { ServiceItem } from '@/types/database'
 import { PRICE_UNIT_LABELS } from '@/types/database'
 import OrderItemModal, { type SlotOption } from '@/components/ui/OrderItemModal'
@@ -21,6 +22,9 @@ interface Props {
   slots?: SlotOption[]
   providerGeo?: { lat: number | null; lng: number | null; radiusKm: number | null }
   providerName?: string | null
+  /** Pro předvyplnění poptávky, když karta nemá ceník. */
+  categoryName?: string | null
+  city?: string | null
 }
 
 // Souhrn ceny pod názvem úkonu — stejná logika jako v editačním ceníku,
@@ -39,6 +43,7 @@ function priceLabel(it: ServiceItem): string {
 export default function PriceListPublic({
   items, serviceId, providerId, isLoggedIn,
   locationType = 'u_zakaznika', slots = [], providerGeo, providerName,
+  categoryName = null, city = null,
 }: Props) {
   // Který úkon má otevřený objednávkový modal.
   const [openItem, setOpenItem] = useState<ServiceItem | null>(null)
@@ -49,12 +54,29 @@ export default function PriceListPublic({
     .sort((a, b) => a.sort_order - b.sort_order)
 
   if (visible.length === 0) {
+    // Bez úkonu nemá zákazník na co kliknout „Objednat" — a odejde.
+    // Nabídneme aspoň poptávku, ať se ti dva potkají.
+    const poptavkaHref = `/poptavky/nova${
+      categoryName || city
+        ? `?${[
+            categoryName ? `category=${encodeURIComponent(categoryName)}` : '',
+            city ? `city=${encodeURIComponent(city)}` : '',
+          ].filter(Boolean).join('&')}`
+        : ''
+    }`
     return (
       <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 px-5 py-8 text-center">
         <p className="text-sm font-semibold text-slate-600">Ceník zatím není vyplněný</p>
-        <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-slate-400">
-          Napište poskytovateli — rád vám cenu i termín sdělí napřímo.
+        <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-slate-500">
+          {providerName ? `${providerName} tu zatím nemá vypsané ceny.` : 'Poskytovatel tu zatím nemá vypsané ceny.'}
+          {' '}Napište, co potřebujete — ozve se vám s cenou i termínem.
         </p>
+        <Link
+          href={poptavkaHref}
+          className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-600"
+        >
+          <Send className="h-4 w-4" /> Poslat poptávku
+        </Link>
       </div>
     )
   }

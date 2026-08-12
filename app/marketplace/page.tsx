@@ -251,6 +251,48 @@ async function ServiceList({
     sorted = [...sorted].sort((a, b) => Number(b.profiles?.rating ?? 0) - Number(a.profiles?.rating ?? 0))
   }
 
+  // ── ROZMANITOST VÝSLEDKŮ ──────────────────────────────────────
+  // Salon s pěti lidmi (nebo jeden poskytovatel s pěti kartami) by jinak
+  // obsadil celou první obrazovku a menší živnostníci by se neukázali.
+  // Prostřídáme karty tak, aby po sobě nešly víc než DVĚ od stejného
+  // poskytovatele/značky. Pořadí uvnitř skupiny zůstává — kdo byl lepší,
+  // je pořád první; jen se to prokládá.
+  const MAX_ZA_SEBOU = 2
+  {
+    const klic = (s: any) => s.brand_id ?? (s.profiles as any)?.id ?? s.provider_id ?? s.id
+    // Rozdělíme do front podle poskytovatele, pořadí zachováme.
+    const fronty = new Map<string, any[]>()
+    for (const s of sorted) {
+      const k = String(klic(s))
+      if (!fronty.has(k)) fronty.set(k, [])
+      fronty.get(k)!.push(s)
+    }
+    // Když je jen jeden poskytovatel, není co střídat.
+    if (fronty.size > 1) {
+      const vysledek: any[] = []
+      let poslednKlic: string | null = null
+      let poRade = 0
+      while (vysledek.length < sorted.length) {
+        // Fronty seřadíme podle délky (nejdelší první) — ať se nejvíc
+        // zastoupený poskytovatel průběžně „vyprazdňuje" a nezůstane na konci.
+        const kandidati = [...fronty.entries()]
+          .filter(([, v]) => v.length > 0)
+          .sort((a, b) => b[1].length - a[1].length)
+        if (kandidati.length === 0) break
+
+        // Přednost má fronta, která neporušuje limit za sebou.
+        let vybrany = kandidati.find(([k]) => !(k === poslednKlic && poRade >= MAX_ZA_SEBOU))
+        if (!vybrany) vybrany = kandidati[0]   // nezbylo nic jiného
+
+        const [k, fronta] = vybrany
+        vysledek.push(fronta.shift())
+        poRade = k === poslednKlic ? poRade + 1 : 1
+        poslednKlic = k
+      }
+      sorted = vysledek
+    }
+  }
+
   if (sorted.length === 0) {
     const params = new URLSearchParams()
     const hledane = q || category

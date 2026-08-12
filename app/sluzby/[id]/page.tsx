@@ -282,6 +282,8 @@ export default async function ServiceDetailPage({ params }: Props) {
                   radiusKm: (s as any).radius_km ?? null,
                 }}
                 providerName={providerDisplayName}
+                categoryName={categoryName}
+                city={s.city}
               />
               <p className="mt-3 text-xs leading-relaxed text-slate-400">
                 Nevyhovuje žádný z volných termínů? Vyberte úkon a pošlete poptávku — poskytovatel vám navrhne čas.

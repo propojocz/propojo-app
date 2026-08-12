@@ -179,6 +179,13 @@ export default function ServiceCard({
           {(service as any).subtitle && (
             <p className="mt-0.5 line-clamp-1 text-sm text-slate-500">{(service as any).subtitle}</p>
           )}
+          {/* Kdo za kartou stojí — zákazník si vybírá i podle člověka, ne jen podle služby. */}
+          <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
+            <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-slate-200 text-[9px] font-bold text-slate-600">
+              {providerName.charAt(0).toUpperCase()}
+            </span>
+            <span className="truncate">{providerName}</span>
+          </p>
         </div>
 
         {/* Důvěra: hodnocení · ověřeno */}
