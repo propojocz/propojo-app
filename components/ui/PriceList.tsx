@@ -267,10 +267,37 @@ export default function PriceList({
   const editorOpenFor = (subId: string | null) =>
     editor.kind === 'new' && editor.subcategoryId === subId
 
+  // Které vybrané služby nemají ani jeden úkon → nejde z nich objednat.
+  const prazdneSkupiny = subcategories.filter(sub => itemsOf(sub.id).length === 0)
+
   return (
     <div className="space-y-4">
       {error && (
         <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+      )}
+
+      {/* ── UPOZORNĚNÍ NA SLUŽBY, ZE KTERÝCH NEJDE OBJEDNAT ──
+          Zákazník objednává ÚKON, ne podkategorii. Bez jediného úkonu se
+          služba na kartě sice ukáže, ale nikdo si ji nemůže objednat —
+          a poskytovatel neví proč. */}
+      {prazdneSkupiny.length > 0 && subcategories.length > 0 && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4">
+          <p className="flex items-center gap-2 text-sm font-bold text-amber-900">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            {prazdneSkupiny.length === 1
+              ? 'Z jedné vaší služby si zákazník nemůže objednat'
+              : `Z ${prazdneSkupiny.length} vašich služeb si zákazník nemůže objednat`}
+          </p>
+          <p className="mt-1 text-xs leading-relaxed text-amber-800">
+            <strong>{prazdneSkupiny.map(g => g.name).join(', ')}</strong> {prazdneSkupiny.length === 1 ? 'nemá' : 'nemají'} zatím
+            žádný úkon. I když vypíšete volný termín, nabídne se z něj jen to, co je níž v ceníku.
+          </p>
+          <p className="mt-1.5 text-xs leading-relaxed text-amber-700">
+            Ceny vypisovat nemusíte — stačí přidat úkon a zvolit <strong>„Cena dohodou"</strong>
+            {' '}nebo <strong>výjezd a nacenění na místě</strong>. Jde hlavně o to, aby měl zákazník
+            na co kliknout.
+          </p>
+        </div>
       )}
 
       {/* ── SKUPINY PODLE PODKATEGORIÍ ── */}
@@ -288,9 +315,15 @@ export default function PriceList({
                   <Sparkles className="h-2.5 w-2.5" /> vaše vlastní
                 </span>
               )}
-              <span className="shrink-0 text-xs text-slate-400">
-                {groupItems.length} {groupItems.length === 1 ? 'úkon' : groupItems.length > 0 && groupItems.length < 5 ? 'úkony' : 'úkonů'}
-              </span>
+              {empty ? (
+                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                  nejde objednat
+                </span>
+              ) : (
+                <span className="shrink-0 text-xs text-slate-400">
+                  {groupItems.length} {groupItems.length === 1 ? 'úkon' : groupItems.length < 5 ? 'úkony' : 'úkonů'}
+                </span>
+              )}
             </div>
 
             {/* Úkony ve skupině */}
