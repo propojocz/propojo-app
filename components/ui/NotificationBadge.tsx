@@ -69,13 +69,16 @@ export default function NotificationBadge() {
     }
   }
 
-  // Cílový odkaz notifikace: objednávka → detail, pozastavení → dashboard
+  // Cílový odkaz notifikace.
+  // POZOR NA POŘADÍ: typ rozhoduje PŘED order_id. Recenze i pozvánka do značky
+  // mají u sebe objednávku, ale patří jinam — dřív skončily u detailu objednávky.
   const notifHref = (n: NotifItem): string | null => {
-    if (n.order_id) return `/dashboard/objednavky/${n.order_id}`
+    if (n.type === 'review') return '/dashboard/recenze'
+    if (n.type === 'brand_invite' || n.type === 'brand_request' || n.type === 'brand_accepted') {
+      return '/dashboard/znacka'
+    }
     if (n.type === 'account_suspended') return '/dashboard'
-    // Fallback: i notifikace bez order_id (starší, nebo o stavu) je klikací —
-    // vede aspoň na seznam objednávek, ať uživatel neklikne do prázdna.
-    if (n.type === 'status_change') return '/dashboard/objednavky'
+    if (n.order_id) return `/dashboard/objednavky/${n.order_id}`
     return null
   }
 

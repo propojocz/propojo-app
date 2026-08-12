@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { Star } from 'lucide-react'
 import ReviewCard from '@/components/ui/ReviewCard'
+import MarkReviewsSeen from '@/components/ui/MarkReviewsSeen'
 
 export const metadata = { title: 'Moje recenze | Propojo' }
 
@@ -42,6 +43,10 @@ export default async function DashboardRecenzePage() {
 
   return (
     <div className="space-y-6">
+      {/* Otevřením stránky se recenze označí za viděné → odznak v menu zhasne.
+          Nic nevykresluje, jen zapíše čas. */}
+      <MarkReviewsSeen />
+
       <div>
         <h1 className="text-2xl font-black text-slate-900">Moje recenze</h1>
         <p className="mt-0.5 text-sm text-slate-500">
