@@ -16,13 +16,14 @@ import { CATEGORY_META } from '@/types/database'
 import type { ServiceItem } from '@/types/database'
 import Image from 'next/image'
 import Link from 'next/link'
-import { MapPin, Star, ArrowLeft, ShieldCheck, ListChecks, Zap, ChevronRight, Building2, Camera } from 'lucide-react'
+import { MapPin, Star, ArrowLeft, ShieldCheck, ListChecks, Zap, ChevronRight, Building2, Camera, Pencil } from 'lucide-react'
 import Avatar from '@/components/ui/Avatar'
 import PriceListPublic from '@/components/ui/PriceListPublic'
 import ServiceMap from '@/components/ui/ServiceMap'
 import ServiceGallery from '@/components/ui/ServiceGallery'
 import ReviewCard from '@/components/ui/ReviewCard'
 import ServiceFaq from '@/components/ui/ServiceFaq'
+import ServiceFaqEditor from '@/components/ui/ServiceFaqEditor'
 import { getServiceBrand } from '@/lib/actions/brands'
 import type { Metadata } from 'next'
 
@@ -87,6 +88,9 @@ export default async function ServiceDetailPage({ params }: Props) {
   const s = service
   const meta = (CATEGORY_META as Record<string, { label: string; emoji: string }>)[s.category] ?? DEFAULT_META
   const { data: { user } } = await supabase.auth.getUser()
+  // Vlastník vidí na své kartě rovnou nástroje k úpravě — nemusí kvůli
+  // jedné větě procházet celý formulář nabídky.
+  const jeMoje = !!user && user.id === service.provider_id
 
   // Ceník úkonů této karty
   const { data: itemsRaw } = await supabase
@@ -225,11 +229,23 @@ export default async function ServiceDetailPage({ params }: Props) {
               </div>
             )}
 
-            <ServiceFaq faqs={faqs} />
+            {jeMoje
+              ? <ServiceFaqEditor serviceId={s.id} faqs={faqs} />
+              : <ServiceFaq faqs={faqs} />}
 
             {/* Název + podtitul */}
             <div>
-              <h1 className="text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">{s.title}</h1>
+              <div className="flex items-start justify-between gap-3">
+                <h1 className="text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">{s.title}</h1>
+                {jeMoje && (
+                  <Link
+                    href={`/dashboard/nabidky/${s.id}/upravit`}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:border-emerald-300 hover:text-emerald-700"
+                  >
+                    <Pencil className="h-3.5 w-3.5" /> Upravit
+                  </Link>
+                )}
+              </div>
               {s.subtitle && <p className="mt-1 text-lg text-slate-500">{s.subtitle}</p>}
 
               <div className="mt-3 flex flex-wrap items-center gap-4">
