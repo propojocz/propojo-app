@@ -11,6 +11,8 @@ import ChatThread from '@/components/ui/ChatThread'
 import Avatar from '@/components/ui/Avatar'
 import AddressInput from '@/components/ui/AddressInput'
 import ServiceMap from '@/components/ui/ServiceMap'
+import StornoPanel from '@/components/ui/StornoPanel'
+import { terminDlouze, datumCas } from '@/lib/format'
 import OrderTimeline from '@/components/ui/OrderTimeline'
 
 type ServiceLite = {
@@ -154,6 +156,12 @@ export default function OrderDetailClient({
   // Vratka se zákazníkovi dřív ukázala jen v notifikaci, která zapadne.
   // Tady zůstane natrvalo, ať je dohledatelná i za měsíc.
   const isRefunded = order.deposit_status === 'refunded'
+  // Storno poplatek: zákazník ho musí vidět PŘED zrušením, ne až z vyúčtování.
+  const stornoRezim = (order as any).service_items?.fee_mode === 'storno'
+  const stornoCastka = Math.min(
+    Number((order as any).no_show_fee_amount ?? 0),
+    Number(order.deposit_amount ?? depositAmount ?? 0)
+  )
   // Konec služby = termín + délka úkonu. Po něm smí zakázku uzavřít i zákazník,
   // kdyby na to poskytovatel zapomněl — jinak objednávka visí donekonečna.
   const sluzbaSkoncila = (() => {
@@ -235,7 +243,10 @@ export default function OrderDetailClient({
   }
 
   const handleCustomerCancel = async () => {
-    if (!confirm('Opravdu chcete objednávku zrušit?')) return
+    const zprava = stornoRezim && stornoCastka > 0
+      ? `Opravdu zrušit? Poskytovatel si nechá storno poplatek ${stornoCastka.toLocaleString('cs-CZ')} Kč.`
+      : 'Opravdu chcete objednávku zrušit?'
+    if (!confirm(zprava)) return
     setCancelBusy(true)
     setCancelErr('')
     const res = await updateOrderStatus(order.id, 'zruseno' as any)
@@ -268,7 +279,7 @@ export default function OrderDetailClient({
             <div>
               <h1 className="text-xl font-black text-slate-900">{service?.title ?? 'Neznámá služba'}</h1>
               <p className="mt-1 text-sm text-slate-500">
-                Vytvořeno {new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(order.created_at))}
+                Vytvořeno {datumCas(order.created_at)}
               </p>
             </div>
             {(order as any).is_inquiry === true && order.status === 'cekajici' && !order.scheduled_at ? (
@@ -317,6 +328,21 @@ export default function OrderDetailClient({
             </div>
           )}
 
+          {/* STORNO ČEKÁ NA VYŘÍZENÍ — poskytovatel může odpustit */}
+          {isProvider
+            && (order as any).storno_marked_at
+            && order.deposit_status === 'paid'
+            && Number((order as any).storno_fee_amount ?? 0) > 0 && (
+            <div className="mt-4">
+              <StornoPanel
+                orderId={order.id}
+                poplatek={Number((order as any).storno_fee_amount ?? 0)}
+                zaplaceno={Number(order.deposit_amount ?? depositAmount ?? 0)}
+                markedAt={(order as any).storno_marked_at}
+              />
+            </div>
+          )}
+
           {/* VRÁCENÁ ZÁLOHA — vidí obě strany, zůstává dohledatelné */}
           {isRefunded && (
             <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
@@ -342,7 +368,7 @@ export default function OrderDetailClient({
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Termín</p>
                 <p className="font-bold text-slate-800">
-                  {new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(new Date(order.scheduled_at))}
+                  {terminDlouze(order.scheduled_at)}
                 </p>
               </div>
             </div>
@@ -395,7 +421,19 @@ export default function OrderDetailClient({
                 {cancelBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
                 Zrušit objednávku
               </button>
-              {isPaid && <p className="mt-2 text-xs text-slate-400">Zaplacená záloha vám bude vrácena.</p>}
+              {isPaid && (
+                stornoRezim && stornoCastka > 0 ? (
+                  <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
+                    <strong>Pozor na storno poplatek.</strong> Při zrušení si poskytovatel nechá{' '}
+                    <strong>{stornoCastka.toLocaleString('cs-CZ')} Kč</strong>
+                    {Number(order.deposit_amount ?? depositAmount ?? 0) - stornoCastka > 0
+                      ? <>, zbylých {(Number(order.deposit_amount ?? depositAmount ?? 0) - stornoCastka).toLocaleString('cs-CZ')} Kč vám vrátíme.</>
+                      : <> — to je celá zaplacená částka.</>}
+                  </p>
+                ) : (
+                  <p className="mt-2 text-xs text-slate-400">Zaplacená záloha vám bude vrácena.</p>
+                )
+              )}
               {cancelErr && <p className="mt-2 text-sm text-red-600">{cancelErr}</p>}
             </div>
           )}

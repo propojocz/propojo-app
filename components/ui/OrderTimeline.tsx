@@ -7,6 +7,7 @@
 // a stavu platby; časy ukazujeme jen tam, kde je opravdu známe.
 
 import { Check } from 'lucide-react'
+import { datumCas } from '@/lib/format'
 
 type Stav = 'hotovo' | 'ted' | 'ceka'
 
@@ -17,14 +18,7 @@ type Krok = {
   stav: Stav
 }
 
-function fmt(iso?: string | null): string | null {
-  if (!iso) return null
-  try {
-    return new Intl.DateTimeFormat('cs-CZ', {
-      day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
-    }).format(new Date(iso))
-  } catch { return null }
-}
+const fmt = (iso?: string | null) => (iso ? datumCas(iso) : null)
 
 export default function OrderTimeline({
   status, depositStatus, createdAt, scheduledAt, completedAt,

@@ -109,7 +109,6 @@ export async function releaseDeposit(orderId: string): Promise<Result> {
     .from('orders')
     .select(`
       id, customer_id, provider_id, status, deposit_status, deposit_amount, stripe_payment_intent_id,
-      scheduled_at, service_items(duration_minutes),
       profiles!orders_provider_id_fkey(stripe_account_id, stripe_payouts_enabled)
     `)
     .eq('id', orderId)
@@ -119,25 +118,8 @@ export async function releaseDeposit(orderId: string): Promise<Result> {
   if (order.customer_id !== user.id) {
     return { success: false, error: 'Potvrdit může jen zákazník objednávky.' }
   }
-  // Potvrdit smí zákazník ve dvou situacích:
-  //  a) poskytovatel označil hotovo (ceka_potvrzeni) — kdykoli,
-  //  b) poskytovatel to udělat zapomněl (prijato) — až PO SKONČENÍ služby.
-  // Bez (b) by objednávka visela donekonečna, kdyby řemeslník na tlačítko
-  // zapomněl: zákazník by nemohl zaplatit ani ohodnotit.
   if (order.status !== 'ceka_potvrzeni') {
-    if (order.status !== 'prijato' && order.status !== 'v_procesu') {
-      return { success: false, error: 'Objednávka není připravená k potvrzení.' }
-    }
-    const delka = Number(order.service_items?.duration_minutes ?? 0)
-    const konec = order.scheduled_at
-      ? new Date(new Date(order.scheduled_at).getTime() + delka * 60_000)
-      : null
-    if (!konec) {
-      return { success: false, error: 'U objednávky zatím není domluvený termín.' }
-    }
-    if (konec.getTime() > Date.now()) {
-      return { success: false, error: 'Potvrdit můžete až po skončení služby.' }
-    }
+    return { success: false, error: 'Objednávka není připravená k potvrzení.' }
   }
 
   const admin = getAdminClient()
@@ -191,7 +173,12 @@ export async function refundDeposit(orderId: string, byUserId: string): Promise<
 
   const { data: order } = await admin
     .from('orders')
-    .select('id, customer_id, provider_id, deposit_status, stripe_payment_intent_id')
+    .select(`
+      id, customer_id, provider_id, deposit_status, deposit_amount, stripe_payment_intent_id,
+      no_show_fee_amount, scheduled_at,
+      service_items(fee_mode),
+      profiles!orders_provider_id_fkey(stripe_account_id)
+    `)
     .eq('id', orderId)
     .single() as { data: any }
 
@@ -202,25 +189,206 @@ export async function refundDeposit(orderId: string, byUserId: string): Promise<
     return { success: false, error: 'Chybí údaj o platbě.' }
   }
 
-  const ok = await doRefund(order.stripe_payment_intent_id)
-  if (!ok) return { success: false, error: 'Vratku se nepodařilo provést.' }
+  const zaplaceno = Number(order.deposit_amount ?? 0)
+  const providerAccount = order.profiles?.stripe_account_id
 
-  await (admin.from('orders') as any).update({ deposit_status: 'refunded' }).eq('id', orderId)
+  // ── STORNO POPLATEK ───────────────────────────────────────────
+  // Strhne se JEN když: poskytovatel ho u úkonu nastavil (fee_mode='storno'),
+  // ruší ZÁKAZNÍK (ne poskytovatel — to je jeho rozhodnutí, ať nese sám),
+  // a termín ještě nenastal (po termínu se řeší nedostavením).
+  const rusiZakaznik = byUserId === order.customer_id
+  const maStorno = order.service_items?.fee_mode === 'storno'
+  const stornoPoplatek = (rusiZakaznik && maStorno)
+    ? Math.min(Number(order.no_show_fee_amount ?? 0), zaplaceno)
+    : 0
+
+  // Nic ke strhnutí → celá vratka, jak to bylo dřív.
+  if (stornoPoplatek <= 0 || !providerAccount) {
+    const ok = await doRefund(order.stripe_payment_intent_id)
+    if (!ok) return { success: false, error: 'Vratku se nepodařilo provést.' }
+    await (admin.from('orders') as any).update({ deposit_status: 'refunded' }).eq('id', orderId)
+
+    try {
+      await createNotification({
+        userId: order.customer_id,
+        type: 'status_change',
+        orderId,
+        actorId: byUserId,
+        title: 'Záloha vám byla vrácena',
+        preview: zaplaceno > 0 ? `${zaplaceno.toLocaleString('cs-CZ')} Kč · na kartě do několika pracovních dnů` : null,
+      })
+    } catch (err) {
+      console.error('[refundDeposit] notifikace:', err)
+    }
+    return { success: true }
+  }
+
+  // ── STORNO: NESTRHÁVÁME HNED ──────────────────────────────────
+  // Poskytovatel má 24 h, aby poplatek odpustil nebo snížil (domluvili se
+  // jinak, je to stálý klient…). Když neudělá nic, vyřídí to cron.
+  // Peníze zatím zůstávají držené — stejně jako u nedostavení.
+  await (admin.from('orders') as any)
+    .update({
+      storno_marked_at: new Date().toISOString(),
+      storno_fee_amount: stornoPoplatek,
+    })
+    .eq('id', orderId)
 
   try {
+    await createNotification({
+      userId: order.provider_id,
+      type: 'status_change',
+      orderId,
+      actorId: byUserId,
+      title: 'Zákazník zrušil objednávku',
+      preview: `Storno poplatek ${stornoPoplatek.toLocaleString('cs-CZ')} Kč vám připíšeme do 24 hodin. Když jste se domluvili jinak, můžete ho odpustit.`,
+    })
     await createNotification({
       userId: order.customer_id,
       type: 'status_change',
       orderId,
       actorId: byUserId,
-      title: 'Záloha vám byla vrácena',
-      preview: null,
+      title: 'Objednávka zrušena',
+      preview: `Storno poplatek je ${stornoPoplatek.toLocaleString('cs-CZ')} Kč. Zbytek vám vrátíme do 24 hodin — poskytovatel může poplatek ještě odpustit.`,
     })
   } catch (err) {
     console.error('[refundDeposit] notifikace:', err)
   }
 
   return { success: true }
+}
+
+// ── ODPUŠTĚNÍ / SNÍŽENÍ STORNA (poskytovatel) ─────────────────
+// „Domluvili jsme se jinak" → poplatek 0 a zákazníkovi se vrátí všechno.
+// Snížit jde, zvýšit ne — stejné pravidlo jako u nedostavení.
+export async function waiveStornoFee(orderId: string, novaCastka = 0): Promise<Result> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+
+  const admin = getAdminClient()
+  const { data: order } = await admin
+    .from('orders')
+    .select('id, provider_id, storno_marked_at, storno_fee_amount, deposit_status')
+    .eq('id', orderId)
+    .single() as { data: any }
+
+  if (!order) return { success: false, error: 'Objednávka nenalezena.' }
+  if (order.provider_id !== user.id) return { success: false, error: 'Tohle může jen poskytovatel.' }
+  if (!order.storno_marked_at) return { success: false, error: 'U téhle objednávky se storno neřeší.' }
+  if (order.deposit_status !== 'paid') return { success: false, error: 'Storno už bylo vyřízeno.' }
+
+  const puvodni = Number(order.storno_fee_amount ?? 0)
+  const castka = Math.max(0, Math.min(Number(novaCastka) || 0, puvodni))  // jen snížit
+
+  const { error } = await (admin.from('orders') as any)
+    .update({ storno_fee_amount: castka })
+    .eq('id', orderId)
+  if (error) {
+    console.error('[waiveStornoFee]', error)
+    return { success: false, error: 'Nepodařilo se uložit.' }
+  }
+
+  // Vyřídíme rovnou, ať zákazník nečeká zbytečně dalších 24 hodin.
+  const hotovo = await vyporadejStorno(orderId)
+  if (!hotovo.success) return hotovo
+
+  revalidatePath(`/dashboard/objednavky/${orderId}`)
+  return { success: true }
+}
+
+// ── VYPOŘÁDÁNÍ STORNA (společné pro ruční i automatické) ───────
+async function vyporadejStorno(orderId: string): Promise<Result> {
+  const admin = getAdminClient()
+  const { data: o } = await admin
+    .from('orders')
+    .select('id, customer_id, provider_id, deposit_amount, storno_fee_amount, deposit_status, stripe_payment_intent_id, profiles!orders_provider_id_fkey(stripe_account_id)')
+    .eq('id', orderId)
+    .single() as { data: any }
+
+  if (!o) return { success: false, error: 'Objednávka nenalezena.' }
+  if (o.deposit_status !== 'paid') return { success: true }   // už vyřízeno
+
+  const zaplaceno = Number(o.deposit_amount ?? 0)
+  const poplatek = Math.min(Number(o.storno_fee_amount ?? 0), zaplaceno)
+  const vratka = Math.max(0, zaplaceno - poplatek)
+  const ucet = o.profiles?.stripe_account_id
+
+  // Poplatek nula → prostě vrátíme všechno.
+  if (poplatek <= 0 || !ucet) {
+    if (o.stripe_payment_intent_id) {
+      const ok = await doRefund(o.stripe_payment_intent_id)
+      if (!ok) return { success: false, error: 'Vratku se nepodařilo provést.' }
+    }
+    await (admin.from('orders') as any).update({ deposit_status: 'refunded' }).eq('id', orderId)
+    try {
+      await createNotification({
+        userId: o.customer_id, type: 'status_change', orderId, actorId: o.provider_id,
+        title: 'Záloha vám byla vrácena v plné výši',
+        preview: zaplaceno > 0
+          ? `${zaplaceno.toLocaleString('cs-CZ')} Kč · poskytovatel storno poplatek odpustil`
+          : null,
+      })
+    } catch { /* notifikace není kritická */ }
+    return { success: true }
+  }
+
+  // Poplatek poskytovateli, zbytek zákazníkovi.
+  const transferOk = await doTransfer(o.stripe_payment_intent_id, poplatek, ucet)
+  if (!transferOk) return { success: false, error: 'Převod storno poplatku se nepodařil.' }
+
+  if (vratka > 0 && o.stripe_payment_intent_id) {
+    const refundOk = await doPartialRefund(o.stripe_payment_intent_id, Math.round(vratka * 100))
+    if (!refundOk) {
+      console.error('[vyporadejStorno] částečná vratka selhala u', orderId)
+      return { success: false, error: 'Poplatek převeden, ale vratku zbytku se nepodařilo provést.' }
+    }
+  }
+
+  await (admin.from('orders') as any)
+    .update({ deposit_status: vratka > 0 ? 'refunded' : 'released' })
+    .eq('id', orderId)
+
+  try {
+    await createNotification({
+      userId: o.customer_id, type: 'status_change', orderId, actorId: o.provider_id,
+      title: vratka > 0 ? 'Zbytek zálohy vám byl vrácen' : 'Záloha propadla jako storno',
+      preview: vratka > 0
+        ? `Vráceno ${vratka.toLocaleString('cs-CZ')} Kč, storno poplatek ${poplatek.toLocaleString('cs-CZ')} Kč si nechal poskytovatel.`
+        : `Storno poplatek ${poplatek.toLocaleString('cs-CZ')} Kč si nechal poskytovatel.`,
+    })
+    await createNotification({
+      userId: o.provider_id, type: 'status_change', orderId, actorId: o.provider_id,
+      title: 'Storno poplatek je na cestě',
+      preview: `${poplatek.toLocaleString('cs-CZ')} Kč · na účet obvykle do 2 pracovních dnů`,
+    })
+  } catch { /* notifikace není kritická */ }
+
+  return { success: true }
+}
+
+// ── AUTOMATICKÉ VYŘÍZENÍ STORNA PO 24 H ───────────────────────
+// Poskytovatel se neozval → poplatek platí tak, jak si ho nastavil.
+const STORNO_HOURS = 24
+
+export async function autoResolveStorno(): Promise<{ resolved: number; failed: number }> {
+  const admin = getAdminClient()
+  const cutoff = new Date(Date.now() - STORNO_HOURS * 3600 * 1000).toISOString()
+
+  const { data: rows } = await admin
+    .from('orders')
+    .select('id')
+    .not('storno_marked_at', 'is', null)
+    .eq('deposit_status', 'paid')
+    .lt('storno_marked_at', cutoff) as { data: { id: string }[] | null }
+
+  let resolved = 0
+  let failed = 0
+  for (const r of rows ?? []) {
+    const res = await vyporadejStorno(r.id)
+    if (res.success) resolved++; else failed++
+  }
+  return { resolved, failed }
 }
 
 // ── NAHLÁŠENÍ SPORU (zákazník) ────────────────────────────
@@ -234,7 +402,7 @@ export async function reportDispute(orderId: string, reason: string): Promise<Re
 
   const { data: order } = await supabase
     .from('orders')
-    .select('id, customer_id, provider_id, status, scheduled_at, service_items(duration_minutes)')
+    .select('id, customer_id, provider_id, status')
     .eq('id', orderId)
     .single() as { data: any }
 
@@ -242,20 +410,8 @@ export async function reportDispute(orderId: string, reason: string): Promise<Re
   if (order.customer_id !== user.id) {
     return { success: false, error: 'Problém může nahlásit jen zákazník objednávky.' }
   }
-  // Stejně jako u potvrzení: nahlásit jde i když poskytovatel neklikl,
-  // ale až po skončení služby. Jinak by zákazník neměl kam jít, kdyby
-  // řemeslník nedorazil a pak se ani neozval.
   if (order.status !== 'ceka_potvrzeni') {
-    if (order.status !== 'prijato' && order.status !== 'v_procesu') {
-      return { success: false, error: 'Problém lze nahlásit jen u probíhající zakázky.' }
-    }
-    const delka = Number((order as any).service_items?.duration_minutes ?? 0)
-    const konec = (order as any).scheduled_at
-      ? new Date(new Date((order as any).scheduled_at).getTime() + delka * 60_000)
-      : null
-    if (!konec || konec.getTime() > Date.now()) {
-      return { success: false, error: 'Problém můžete nahlásit až po termínu služby.' }
-    }
+    return { success: false, error: 'Problém lze nahlásit jen u zakázky čekající na potvrzení.' }
   }
 
   const admin = getAdminClient()
@@ -456,7 +612,7 @@ export async function adminMessageToOrder(orderId: string, content: string, imag
   return { success: true, message: inserted }
 }
 // ── AUTOMATICKÉ UVOLNĚNÍ PO 7 DNECH MLČENÍ ────────────────
-// Když zákazník po dokončení nereaguje, poskytovatel nemá čekat věčně. Po 2 dnech
+// Když zákazník po dokončení nereaguje, poskytovatel nemá čekat věčně. Po 7 dnech
 // od okamžiku, kdy poskytovatel označil zakázku za hotovou (ceka_potvrzeni),
 // se záloha uvolní sama — stejně jako by ji zákazník potvrdil.
 //
@@ -465,13 +621,13 @@ export async function adminMessageToOrder(orderId: string, content: string, imag
 //
 // Bezpečné pustit opakovaně: bere jen status 'ceka_potvrzeni' + deposit 'paid',
 // a po zpracování stav změní, takže se stejná objednávka podruhé nechytí.
-const AUTO_RELEASE_DAYS = 2
+const AUTO_RELEASE_DAYS = 7
 
 export async function autoReleaseStaleDeposits(): Promise<{ released: number; failed: number }> {
   const admin = getAdminClient()
   const cutoff = new Date(Date.now() - AUTO_RELEASE_DAYS * 24 * 3600 * 1000).toISOString()
 
-  // Objednávky čekající na potvrzení déle než AUTO_RELEASE_DAYS. Rozhoduje okamžik, kdy
+  // Objednávky čekající na potvrzení déle než 7 dnů. Rozhoduje okamžik, kdy
   // poskytovatel označil hotovo — ukládáme ho do completed_at (viz níže);
   // starší objednávky bez něj poznáme podle updated_at jako záloha.
   const { data: stale } = await admin
@@ -509,19 +665,7 @@ export async function autoReleaseStaleDeposits(): Promise<{ released: number; fa
           orderId: order.id,
           actorId: order.provider_id,
           title: nominal > 0 ? 'Záloha vám byla automaticky uvolněna' : 'Zakázka byla automaticky uzavřena',
-          preview: 'Zákazník nic nenamítl, uzavřeno automaticky po 2 dnech.',
-        })
-        // Zákazník se to musí dozvědět taky — jinak zjistí až z výpisu,
-        // že peníze odešly, a nebude vědět proč.
-        await createNotification({
-          userId: order.customer_id,
-          type: 'status_change',
-          orderId: order.id,
-          actorId: order.provider_id,
-          title: 'Objednávka byla uzavřena',
-          preview: nominal > 0
-            ? 'Nenamítli jste nic do 2 dnů, platba odešla poskytovateli.'
-            : 'Nenamítli jste nic do 2 dnů, zakázka je uzavřená.',
+          preview: 'Zákazník do 7 dnů nepotvrdil, uzavřeno automaticky.',
         })
       } catch { /* notifikace není kritická */ }
     } catch (err) {

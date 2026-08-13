@@ -1,14 +1,15 @@
 // app/api/cron/release-deposits/route.ts
-// Denní úklid peněz — dvě věci naráz, ať stačí jeden cron:
-//   1) uvolní zálohy u zakázek, které zákazník do 7 dnů nepotvrdil,
+// Denní úklid peněz — tři věci naráz, ať stačí jeden cron:
+//   1) uvolní zálohy u zakázek, které zákazník do 2 dnů nepotvrdil,
 //   2) vyřídí nedostavení, kde zákazník do 24 h nepodal námitku
-//      (storno poskytovateli, zbytek zpět zákazníkovi).
+//      (storno poskytovateli, zbytek zpět zákazníkovi),
+//   3) vyřídí storna, kde poskytovatel do 24 h poplatek neodpustil.
 //
 // Spouští Vercel Cron (vercel.json). Chráněno tajemstvím CRON_SECRET —
 // bez něj by endpoint mohl spustit kdokoli.
 
 import { NextResponse } from 'next/server'
-import { autoReleaseStaleDeposits, autoResolveNoShows } from '@/lib/actions/payout'
+import { autoReleaseStaleDeposits, autoResolveNoShows, autoResolveStorno } from '@/lib/actions/payout'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -23,16 +24,18 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Běží nezávisle na sobě — chyba v jednom nesmí shodit druhé.
-    const [deposits, noShows] = await Promise.allSettled([
+    // Běží nezávisle na sobě — chyba v jednom nesmí shodit ostatní.
+    const [deposits, noShows, storna] = await Promise.allSettled([
       autoReleaseStaleDeposits(),
       autoResolveNoShows(),
+      autoResolveStorno(),
     ])
 
     return NextResponse.json({
       ok: true,
       zalohy: deposits.status === 'fulfilled' ? deposits.value : { chyba: true },
       nedostaveni: noShows.status === 'fulfilled' ? noShows.value : { chyba: true },
+      storna: storna.status === 'fulfilled' ? storna.value : { chyba: true },
     })
   } catch (err) {
     console.error('[cron/release-deposits]', err)

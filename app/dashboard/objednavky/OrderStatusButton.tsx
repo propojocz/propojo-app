@@ -7,7 +7,7 @@
 // rovnou uzavírá zakázku tlačítkem „Potvrdit pro uvolnění výplaty" → ceka_potvrzeni,
 // čímž se u zákazníka objeví potvrzení + hodnocení a spustí se výplata.
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Loader2, CheckCircle2, XCircle, Wallet } from 'lucide-react'
 import { updateOrderStatus } from '@/lib/actions/orders'
 
@@ -37,6 +37,11 @@ export default function OrderStatusButton({
 }) {
   const [loading, setLoading] = useState<string | null>(null)
   const [err, setErr] = useState('')
+
+  // Hláška platí jen k tomu pokusu, u kterého vznikla. Když se mezitím
+  // objednávka posune (doplní se termín, přijde platba), musí zmizet —
+  // jinak visí na stránce rada, která už neplatí.
+  useEffect(() => { setErr('') }, [currentStatus, depositStatus, scheduledAt])
 
   const handleAction = async (status: string) => {
     setErr('')
