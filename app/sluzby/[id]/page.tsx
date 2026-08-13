@@ -16,11 +16,13 @@ import { CATEGORY_META } from '@/types/database'
 import type { ServiceItem } from '@/types/database'
 import Image from 'next/image'
 import Link from 'next/link'
-import { MapPin, Star, ArrowLeft, ShieldCheck, ListChecks, Zap, ChevronRight, Building2 } from 'lucide-react'
+import { MapPin, Star, ArrowLeft, ShieldCheck, ListChecks, Zap, ChevronRight, Building2, Camera } from 'lucide-react'
 import Avatar from '@/components/ui/Avatar'
 import PriceListPublic from '@/components/ui/PriceListPublic'
 import ServiceMap from '@/components/ui/ServiceMap'
 import ServiceGallery from '@/components/ui/ServiceGallery'
+import ReviewCard from '@/components/ui/ReviewCard'
+import ServiceFaq from '@/components/ui/ServiceFaq'
 import { getServiceBrand } from '@/lib/actions/brands'
 import type { Metadata } from 'next'
 
@@ -129,6 +131,25 @@ export default async function ServiceDetailPage({ params }: Props) {
     .from('categories').select('name').eq('slug', s.category).single() as { data: { name: string } | null }
   const categoryName = catRow?.name ?? meta.label
 
+  // Recenze poskytovatele. Zákazník se rozhoduje TADY, ne na profilu —
+  // proto ukazujeme pár nejnovějších rovnou u nabídky.
+  const { data: reviewRows } = await supabase
+    .from('reviews')
+    .select('id, rating, comment, created_at, provider_response, response_created_at, reported_at, profiles!reviews_reviewer_id_fkey(full_name, avatar_url)')
+    .eq('provider_id', s.provider_id)
+    .is('reported_at', null)
+    .order('created_at', { ascending: false })
+    .limit(3) as { data: any[] | null }
+  const reviews = reviewRows ?? []
+
+  // Časté dotazy u téhle karty — ubírají zákazníkovi důvod psát zprávu.
+  const { data: faqRows } = await supabase
+    .from('service_faqs')
+    .select('id, question, answer')
+    .eq('service_id', s.id)
+    .order('sort_order', { ascending: true }) as { data: any[] | null }
+  const faqs = faqRows ?? []
+
   // Značka (salon/firma), pod kterou karta patří. Bez značky je null.
   const brand = await getServiceBrand(s.id)
 
@@ -188,7 +209,13 @@ export default async function ServiceDetailPage({ params }: Props) {
 
             {/* Galerie (prolistovatelná) nebo fallback dlaždice */}
             {galleryPhotos.length > 0 ? (
-              <ServiceGallery photos={galleryPhotos} title={s.title} />
+              <div>
+                <ServiceGallery photos={galleryPhotos} title={s.title} />
+                <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-slate-400">
+                  <Camera className="h-3.5 w-3.5" />
+                  Fotky prací{galleryPhotos.length > 1 ? ` · ${galleryPhotos.length}` : ''}
+                </p>
+              </div>
             ) : (
               <div className="relative flex h-64 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-50 to-blue-50 sm:h-80">
                 <span className="text-8xl">{meta.emoji}</span>
@@ -197,6 +224,8 @@ export default async function ServiceDetailPage({ params }: Props) {
                 </div>
               </div>
             )}
+
+            <ServiceFaq faqs={faqs} />
 
             {/* Název + podtitul */}
             <div>
@@ -289,6 +318,50 @@ export default async function ServiceDetailPage({ params }: Props) {
                 Nevyhovuje žádný z volných termínů? Vyberte úkon a pošlete poptávku — poskytovatel vám navrhne čas.
               </p>
             </div>
+
+            {/* ── RECENZE ZÁKAZNÍKŮ ──
+                Rozhodovací informace patří k nabídce, ne až na profil. */}
+            {reviews.length > 0 && (
+              <div>
+                <div className="mb-3 flex items-end justify-between gap-3">
+                  <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900">
+                    <Star className="h-5 w-5 fill-amber-400 text-amber-400" /> Recenze zákazníků
+                  </h2>
+                  {providerReviews > 3 && (
+                    <Link href={`/profil/${s.provider_id}`} className="shrink-0 text-sm font-semibold text-emerald-600 hover:underline">
+                      Všech {providerReviews} →
+                    </Link>
+                  )}
+                </div>
+
+                {providerRating > 0 && (
+                  <p className="mb-3 text-sm text-slate-500">
+                    Průměr <strong className="text-slate-800">{providerRating.toFixed(1)} ★</strong>
+                    {' '}z {providerReviews} {providerReviews === 1 ? 'hodnocení' : 'hodnocení'}
+                  </p>
+                )}
+
+                <div className="space-y-3">
+                  {reviews.map((r: any) => (
+                    <ReviewCard
+                      key={r.id}
+                      isOwner={false}
+                      review={{
+                        id: r.id,
+                        rating: r.rating,
+                        comment: r.comment,
+                        created_at: r.created_at,
+                        provider_response: r.provider_response,
+                        response_created_at: r.response_created_at,
+                        reported_at: r.reported_at,
+                        reviewerName: r.profiles?.full_name ?? null,
+                        reviewerAvatar: r.profiles?.avatar_url ?? null,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ── PRAVÝ SLOUPEC: poskytovatel + adresa/mapa ── */}
