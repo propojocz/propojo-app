@@ -2,9 +2,13 @@
 // Banner pro poskytovatele bez napojeného Stripe účtu – zobrazí se v dashboardu.
 // Bez napojeného účtu od něj zákazníci nemohou platit zálohy.
 // Server komponenta: sama si načte profil přihlášeného uživatele.
+//
+// Na stránce Výplaty se NEZOBRAZUJE — tam je ta samá výzva hlavním obsahem
+// a banner by ji jen zdvojoval (dvakrát „napojte bankovní účet" nad sebou).
 import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { Landmark, ArrowRight } from 'lucide-react'
+import HideOnPath from '@/components/ui/HideOnPath'
 
 export default async function ConnectBanner() {
   const supabase = createClient()
@@ -22,25 +26,27 @@ export default async function ConnectBanner() {
   if (profile?.stripe_payouts_enabled === true) return null
 
   return (
-    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex gap-3">
-          <Landmark className="h-5 w-5 shrink-0 text-amber-600" />
-          <div>
-            <p className="font-bold text-amber-900">Napojte si bankovní účet</p>
-            <p className="mt-1 text-sm text-amber-800">
-              Dokud nemáte napojený účet, zákazníci u vás nemohou zaplatit zálohu a nemůžete přijímat platby.
-              Napojení zabere pár minut.
-            </p>
+    <HideOnPath paths={['/dashboard/vyplaty']}>
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex gap-3">
+            <Landmark className="h-5 w-5 shrink-0 text-amber-600" />
+            <div>
+              <p className="font-bold text-amber-900">Napojte si bankovní účet</p>
+              <p className="mt-1 text-sm text-amber-800">
+                Dokud nemáte napojený účet, zákazníci u vás nemohou zaplatit zálohu a nemůžete přijímat platby.
+                Napojení zabere pár minut.
+              </p>
+            </div>
           </div>
+          <Link
+            href="/dashboard/vyplaty"
+            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-amber-700"
+          >
+            Napojit účet <ArrowRight className="h-4 w-4" />
+          </Link>
         </div>
-        <Link
-          href="/dashboard/vyplaty"
-          className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-amber-700"
-        >
-          Napojit účet <ArrowRight className="h-4 w-4" />
-        </Link>
       </div>
-    </div>
+    </HideOnPath>
   )
 }

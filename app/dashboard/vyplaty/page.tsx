@@ -2,7 +2,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { CheckCircle2, AlertTriangle, Landmark, ShieldCheck, ArrowLeft, Clock, Eye, ArrowRight } from 'lucide-react'
+import { CheckCircle2, AlertTriangle, Landmark, ShieldCheck, ArrowLeft, Clock, Eye, ArrowRight, Package } from 'lucide-react'
 import ConnectButton from '@/components/ui/ConnectButton'
 import { refreshConnectStatus } from '@/lib/actions/connect'
 
@@ -53,6 +53,14 @@ export default async function VyplatyPage({ searchParams }: Props) {
     .limit(1)
     .maybeSingle() as { data: { status: string } | null }
   const hasActiveSub = !!sub
+
+  // Má vůbec nějakou nabídku? Bez ní není co zviditelnit — hláška
+  // „nabídky jsou viditelné" by lhala tomu, kdo ještě žádnou nepřidal.
+  const { count: pocetNabidek } = await supabase
+    .from('services')
+    .select('id', { count: 'exact', head: true })
+    .eq('provider_id', user.id)
+  const maNabidku = (pocetNabidek ?? 0) > 0
 
   return (
     <div className="space-y-5">
@@ -146,8 +154,32 @@ export default async function VyplatyPage({ searchParams }: Props) {
         </div>
       )}
 
-      {/* Vše hotovo */}
-      {fullyReady && hasActiveSub && (
+      {/* Účet i předplatné hotové, ale není co ukazovat — bez nabídky
+          by hláška „nabídky jsou viditelné" lhala. */}
+      {fullyReady && hasActiveSub && !maNabidku && (
+        <div className="flex flex-col gap-3 rounded-2xl border-2 border-emerald-300 bg-emerald-50/50 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100">
+              <Package className="h-5 w-5 text-emerald-600" />
+            </div>
+            <div>
+              <p className="font-bold text-slate-900">Účet i předplatné máte hotové</p>
+              <p className="text-sm leading-relaxed text-slate-600">
+                Zbývá přidat první nabídku — teprve pak vás zákazníci najdou.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/pridat-sluzbu"
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-2.5 font-bold text-white transition hover:bg-emerald-600"
+          >
+            Přidat nabídku <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      )}
+
+      {/* Vše hotovo — účet, předplatné i aspoň jedna nabídka */}
+      {fullyReady && hasActiveSub && maNabidku && (
         <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           Máte hotovo — nabídky jsou viditelné a můžete přijímat platby.
