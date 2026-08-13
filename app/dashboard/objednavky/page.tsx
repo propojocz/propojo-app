@@ -49,9 +49,15 @@ function OrderCard({ o, role, otherName, todo }: { o: any; role: 'provider' | 'c
         )}
         <div className="flex items-center gap-2 mb-1 flex-wrap">
           <h3 className="font-bold text-slate-900">{o.services?.title ?? 'Neznámá služba'}</h3>
-          <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[o.status] ?? 'bg-slate-100 text-slate-500'}`}>
-            {STATUS_LABELS[o.status] ?? o.status}
-          </span>
+          {o.is_inquiry === true && o.status === 'cekajici' && !o.scheduled_at ? (
+            <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
+              Dotaz
+            </span>
+          ) : (
+            <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[o.status] ?? 'bg-slate-100 text-slate-500'}`}>
+              {STATUS_LABELS[o.status] ?? o.status}
+            </span>
+          )}
           {(Number(o.deposit_amount ?? 0) > 0 || Number(o.services?.quote_fee ?? 0) > 0) && o.status !== 'zruseno' && o.status !== 'cekajici' && (
             (o.deposit_status === 'paid' || o.deposit_status === 'released')
               ? <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">{o.services?.payment_model === 'B' ? 'Výjezd zaplacen' : 'Záloha zaplacena'}</span>

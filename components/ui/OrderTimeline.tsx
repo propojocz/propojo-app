@@ -28,7 +28,7 @@ function fmt(iso?: string | null): string | null {
 
 export default function OrderTimeline({
   status, depositStatus, createdAt, scheduledAt, completedAt,
-  hasDeposit, isCustomer,
+  hasDeposit, isCustomer, isInquiry = false,
 }: {
   status: string
   depositStatus: string | null
@@ -38,7 +38,30 @@ export default function OrderTimeline({
   /** Je u téhle objednávky vůbec co platit? Bez toho krok s platbou vynecháme. */
   hasDeposit: boolean
   isCustomer: boolean
+  /** Zpráva z karty — zákazník si zatím nic neobjednal, jen se ptá. */
+  isInquiry?: boolean
 }) {
+  // DOTAZ: zákazník napsal z karty, nic si neobjednal. Ukazovat kroky
+  // objednávky by lhalo — místo toho řekneme, co se děje a co bude dál.
+  if (isInquiry && !scheduledAt && status === 'cekajici') {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="mb-1 text-sm font-bold text-slate-900">Zatím jen dotaz</h3>
+        <p className="text-xs leading-relaxed text-slate-500">
+          {isCustomer
+            ? 'Nic jste si zatím neobjednal — tohle je konverzace o nabídce. Objednávka vznikne, až se domluvíte na termínu a zaplatíte zálohu.'
+            : 'Zákazník se zatím jen ptá. Když se domluvíte, navrhněte mu termín — teprve tím vznikne objednávka.'}
+        </p>
+        <div className="mt-3 flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5">
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full border-2 border-emerald-500 bg-white">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+          </span>
+          <p className="text-xs font-bold text-slate-800">Domlouváte se ve zprávách</p>
+        </div>
+      </div>
+    )
+  }
+
   const zaplaceno = depositStatus === 'paid' || depositStatus === 'released'
   const vraceno = depositStatus === 'refunded'
   const zruseno = status === 'zruseno'

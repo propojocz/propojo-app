@@ -3,11 +3,17 @@
 // Nad chatem u poptávky bez termínu: zákazník zadá přibližné okno (od–do)
 // a denní dobu. Poskytovatel to vidí v TimeProposalPanel a navrhne podle
 // toho konkrétní časy.
+//
+// Preference se navíc PROPÍŠE DO CHATU jako zpráva od zákazníka. Bez toho
+// se uložila jen tiše do objednávky: poskytovateli nic necinklo a zákazník
+// neměl potvrzení, že to někdo vidí. V konverzaci zůstane dohledatelná,
+// i když se pak domluví jinak.
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { CalendarRange, Loader2, Check } from 'lucide-react'
 import { setTimePreference, type TimePref } from '@/lib/actions/time-preference'
+import { sendOrderMessage } from '@/lib/actions/orders'
 
 interface Props {
   orderId: string
@@ -27,6 +33,13 @@ function todayStr(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
+// „14. 8." — do zprávy stačí den a měsíc, rok se plete.
+function denMesic(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'numeric' }).format(new Date(iso))
+  } catch { return iso }
+}
+
 export default function TimePreferenceForm({ orderId, initialFrom, initialTo, initialTimePref }: Props) {
   const router = useRouter()
   const [from, setFrom] = useState(initialFrom ?? '')
@@ -39,8 +52,22 @@ export default function TimePreferenceForm({ orderId, initialFrom, initialTo, in
   const submit = async () => {
     setBusy(true); setError('')
     const res = await setTimePreference(orderId, from, to, timePref)
+    if (!res.success) { setBusy(false); setError(res.error); return }
+
+    // Do chatu — poskytovateli tím cinkne oznámení a informace neuteče.
+    // Selhání zprávy nesmí shodit uložení preference, proto jen zalogujeme.
+    try {
+      const doba = TIME_OPTIONS.find(o => o.value === timePref)?.label ?? ''
+      const rozsah = from === to ? denMesic(from) : `${denMesic(from)} – ${denMesic(to)}`
+      const text = timePref === 'kdykoli'
+        ? `Hodilo by se mi ${rozsah}, čas kdykoli.`
+        : `Hodilo by se mi ${rozsah}, nejlépe ${doba.toLowerCase()}.`
+      await sendOrderMessage(orderId, text)
+    } catch (e) {
+      console.error('[TimePreferenceForm] zpráva do chatu:', e)
+    }
+
     setBusy(false)
-    if (!res.success) { setError(res.error); return }
     setSaved(true)
     router.refresh()
   }
@@ -53,6 +80,7 @@ export default function TimePreferenceForm({ orderId, initialFrom, initialTo, in
       </div>
       <p className="mb-3 text-sm text-slate-500">
         Zadejte přibližné okno — poskytovatel podle něj navrhne konkrétní časy.
+        Odešleme mu to i jako zprávu, ať mu to nezapadne.
       </p>
 
       <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-end">
@@ -93,10 +121,15 @@ export default function TimePreferenceForm({ orderId, initialFrom, initialTo, in
           className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50 sm:col-auto"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <Check className="h-4 w-4" /> : null}
-          {saved ? 'Uloženo' : 'Uložit'}
+          {saved ? 'Uloženo' : 'Uložit a odeslat'}
         </button>
       </div>
 
+      {saved && !busy && (
+        <p className="mt-2 text-xs text-emerald-700">
+          Odesláno — poskytovatel to má ve zprávách a ozve se s návrhem termínů.
+        </p>
+      )}
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
     </div>
   )

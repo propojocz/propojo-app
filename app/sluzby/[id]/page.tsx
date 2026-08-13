@@ -24,6 +24,7 @@ import ServiceGallery from '@/components/ui/ServiceGallery'
 import ReviewCard from '@/components/ui/ReviewCard'
 import ServiceFaq from '@/components/ui/ServiceFaq'
 import ServiceFaqEditor from '@/components/ui/ServiceFaqEditor'
+import AskProviderButton from '@/components/ui/AskProviderButton'
 import { getServiceBrand } from '@/lib/actions/brands'
 import type { Metadata } from 'next'
 
@@ -439,6 +440,15 @@ export default async function ServiceDetailPage({ params }: Props) {
               >
                 Zobrazit celý profil →
               </Link>
+
+              {!jeMoje && (
+                <div className="mt-3">
+                  <AskProviderButton serviceId={s.id} isLoggedIn={!!user} variant="siroke" />
+                  <p className="mt-1.5 text-center text-[11px] leading-relaxed text-slate-400">
+                    Na zprávy odpovídá poskytovatel v Propoju — konverzaci najdete v Objednávkách.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Adresa + mapa */}

@@ -271,9 +271,15 @@ export default function OrderDetailClient({
                 Vytvořeno {new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(order.created_at))}
               </p>
             </div>
-            <span className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold ${STATUS_COLORS[order.status] ?? 'bg-slate-100 text-slate-500'}`}>
-              {STATUS_LABELS[order.status] ?? order.status}
-            </span>
+            {(order as any).is_inquiry === true && order.status === 'cekajici' && !order.scheduled_at ? (
+              <span className="shrink-0 rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                Dotaz
+              </span>
+            ) : (
+              <span className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold ${STATUS_COLORS[order.status] ?? 'bg-slate-100 text-slate-500'}`}>
+                {STATUS_LABELS[order.status] ?? order.status}
+              </span>
+            )}
           </div>
 
           <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-600">
@@ -615,6 +621,7 @@ export default function OrderDetailClient({
           completedAt={(order as any).completed_at ?? null}
           hasDeposit={hasDeposit}
           isCustomer={isCustomer}
+          isInquiry={(order as any).is_inquiry === true}
         />
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
