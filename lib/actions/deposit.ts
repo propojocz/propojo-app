@@ -127,4 +127,4 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
     console.error('[deposit] Stripe error:', err)
     return { success: false, error: 'Platbu se nepodařilo spustit. Zkuste to znovu.' }
   }
-} 
+}
