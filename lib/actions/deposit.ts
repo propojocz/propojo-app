@@ -17,6 +17,11 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
 // Stripe má minimální částku platby (pro CZK ~ekvivalent 0,50 €). Držíme bezpečné minimum.
 const MIN_AMOUNT_CZK = 20
 
+// Jak dlouho platí odkaz na platbu. Bez tohoto pole ho Stripe drží 24 hodin —
+// zákazník by mohl zaplatit druhý den za termín, který mezitím dostal někdo
+// jiný. 30 minut je nejkratší doba, kterou Stripe dovolí.
+const CHECKOUT_MINUTES = 30
+
 type Result = { success: true; url: string } | { success: false; error: string }
 
 export async function createDepositCheckout(orderId: string): Promise<Result> {
@@ -102,6 +107,9 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
       payment_intent_data: {
         metadata: { order_id: orderId, kind: 'deposit' },
       },
+      // Po vypršení Stripe pošle událost checkout.session.expired — podle ní
+      // se uvolní zamluvený termín.
+      expires_at: Math.floor(Date.now() / 1000) + CHECKOUT_MINUTES * 60,
       success_url: `${APP_URL}/dashboard/objednavky/${orderId}?platba=uspech`,
       cancel_url: `${APP_URL}/dashboard/objednavky/${orderId}?platba=zruseno`,
       locale: 'cs',

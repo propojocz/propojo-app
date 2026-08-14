@@ -3,8 +3,10 @@
 // Bez napojeného účtu od něj zákazníci nemohou platit zálohy.
 // Server komponenta: sama si načte profil přihlášeného uživatele.
 //
-// Na stránce Výplaty se NEZOBRAZUJE — tam je ta samá výzva hlavním obsahem
-// a banner by ji jen zdvojoval (dvakrát „napojte bankovní účet" nad sebou).
+// NEZOBRAZUJE se na stránkách, kde je ta samá výzva hlavním obsahem:
+//   /dashboard/vyplaty    — napojení účtu je tam celý obsah stránky
+//   /dashboard/predplatne — „Krok 2 · Napojte účet pro platby"
+// Jinak by nad sebou stály dvě stejné výzvy a člověk neví, která platí.
 import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { Landmark, ArrowRight } from 'lucide-react'
@@ -26,7 +28,7 @@ export default async function ConnectBanner() {
   if (profile?.stripe_payouts_enabled === true) return null
 
   return (
-    <HideOnPath paths={['/dashboard/vyplaty']}>
+    <HideOnPath paths={['/dashboard/vyplaty', '/dashboard/predplatne']}>
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex gap-3">

@@ -9,6 +9,7 @@ import type { Profile } from '@/types/database'
 import Avatar from '@/components/ui/Avatar'
 import FreeSlotReminder, { NoFreeSlotHint, type ReminderSlot } from '@/components/ui/FreeSlotReminder'
 import PushPrompt from '@/components/ui/PushPrompt'
+import ShareProfileStep from '@/components/ui/ShareProfileStep'
 
 export const metadata = { title: 'Dashboard | Propojo' }
 
@@ -92,6 +93,11 @@ export default async function DashboardPage() {
         }
       }
     }
+
+    // Odkaz na veřejný profil — musí být úplný, protože ho poskytovatel
+    // posílá ven (do WhatsAppu, na Facebook). Relativní adresa by se ve
+    // sdílení rozbila.
+    const profileUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://propojo.cz'}/profil/${user.id}`
 
     const statusColors: Record<string, string> = {
       cekajici: 'bg-amber-100 text-amber-700',
@@ -211,7 +217,6 @@ export default async function DashboardPage() {
               {[
                 { step: 1, label: 'Doplňte profil', desc: 'Přidejte bio a kontakt', href: '/dashboard/profil', done: !!profile?.bio },
                 { step: 2, label: 'Přidejte nabídku', desc: 'Popište co umíte a nastavte cenu', href: '/pridat-sluzbu', done: (servicesCount ?? 0) > 0 },
-                { step: 3, label: 'Sdílejte profil', desc: 'Pošlete odkaz zákazníkům', href: `/profil/${user.id}`, done: false },
               ].map((item) => (
                 <Link key={item.step} href={item.href} className={`flex items-center gap-4 rounded-xl p-3 transition-all hover:bg-indigo-100 ${item.done ? 'opacity-60' : ''}`}>
                   <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${item.done ? 'bg-emerald-500 text-white' : 'bg-indigo-600 text-white'}`}>
@@ -224,6 +229,10 @@ export default async function DashboardPage() {
                   {!item.done && <ArrowRight className="h-4 w-4 text-indigo-400" />}
                 </Link>
               ))}
+
+              {/* Třetí krok opravdu sdílí — systémové sdílení na telefonu,
+                  kopie odkazu na počítači. Dřív jen otevřel profil. */}
+              <ShareProfileStep url={profileUrl} />
             </div>
           </div>
         )}

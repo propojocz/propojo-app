@@ -1,6 +1,14 @@
 'use server'
 // lib/actions/connect.ts
 // Stripe Connect (Express) – napojení poskytovatele, aby mohl dostávat peníze ze záloh.
+//
+// PROČ SE PŘEDVYPLŇUJE business_profile:
+// Stripe v onboardingu jinak chce „Váš web". Většina řemeslníků web nemá,
+// zástupné stránky Stripe neuznává a pro Propojo ten údaj stejně k ničemu
+// není. Posíláme proto rovnou odkaz na jeho VEŘEJNOU KARTU na Propoju —
+// je to přesně to, co Stripe chce vidět (stránka se službami a cenami) —
+// plus popis činnosti. Když jsou obě pole vyplněná z naší strany, Stripe
+// se na ně poskytovatele už neptá.
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { stripe } from '@/lib/stripe'
@@ -13,6 +21,17 @@ function getAdminClient() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
 }
+
+// Odkaz na veřejný profil poskytovatele. Na localhostu ho Stripe nevezme
+// (nesmí to být neveřejná adresa), takže tam raději neposíláme nic a
+// necháme jen popis činnosti.
+function profilUrl(userId: string): string | undefined {
+  if (!APP_URL.startsWith('https://')) return undefined
+  return `${APP_URL}/profil/${userId}`
+}
+
+const POPIS_CINNOSTI =
+  'Řemeslné a osobní služby na objednávku. Zákazníci si rezervují termín a platí zálohu přes Propojo.cz.'
 
 type LinkResult = { success: true; url: string } | { success: false; error: string }
 
@@ -47,6 +66,8 @@ export async function createConnectOnboardingLink(): Promise<LinkResult> {
         },
         business_profile: {
           name: profile.full_name ?? undefined,
+          url: profilUrl(user.id),
+          product_description: POPIS_CINNOSTI,
         },
         metadata: { supabase_user_id: user.id },
       })
@@ -60,6 +81,26 @@ export async function createConnectOnboardingLink(): Promise<LinkResult> {
     } catch (err) {
       console.error('[connect] accounts.create error:', err)
       return { success: false, error: 'Nepodařilo se založit účet pro výplaty.' }
+    }
+  } else {
+    // Účet už existuje — může být založený ještě před tímhle předvyplněním
+    // a Stripe by se na web ptal znovu. Doplníme, co chybí. Co si poskytovatel
+    // vyplnil sám, nepřepisujeme. Selhání tady napojení neblokuje.
+    try {
+      const account = await stripe.accounts.retrieve(accountId)
+      const chybiUrl = !account.business_profile?.url
+      const chybiPopis = !account.business_profile?.product_description
+
+      if (chybiUrl || chybiPopis) {
+        await stripe.accounts.update(accountId, {
+          business_profile: {
+            ...(chybiUrl ? { url: profilUrl(user.id) } : {}),
+            ...(chybiPopis ? { product_description: POPIS_CINNOSTI } : {}),
+          },
+        })
+      }
+    } catch (err) {
+      console.warn('[connect] doplnění business_profile přeskočeno:', err)
     }
   }
 
