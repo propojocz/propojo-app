@@ -8,6 +8,7 @@ import ReviewForm from '@/components/ui/ReviewForm'
 import TimeProposalPanel from '@/components/ui/TimeProposalPanel'
 import { getProposals } from '@/lib/actions/time-proposals'
 import TimePreferenceForm from '@/components/ui/TimePreferenceForm'
+import { releaseUnpaidReservation } from '@/lib/actions/reservation-release'
 
 interface Props { params: { id: string }; searchParams: { platba?: string } }
 
@@ -73,6 +74,15 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/prihlasit')
+
+  // Zákazník se vrátil z platby tlačítkem zpět → platit nebude. Termín pustíme
+  // hned dál, ať neblokuje dalších 30 minut, než platba vyprší sama.
+  // Funkce si sama ověří, že jde o zákazníka a o rezervaci čekající na platbu;
+  // u ostatních objednávek neudělá nic. Musí běžet PŘED načtením objednávky,
+  // aby stránka rovnou ukázala aktuální stav.
+  if (searchParams.platba === 'zruseno') {
+    await releaseUnpaidReservation(params.id)
+  }
 
   const { data: order, error } = await supabase
     .from('orders')
@@ -155,6 +165,22 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
       <Link href="/dashboard/objednavky" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
         <ArrowLeft className="h-4 w-4" /> Zpět na objednávky
       </Link>
+
+      {/* Zrušená platba u rezervace termínu — termín je pryč, řekneme to rovnou
+          a nabídneme cestu zpátky. Bez toho by zákazník koukal na zrušenou
+          objednávku a nevěděl proč. */}
+      {searchParams.platba === 'zruseno' && order.status === 'zruseno' && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-800">
+          <strong>Platba nebyla dokončena, termín jsme uvolnili.</strong>{' '}
+          Rezervaci potvrzuje až zaplacení zálohy — držet vám čas bez ní bohužel nemůžeme.
+          Objednat se můžete znovu, pokud je termín pořád volný.
+          <div className="mt-2">
+            <Link href={`/sluzby/${order.service_id}`} className="font-bold underline">
+              Zpět na nabídku →
+            </Link>
+          </div>
+        </div>
+      )}
 
       {canReview && <ReviewForm orderId={order.id} />}
 
