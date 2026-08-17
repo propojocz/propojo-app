@@ -758,3 +758,88 @@ export async function autoResolveNoShows(): Promise<{ resolved: number; failed: 
 
   return { resolved, failed }
 }
+
+// ── UVOLNĚNÍ NEZAPLACENÝCH REZERVACÍ PO 24 H ──────────────
+// Rezervace vypsaného termínu zabere slot okamžitě (reserveSlotForItem) a
+// objednávka čeká na zaplacení zálohy. Když zákazník nezaplatí, termín tam
+// visel donekonečna a poskytovatel o něj přišel. VOP slibují uvolnění do 24 h.
+//
+// Co se stane: objednávka → 'zruseno', slot zpět na 'volno' a rovnou viditelný
+// (pending_confirm=false), oběma stranám oznámení.
+//
+// Bezpečnostní pojistky:
+//   · bere JEN objednávky se slot_id (rezervace, ne poptávky),
+//   · slot uvolní jen když na něm sedí order_id téhle objednávky — cizí ani
+//     mezitím přeobsazený termín se nesáhne,
+//   · žádné peníze se nepřesouvají (deposit_status je 'pending' = nezaplaceno);
+//     kdyby platba dorazila později, webhook ji sám vrátí.
+//
+// Pozn.: když se okno při rezervaci dělilo, zůstanou po uvolnění dvě sousední
+// volná okna místo jednoho. Slučování neděláme — poskytovatel je vidí obě
+// a může s nimi naložit sám.
+const UNPAID_HOURS = 24
+
+export async function autoReleaseUnpaidReservations(): Promise<{ released: number; failed: number }> {
+  const admin = getAdminClient()
+  const cutoff = new Date(Date.now() - UNPAID_HOURS * 3600 * 1000).toISOString()
+
+  const { data: rows } = await admin
+    .from('orders')
+    .select('id, provider_id, customer_id, slot_id, scheduled_at, deposit_amount, service_items(name), services(title)')
+    .eq('status', 'prijato')
+    .eq('deposit_status', 'pending')
+    .not('slot_id', 'is', null)
+    .lt('created_at', cutoff) as { data: any[] | null }
+
+  let released = 0
+  let failed = 0
+
+  for (const o of rows ?? []) {
+    try {
+      // 1) Uvolnit termín — jen pokud na něm pořád sedí tahle objednávka
+      const { data: freed } = await (admin.from('availability_slots') as any)
+        .update({ status: 'volno', order_id: null, pending_confirm: false })
+        .eq('id', o.slot_id)
+        .eq('order_id', o.id)
+        .select('id')
+
+      // 2) Zrušit objednávku (i když slot mezitím převzal někdo jiný —
+      //    nezaplacená objednávka nemá důvod dál žít)
+      const { error: orderErr } = await (admin.from('orders') as any)
+        .update({ status: 'zruseno' })
+        .eq('id', o.id)
+        .eq('status', 'prijato')
+        .eq('deposit_status', 'pending')
+      if (orderErr) { failed++; continue }
+
+      released++
+
+      const nazev = o.service_items?.name || o.services?.title || 'objednávka'
+      const uvolneno = Array.isArray(freed) && freed.length > 0
+
+      try {
+        await createNotification({
+          userId: o.customer_id,
+          type: 'status_change',
+          orderId: o.id,
+          actorId: o.customer_id,
+          title: 'Rezervace zrušena — záloha nebyla zaplacena',
+          preview: `${nazev} · termín jsme uvolnili pro ostatní. Objednat se můžete znovu.`,
+        })
+        await createNotification({
+          userId: o.provider_id,
+          type: 'status_change',
+          orderId: o.id,
+          actorId: o.provider_id,
+          title: uvolneno ? 'Nezaplacená rezervace — termín je zase volný' : 'Nezaplacená rezervace zrušena',
+          preview: `${nazev} · zákazník do 24 hodin nezaplatil zálohu.`,
+        })
+      } catch { /* notifikace není kritická */ }
+    } catch (err) {
+      console.error('[autoReleaseUnpaidReservations] chyba u', o.id, err)
+      failed++
+    }
+  }
+
+  return { released, failed }
+}

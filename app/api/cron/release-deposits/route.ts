@@ -1,15 +1,21 @@
 // app/api/cron/release-deposits/route.ts
-// Denní úklid peněz — tři věci naráz, ať stačí jeden cron:
-//   1) uvolní zálohy u zakázek, které zákazník do 2 dnů nepotvrdil,
+// Denní úklid peněz a termínů — čtyři věci naráz, ať stačí jeden cron:
+//   1) uvolní zálohy u zakázek, které zákazník do 7 dnů nepotvrdil,
 //   2) vyřídí nedostavení, kde zákazník do 24 h nepodal námitku
 //      (storno poskytovateli, zbytek zpět zákazníkovi),
-//   3) vyřídí storna, kde poskytovatel do 24 h poplatek neodpustil.
+//   3) vyřídí storna, kde poskytovatel do 24 h poplatek neodpustil,
+//   4) uvolní termíny u rezervací, které zákazník do 24 h nezaplatil.
 //
 // Spouští Vercel Cron (vercel.json). Chráněno tajemstvím CRON_SECRET —
 // bez něj by endpoint mohl spustit kdokoli.
 
 import { NextResponse } from 'next/server'
-import { autoReleaseStaleDeposits, autoResolveNoShows, autoResolveStorno } from '@/lib/actions/payout'
+import {
+  autoReleaseStaleDeposits,
+  autoResolveNoShows,
+  autoResolveStorno,
+  autoReleaseUnpaidReservations,
+} from '@/lib/actions/payout'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -25,10 +31,11 @@ export async function GET(request: Request) {
 
   try {
     // Běží nezávisle na sobě — chyba v jednom nesmí shodit ostatní.
-    const [deposits, noShows, storna] = await Promise.allSettled([
+    const [deposits, noShows, storna, nezaplacene] = await Promise.allSettled([
       autoReleaseStaleDeposits(),
       autoResolveNoShows(),
       autoResolveStorno(),
+      autoReleaseUnpaidReservations(),
     ])
 
     return NextResponse.json({
@@ -36,6 +43,7 @@ export async function GET(request: Request) {
       zalohy: deposits.status === 'fulfilled' ? deposits.value : { chyba: true },
       nedostaveni: noShows.status === 'fulfilled' ? noShows.value : { chyba: true },
       storna: storna.status === 'fulfilled' ? storna.value : { chyba: true },
+      nezaplacene_rezervace: nezaplacene.status === 'fulfilled' ? nezaplacene.value : { chyba: true },
     })
   } catch (err) {
     console.error('[cron/release-deposits]', err)

@@ -1,19 +1,40 @@
 'use server'
 // lib/actions/slots.ts — kalendář Fáze 1: správa volných oken poskytovatele.
 // Okno = od-do + seznam služeb, které se do něj vejdou (slot_services).
-// Rezervace zákazníkem přijde v další části (reserveSlot).
+//
+// PLATBA DRŽÍ TERMÍN: u úkonu se zálohou vytvoří rezervace rovnou i platbu
+// a vrátí na ni odkaz (payUrl). Zákazník tedy nejde na detail objednávky,
+// ale rovnou na Stripe. Odkaz platí 30 minut (deposit.ts) — když nezaplatí,
+// Stripe pošle 'checkout.session.expired', webhook objednávku zruší a termín
+// vrátí mezi volné. Co je tedy v kalendáři, to je buď zaplacené, nebo se do
+// půl hodiny samo uvolní.
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { createDepositCheckout } from '@/lib/actions/deposit'
 
-type Result = { success: true; id?: string } | { success: false; error: string }
+type Result = { success: true; id?: string; payUrl?: string } | { success: false; error: string }
 
 function getAdminClient() {
   return createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
+}
+
+// Založí platbu k čerstvé rezervaci. Když se nepovede (poskytovatel nemá
+// dokončený Stripe, výpadek…), rezervace platí dál — zákazník zaplatí
+// z detailu objednávky jako dřív. Proto se chyba jen loguje.
+async function zaridPlatbu(orderId: string): Promise<string | undefined> {
+  try {
+    const pay = await createDepositCheckout(orderId)
+    if (pay.success) return pay.url
+    console.warn('[slots] platbu se nepodařilo založit:', pay.error)
+  } catch (err) {
+    console.error('[slots] zaridPlatbu:', err)
+  }
+  return undefined
 }
 
 // ── Přidat volné okno ─────────────────────────────────────────
@@ -235,6 +256,9 @@ export async function reserveSlot(values: {
 // vejde jen když jeho délka (duration_minutes) není delší než okno — krátké okno
 // na dlouhý úkon odmítneme. Slot je široké okno, ne pevná délka, takže žádné
 // dělení ani zbytky neřešíme (skládání úkonů do bloků je až v2).
+//
+// Má-li úkon zálohu, vrací se i payUrl — odkaz na platbu. Modal na něj zákazníka
+// rovnou přesměruje.
 export async function reserveSlotForItem(values: {
   slot_id: string
   service_id: string
@@ -339,6 +363,7 @@ export async function reserveSlotForItem(values: {
 
   // U modelu B (nacenění) zálohu nefixujeme — poplatek/nacenění řeší poskytovatel.
   const depositForOrder = item.payment_model === 'B' ? null : (item.deposit_amount ?? null)
+  const platiSeHned = !!depositForOrder && depositForOrder > 0
 
   // ── Zkracování okna ──────────────────────────────────────────────
   // Když je úkon kratší než okno, zabere jen svůj čas OD ZAČÁTKU okna a zbytek
@@ -394,7 +419,7 @@ export async function reserveSlotForItem(values: {
         // Když má úkon zálohu, objednávka rovnou čeká na úhradu — jinak by
         // šlo zahájit práci bez zaplacení (kontrola v updateOrderStatus
         // testuje právě 'pending').
-        deposit_status: depositForOrder && depositForOrder > 0 ? 'pending' : 'none',
+        deposit_status: platiSeHned ? 'pending' : 'none',
         location_city: values.location_city?.trim() || null,
         service_location: values.service_location ?? null,
         scheduled_at: loadedStart,
@@ -437,14 +462,17 @@ export async function reserveSlotForItem(values: {
         type: 'status_change',
         order_id: order.id,
         actor_id: user.id,
-        title: 'Nová rezervace ✓',
+        title: platiSeHned ? 'Nová rezervace — čeká na zaplacení' : 'Nová rezervace ✓',
         preview: `${item.name} · po něm vám zbývá ${remainderMin} min volných — nabídnout je někomu dalšímu?`,
       })
     } catch {}
 
+    // 5) Platba — odkaz vrátíme rovnou, ať zákazník neodbíhá na detail objednávky
+    const payUrl = platiSeHned ? await zaridPlatbu(order.id) : undefined
+
     revalidatePath('/dashboard/objednavky')
     revalidatePath('/dashboard/terminy')
-    return { success: true, id: order.id }
+    return { success: true, id: order.id, payUrl }
   }
 
   // ── Úkon vyplní okno (skoro) celé → zabrat celé, jako dřív ──────
@@ -459,7 +487,7 @@ export async function reserveSlotForItem(values: {
       status: 'prijato',
       description: values.message?.trim() || null,
       deposit_amount: depositForOrder,
-      deposit_status: depositForOrder && depositForOrder > 0 ? 'pending' : 'none',
+      deposit_status: platiSeHned ? 'pending' : 'none',
       location_city: values.location_city?.trim() || null,
       service_location: values.service_location ?? null,
       scheduled_at: loadedStart,
@@ -491,14 +519,17 @@ export async function reserveSlotForItem(values: {
       type: 'status_change',
       order_id: order.id,
       actor_id: user.id,
-      title: 'Nová rezervace termínu (potvrzeno)',
+      title: platiSeHned ? 'Nová rezervace — čeká na zaplacení' : 'Nová rezervace termínu (potvrzeno)',
       preview: item.name,
     })
   } catch {}
 
+  // 4) Platba
+  const payUrl = platiSeHned ? await zaridPlatbu(order.id) : undefined
+
   revalidatePath('/dashboard/objednavky')
   revalidatePath('/dashboard/terminy')
-  return { success: true, id: order.id }
+  return { success: true, id: order.id, payUrl }
 }
 
 

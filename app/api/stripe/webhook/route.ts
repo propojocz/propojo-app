@@ -119,6 +119,12 @@ async function upsertSubscription(db: ReturnType<typeof admin>, sub: Stripe.Subs
 // rezervační zálohu (model A) nebo poplatek za nacenění (model B).
 // Bez tohoto kroku by peníze dorazily, ale objednávka by zůstala v 'pending'
 // a poskytovatel by nemohl zahájit práci.
+//
+// POJISTKA: než platbu potvrdíme, ověříme, že objednávka pořád platí a že
+// termín na ní stále visí. Nezaplacené rezervace se po 24 h ruší a termín se
+// uvolní (autoReleaseUnpaidReservations) — kdyby zákazník zaplatil ze starého
+// odkazu potom, dostali bychom dva lidi na jeden čas. V takovém případě peníze
+// rovnou vracíme.
 async function handleDepositPaid(
   db: ReturnType<typeof admin>,
   session: Stripe.Checkout.Session
@@ -129,7 +135,82 @@ async function handleDepositPaid(
     return
   }
 
-  // Hlavní zápis — jen sloupec, o kterém víme jistě, že existuje.
+  const paymentIntentId =
+    typeof session.payment_intent === 'string'
+      ? session.payment_intent
+      : (session.payment_intent as Stripe.PaymentIntent | null)?.id ?? null
+
+  // Objednávka a její termín — potřebujeme je na kontrolu i na notifikaci.
+  const { data: order } = await db
+    .from('orders')
+    .select('id, status, slot_id, provider_id, customer_id, deposit_amount, service_items(name), services(title)')
+    .eq('id', orderId)
+    .single() as { data: any }
+
+  if (!order) {
+    console.error('[webhook] platba k neexistující objednávce', orderId)
+    return
+  }
+
+  const nazev = order.service_items?.name || order.services?.title || null
+
+  // ── Platí objednávka ještě? ─────────────────────────────────
+  let platna = order.status !== 'zruseno'
+
+  if (platna && order.slot_id) {
+    const { data: slot } = await db
+      .from('availability_slots')
+      .select('id, status, order_id')
+      .eq('id', order.slot_id)
+      .maybeSingle() as { data: { id: string; status: string; order_id: string | null } | null }
+
+    // Termín musí pořád patřit téhle objednávce. Když je zpátky volný nebo ho
+    // mezitím dostal někdo jiný, platbu nepřijímáme.
+    if (!slot || slot.order_id !== orderId || slot.status !== 'zabrano') {
+      platna = false
+    }
+  }
+
+  if (!platna) {
+    console.warn('[webhook] platba za propadlou rezervaci', orderId, '— vracím peníze')
+
+    let vraceno = false
+    if (paymentIntentId) {
+      try {
+        await stripe.refunds.create({
+          payment_intent: paymentIntentId,
+          metadata: { kind: 'deposit_late_refund', order_id: orderId },
+        })
+        vraceno = true
+      } catch (err) {
+        console.error('[webhook] vratka propadlé rezervace selhala:', err)
+      }
+    }
+
+    if (vraceno) {
+      await (db.from('orders') as any)
+        .update({ deposit_status: 'refunded', stripe_payment_intent_id: paymentIntentId })
+        .eq('id', orderId)
+    }
+
+    try {
+      await createNotification({
+        userId: order.customer_id,
+        type: 'status_change',
+        orderId,
+        actorId: order.customer_id,
+        title: vraceno ? 'Termín už byl obsazený — peníze vracíme' : 'Termín už byl obsazený',
+        preview: vraceno
+          ? `${nazev ?? 'Rezervace'} · platba se vrací na kartu, vyberte prosím jiný termín.`
+          : `${nazev ?? 'Rezervace'} · ozvěte se nám na admin@propojo.cz, vyřešíme to.`,
+      })
+    } catch (err) {
+      console.error('[webhook] notifikace o vratce:', err)
+    }
+    return
+  }
+
+  // ── Standardní cesta: platba potvrzena ──────────────────────
   const { error } = await (db.from('orders') as any)
     .update({ deposit_status: 'paid' })
     .eq('id', orderId)
@@ -142,11 +223,6 @@ async function handleDepositPaid(
   // Uložení payment intentu je NEPOVINNÉ — hodí se pro pozdější převod
   // poskytovateli a vratky. Když sloupec v tabulce není, jen to zalogujeme
   // a jedeme dál; potvrzení platby je důležitější než tenhle údaj.
-  const paymentIntentId =
-    typeof session.payment_intent === 'string'
-      ? session.payment_intent
-      : (session.payment_intent as Stripe.PaymentIntent | null)?.id ?? null
-
   if (paymentIntentId) {
     const { error: piErr } = await (db.from('orders') as any)
       .update({ stripe_payment_intent_id: paymentIntentId })
@@ -155,15 +231,8 @@ async function handleDepositPaid(
   }
 
   // Dát vědět poskytovateli — do zvonečku i jako push do telefonu.
-  const { data: order } = await db
-    .from('orders')
-    .select('provider_id, customer_id, service_items(name), services(title)')
-    .eq('id', orderId)
-    .single() as { data: any }
+  if (!order.provider_id) return
 
-  if (!order?.provider_id) return
-
-  const nazev = order.service_items?.name || order.services?.title || null
   try {
     await createNotification({
       userId: order.provider_id,
@@ -175,6 +244,79 @@ async function handleDepositPaid(
     })
   } catch (err) {
     console.error('[webhook] notifikace o záloze:', err)
+  }
+}
+
+// ── PLATBA VYPRŠELA ───────────────────────────────────────────
+// Odkaz na platbu platí 30 minut (deposit.ts). Když zákazník nezaplatí,
+// Stripe pošle tuhle událost — rezervaci zrušíme a termín vrátíme mezi volné.
+// Tím platí pravidlo „co je v kalendáři, to je zaplacené".
+//
+// Pojistky:
+//   · jen objednávky, které pořád čekají na platbu (deposit_status 'pending'),
+//   · jen když tahle session je ta poslední — když si zákazník mezitím otevřel
+//     platbu znovu, starší vypršelá session nesmí novou rezervaci zabít,
+//   · termín uvolníme jen tehdy, sedí-li na něm order_id téhle objednávky.
+async function handleDepositExpired(
+  db: ReturnType<typeof admin>,
+  session: Stripe.Checkout.Session
+) {
+  const orderId = session.metadata?.order_id
+  if (!orderId) return
+
+  const { data: order } = await db
+    .from('orders')
+    .select('id, status, deposit_status, slot_id, customer_id, provider_id, stripe_checkout_session_id, service_items(name), services(title)')
+    .eq('id', orderId)
+    .single() as { data: any }
+
+  if (!order) return
+  if (order.deposit_status !== 'pending') return   // zaplaceno nebo už vyřešeno
+  if (order.status !== 'prijato') return           // mezitím zrušeno či posunuto dál
+  if (order.stripe_checkout_session_id && order.stripe_checkout_session_id !== session.id) {
+    return // běží novější pokus o platbu
+  }
+
+  // 1) Uvolnit termín
+  let uvolneno = false
+  if (order.slot_id) {
+    const { data: freed } = await (db.from('availability_slots') as any)
+      .update({ status: 'volno', order_id: null, pending_confirm: false })
+      .eq('id', order.slot_id)
+      .eq('order_id', orderId)
+      .select('id')
+    uvolneno = Array.isArray(freed) && freed.length > 0
+  }
+
+  // 2) Zrušit objednávku
+  await (db.from('orders') as any)
+    .update({ status: 'zruseno' })
+    .eq('id', orderId)
+    .eq('deposit_status', 'pending')
+
+  const nazev = order.service_items?.name || order.services?.title || 'Rezervace'
+
+  try {
+    await createNotification({
+      userId: order.customer_id,
+      type: 'status_change',
+      orderId,
+      actorId: order.customer_id,
+      title: 'Rezervace vypršela — nebyla zaplacena',
+      preview: `${nazev} · termín jsme uvolnili. Objednat se můžete znovu.`,
+    })
+    if (uvolneno) {
+      await createNotification({
+        userId: order.provider_id,
+        type: 'status_change',
+        orderId,
+        actorId: order.provider_id,
+        title: 'Termín je zase volný',
+        preview: `${nazev} · zákazník zálohu nezaplatil.`,
+      })
+    }
+  } catch (err) {
+    console.error('[webhook] notifikace o vypršení:', err)
   }
 }
 
@@ -244,6 +386,16 @@ export async function POST(req: Request) {
             dashboardUrl: `${APP_URL}/dashboard/predplatne`,
           })
           await sendMail(p.email, subject, html)
+        }
+        break
+      }
+
+      // ── Platba vypršela (30 min) ──────────────────────────────────
+      // Týká se jen záloh; u předplatného se nic neděje.
+      case 'checkout.session.expired': {
+        const session = event.data.object as Stripe.Checkout.Session
+        if (session.metadata?.kind === 'deposit') {
+          await handleDepositExpired(db, session)
         }
         break
       }

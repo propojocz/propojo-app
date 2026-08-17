@@ -6,6 +6,8 @@
 // Dvě cesty v jednom modalu:
 //  1) Úkon má dostupná VOLNÁ OKNA dost dlouhá na jeho délku → zákazník vybere termín,
 //     jde přes reserveSlotForItem (objednávka rovnou 'prijato', okno se zabere).
+//     Má-li úkon zálohu, rezervace rovnou vrátí odkaz na platbu a my na něj
+//     zákazníka přesměrujeme — termín se drží 30 minut, pak se sám uvolní.
 //  2) Žádné vhodné okno / model B (nacenění) → poptávka bez termínu přes createOrder
 //     (poskytovatel se ozve).
 //
@@ -104,6 +106,8 @@ export default function OrderItemModal({
   const [skipSlot, setSkipSlot] = useState(false)
   // Souřadnice vybrané obce — bez nich dosah spočítat nejde.
   const [cityGeo, setCityGeo] = useState<{ lat: number; lng: number } | null>(null)
+  // Jdeme rovnou na Stripe? Ovlivňuje jen text na potvrzovací obrazovce.
+  const [goingToPay, setGoingToPay] = useState(false)
 
   const isModelB = item.payment_model === 'B'
   // Místo výkonu určuje KARTA, ne zákazník. Kdo jezdí za zákazníky i přijímá
@@ -214,8 +218,17 @@ export default function OrderItemModal({
         service_location: atCustomer ? 'u_zakaznika' : 'u_poskytovatele',
       })
       if (res.success) {
-        setState('success')
-        setTimeout(() => router.push(`/dashboard/objednavky/${res.id}`), 1200)
+        // Má-li úkon zálohu, rezervace rovnou založila platbu. Termín se drží
+        // 30 minut — pak ho Stripe prohlásí za propadlý a appka ho uvolní.
+        if (res.payUrl) {
+          setGoingToPay(true)
+          setState('success')
+          const cil = res.payUrl
+          setTimeout(() => { window.location.href = cil }, 900)
+        } else {
+          setState('success')
+          setTimeout(() => router.push(`/dashboard/objednavky/${res.id}`), 1200)
+        }
       } else {
         setState('error'); setErrorMsg(res.error)
         router.refresh()
@@ -280,7 +293,9 @@ export default function OrderItemModal({
                     <CheckCircle2 className="h-7 w-7 text-emerald-600" />
                   </div>
                   <p className="text-lg font-black text-emerald-800">
-                    {bookedSlot ? 'Termín je váš! 🎉' : skipSlot ? 'Poptávka odeslána' : 'Objednávka odeslána'}
+                    {bookedSlot
+                      ? (goingToPay ? 'Termín pro vás držíme' : 'Termín je váš! 🎉')
+                      : skipSlot ? 'Poptávka odeslána' : 'Objednávka odeslána'}
                   </p>
                   {bookedSlot ? (
                     <>
@@ -292,7 +307,13 @@ export default function OrderItemModal({
                           Zaplatíte zálohu {deposit.toLocaleString('cs-CZ')} Kč, na místě doplatíte {Math.max(0, Number(item.price) - deposit).toLocaleString('cs-CZ')} Kč.
                         </p>
                       )}
-                      <p className="text-xs text-emerald-600">Otevírám platbu…</p>
+                      {goingToPay ? (
+                        <p className="text-xs font-semibold text-emerald-700">
+                          Otevírám platbu… termín držíme 30 minut, potvrdí ho zaplacení.
+                        </p>
+                      ) : (
+                        <p className="text-xs text-emerald-600">Přesměrovávám na objednávku…</p>
+                      )}
                     </>
                   ) : (
                     <p className="text-xs leading-relaxed text-emerald-700">
@@ -447,7 +468,11 @@ export default function OrderItemModal({
                       )
                     })}
                   </div>
-                  <p className="mt-1.5 text-[11px] text-slate-400">Vybraný termín je po rezervaci rovnou potvrzený — první bere.</p>
+                  <p className="mt-1.5 text-[11px] text-slate-400">
+                    {deposit > 0
+                      ? 'Termín potvrdí zaplacení zálohy — po rezervaci vás rovnou pustíme k platbě.'
+                      : 'Vybraný termín je po rezervaci rovnou potvrzený — první bere.'}
+                  </p>
 
                   {/* Únikový východ: žádné z oken nevyhovuje → poptávka, poskytovatel
                       navrhne čas. Dřív tady zákazník uvízl. */}
@@ -557,7 +582,9 @@ export default function OrderItemModal({
                 {state === 'loading'
                   ? <><Loader2 className="h-4 w-4 animate-spin" /> {hasSlots && selectedSlot && !skipSlot ? 'Rezervuji…' : 'Odesílám…'}</>
                   : hasSlots && !skipSlot
-                    ? <><CalendarDays className="h-4 w-4" /> Rezervovat termín</>
+                    ? (deposit > 0
+                        ? <><Wallet className="h-4 w-4" /> Rezervovat a zaplatit</>
+                        : <><CalendarDays className="h-4 w-4" /> Rezervovat termín</>)
                     : isModelB ? 'Odeslat poptávku' : skipSlot ? 'Odeslat poptávku' : 'Odeslat objednávku'}
               </button>
 
