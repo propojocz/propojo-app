@@ -50,12 +50,38 @@ function fmtDate(iso?: string | null): string | undefined {
   } catch { return undefined }
 }
 
-// Krátký popis storno podmínek do e-mailu.
-const CANCELLATION_TEXT: Record<string, string> = {
-  zadna: 'Zrušit můžete kdykoli, záloha se vrací v plné výši.',
-  mirna: 'Při zrušení více než 24 hodin předem se záloha vrací v plné výši.',
-  standardni: 'Při zrušení více než 48 hodin předem se záloha vrací v plné výši.',
-  prisna: 'Při zrušení méně než 7 dní předem záloha propadá živnostníkovi.',
+// ── Storno podmínky do e-mailu ─────────────────────────────
+// Dřív se braly z services.cancellation_policy (žádná/mírná/standardní/přísná
+// s lhůtami 24 h / 48 h / 7 dní). To pole ale NIC neřídilo — žádná lhůta se
+// nikde nepočítala a žádné peníze se podle ní nestrhávaly. Zákazníkovi tedy
+// chodila e-mailem podmínka, která neplatila, a ve sporu by to bylo proti nám.
+//
+// Skutečná pravidla drží ÚKON: fee_mode ('storno' | 'noshow' | 'zadny')
+// a no_show_fee. Vypořádání dělá payout.ts — poplatek jde poskytovateli,
+// zbytek zpět zákazníkovi. Text v mailu teď říká přesně tohle, tedy totéž,
+// co zákazník viděl v objednávkovém okně.
+function stornoText(
+  feeMode?: string | null,
+  fee?: number | null,
+  deposit?: number | null
+): string | undefined {
+  const poplatek = Number(fee ?? 0)
+  const zaloha = Number(deposit ?? 0)
+
+  // Není z čeho strhávat ani co vracet → o storno podmínkách mlčíme.
+  if (poplatek <= 0 || feeMode === 'zadny' || !feeMode) {
+    return zaloha > 0 ? 'Zrušit můžete kdykoli — záloha se vrací v plné výši.' : undefined
+  }
+
+  const castka = poplatek.toLocaleString('cs-CZ')
+  if (feeMode === 'storno') {
+    return zaloha > poplatek
+      ? `Když termín zrušíte příliš pozdě, živnostník si účtuje ${castka} Kč; zbytek zálohy se vrací.`
+      : `Když termín zrušíte příliš pozdě, živnostník si účtuje ${castka} Kč.`
+  }
+  return zaloha > poplatek
+    ? `Když nedorazíte a neozvete se, živnostník si účtuje ${castka} Kč; zbytek zálohy se vrací.`
+    : `Když nedorazíte a neozvete se, živnostník si účtuje ${castka} Kč.`
 }
 
 async function sendNotification(to: string, subject: string, html: string) {
@@ -427,8 +453,8 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
         location_city,
         total_price,
         service_item_id,
-        services(title, price, price_unit, payment_model, deposit_amount, quote_fee, cancellation_policy, city),
-        service_items(name, price, price_unit, payment_model, deposit_amount, quote_fee),
+        services(title, price, price_unit, payment_model, deposit_amount, quote_fee, city),
+        service_items(name, price, price_unit, payment_model, deposit_amount, quote_fee, fee_mode, no_show_fee),
         profiles!orders_provider_id_fkey(full_name, display_name, company_name, ico, phone)
       `)
       .eq('id', orderId)
@@ -475,7 +501,10 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
           depositText: depositLabel ? `${depositLabel}${isModelB ? ' (za nacenění)' : ' (započítá se do ceny)'}` : undefined,
           scheduledAt: fmtDate(order.scheduled_at),
           city: order.location_city ?? sv.city ?? undefined,
-          cancellationText: sv.cancellation_policy ? CANCELLATION_TEXT[sv.cancellation_policy] : undefined,
+          // U modelu B se storno neřeší — platí se za nacenění, ne za termín.
+          cancellationText: isModelB
+            ? undefined
+            : stornoText(it?.fee_mode, it?.no_show_fee, depositAmount),
         })
         await sendNotification(clientEmail, subject, html)
       }
