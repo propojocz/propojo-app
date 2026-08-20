@@ -14,6 +14,7 @@ import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { MapPin, BadgeCheck, Star, Eye, Zap, CheckCircle2, Clock, ChevronRight, Pencil, ExternalLink } from 'lucide-react'
+import ServiceMap from '@/components/ui/ServiceMap'
 import FavoriteButton from '@/components/ui/FavoriteButton'
 import { isFavorited } from '@/lib/actions/favorites'
 import ProfileViewTracker from '@/components/ui/ProfileViewTracker'
@@ -33,6 +34,12 @@ type ProviderProfile = {
   ico: string | null
   avatar_url: string | null
   city: string | null
+  // Adresa provozovny — nepovinná, veřejná jen když si to poskytovatel zapne.
+  // U OSVČ bývá sídlo domácí adresa, proto se nikdy nezveřejňuje samo.
+  address: string | null
+  address_lat: number | null
+  address_lng: number | null
+  address_public: boolean | null
   bio: string | null
   is_provider: boolean
   ico_verified: boolean | null
@@ -98,7 +105,7 @@ export default async function ProfilPage({ params }: Props) {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id, full_name, company_name, display_name, ico, avatar_url, city, bio, is_provider, ico_verified, rating, review_count, view_count, gallery, is_suspended, created_at')
+    .select('id, full_name, company_name, display_name, ico, avatar_url, city, bio, is_provider, ico_verified, rating, review_count, view_count, gallery, is_suspended, created_at, address, address_lat, address_lng, address_public')
     .eq('id', params.id)
     .single() as { data: ProviderProfile | null }
 
@@ -337,8 +344,27 @@ export default async function ProfilPage({ params }: Props) {
         </div>
 
         {/* Pravý sloupec — sticky rezervace */}
-        <aside>
+        <aside className="space-y-4">
           <ProfileBookingBox providerId={profile.id} slots={upcomingSlots} isLoggedIn={!!user} />
+
+          {/* Kde nás najdete — ukáže se, jen když poskytovatel adresu vyplnil
+              A zapnul její zveřejnění. Platí i pro toho, kdo jezdí za zákazníky:
+              kamenná provozovna je důkaz, že za tím někdo stojí. */}
+          {profile.address_public === true && profile.address && (
+            <section className="rounded-2xl border border-slate-200 bg-white p-5">
+              <h2 className="mb-2 flex items-center gap-1.5 text-sm font-bold uppercase tracking-wider text-slate-500">
+                <MapPin className="h-4 w-4 text-slate-400" /> Kde nás najdete
+              </h2>
+              <p className="mb-3 text-sm text-slate-700">{profile.address}</p>
+              {profile.address_lat != null && profile.address_lng != null && (
+                <ServiceMap
+                  lat={Number(profile.address_lat)}
+                  lng={Number(profile.address_lng)}
+                  label={displayName}
+                />
+              )}
+            </section>
+          )}
         </aside>
       </div>
     </div>

@@ -21,6 +21,7 @@ import ImageUpload from '@/components/ui/ImageUpload'
 import GalleryUpload from '@/components/ui/GalleryUpload'
 import type { Profile } from '@/types/database'
 import ChangePasswordSection from '@/components/ui/ChangePasswordSection'
+import AddressInput from '@/components/ui/AddressInput'
 
 const schema = z.object({
   full_name: z.string().min(2, 'Zadejte celé jméno'),
@@ -39,6 +40,13 @@ const schema = z.object({
   city: z.string().optional(),
   bio: z.string().max(600, 'Bio je příliš dlouhé').optional(),
   avatar_url: z.string().optional(),
+  // Adresa provozovny — nepovinná. Zveřejní se, JEN když si to poskytovatel
+  // zapne: u OSVČ bývá sídlo domácí adresa a zveřejnit ji omylem je horší,
+  // než ji nemít vůbec.
+  address: z.string().max(200).nullable().optional(),
+  address_lat: z.number().nullable().optional(),
+  address_lng: z.number().nullable().optional(),
+  address_public: z.boolean().optional(),
 })
 type FormValues = z.infer<typeof schema>
 
@@ -74,6 +82,10 @@ export default function ProfilPage() {
           city: data.city ?? '',
           bio: data.bio ?? '',
           avatar_url: data.avatar_url ?? '',
+          address: d.address ?? null,
+          address_lat: d.address_lat ?? null,
+          address_lng: d.address_lng ?? null,
+          address_public: d.address_public === true,
         })
         setIco(d.ico ?? null)
         setIcoVerified(d.ico_verified === true)
@@ -101,6 +113,11 @@ export default function ProfilPage() {
       city: values.city ?? null,
       bio: values.bio ?? null,
       avatar_url: values.avatar_url ?? null,
+      address: values.address?.trim() || null,
+      address_lat: values.address_lat ?? null,
+      address_lng: values.address_lng ?? null,
+      // Bez adresy nemá co být veřejné.
+      address_public: (values.address?.trim() ? values.address_public === true : false),
       gallery,
     }
 
@@ -220,6 +237,58 @@ export default function ProfilPage() {
               <input {...f('city')} placeholder="Vsetín" className="form-input" />
             </div>
           </div>
+
+          {/* ── ADRESA PROVOZOVNY ──
+              Platí i pro toho, kdo jezdí za zákazníky: kamenná adresa je důkaz,
+              že za nabídkou někdo stojí. Proto sedí na profilu, ne na kartě —
+              karta řeší, KDE se služba provádí, profil KDO ji dělá. */}
+          {isProvider && (
+            <div className="space-y-2 rounded-2xl border border-slate-200 p-4">
+              <div>
+                <label className="form-label">
+                  Adresa provozovny <span className="font-normal text-slate-400">(volitelné)</span>
+                </label>
+                <p className="mb-2 text-xs leading-relaxed text-slate-400">
+                  Máte salon, dílnu nebo kancelář? Zadejte adresu a zákazníkům se ukáže i s mapou.
+                  Jezdíte-li jen za zákazníky, nechte prázdné.
+                </p>
+                <AddressInput
+                  defaultValue={watch('address') ?? ''}
+                  onPick={(a: { address: string; lat: number; lng: number; municipality: string }) => {
+                    setValue('address', a.address)
+                    setValue('address_lat', a.lat)
+                    setValue('address_lng', a.lng)
+                    if (!watch('city') && a.municipality) setValue('city', a.municipality)
+                  }}
+                  onFreeText={(text: string) => {
+                    setValue('address', text || null)
+                    setValue('address_lat', null)
+                    setValue('address_lng', null)
+                  }}
+                />
+                <p className="mt-1 text-xs text-slate-400">
+                  Vyberte adresu ze seznamu — jinak se nepodaří ukázat špendlík na mapě.
+                </p>
+              </div>
+
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-xl bg-slate-50 p-3">
+                <input
+                  type="checkbox"
+                  checked={watch('address_public') === true}
+                  onChange={(e) => setValue('address_public', e.target.checked)}
+                  disabled={!watch('address')}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 disabled:opacity-40"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-slate-800">Zobrazit adresu veřejně</span>
+                  <span className="block text-xs leading-relaxed text-slate-500">
+                    Adresu uvidí kdokoli na vašem profilu. <strong>Pracujete-li z domova, nechte vypnuté</strong> —
+                    zákazníkům se ukáže jen město.
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <label className="form-label">
