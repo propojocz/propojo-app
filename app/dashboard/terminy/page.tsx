@@ -70,10 +70,12 @@ export default async function TerminyPage({ searchParams }: { searchParams: { se
       shortestMinutes: statsByService[s.id].shortest,
     }))
 
-  // Moje nadcházející okna + přiřazené karty
+  // Moje nadcházející okna + přiřazené karty.
+  // order_id: u zabraných oken z něj vede odkaz rovnou na detail objednávky —
+  // poskytovatel jinak musel hledat, kdo že to vlastně přijde.
   const { data: slots } = await supabase
     .from('availability_slots')
-    .select('id, starts_at, ends_at, status, pending_confirm, slot_services(service_id, services(title))')
+    .select('id, starts_at, ends_at, status, pending_confirm, order_id, slot_services(service_id, services(title))')
     .eq('provider_id', user.id)
     .gte('ends_at', new Date().toISOString())
     .order('starts_at', { ascending: true }) as { data: any[] | null }

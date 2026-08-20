@@ -3,18 +3,19 @@
 // Objednávka JEDNOHO úkonu z ceníku. Otevírá se z PriceListPublic kliknutím na
 // „Objednat"/„Poptat" u položky.
 //
-// Dvě cesty v jednom modalu:
-//  1) Úkon má dostupná VOLNÁ OKNA dost dlouhá na jeho délku → zákazník vybere termín,
-//     jde přes reserveSlotForItem (objednávka rovnou 'prijato', okno se zabere).
-//     Má-li úkon zálohu, rezervace rovnou vrátí odkaz na platbu a my na něj
-//     zákazníka přesměrujeme — termín se drží 30 minut, pak se sám uvolní.
-//  2) Žádné vhodné okno / model B (nacenění) → poptávka bez termínu přes createOrder
-//     (poskytovatel se ozve).
+// VÝBĚR ČASU: z volných oken se spočítá mřížka konkrétních začátků po 15
+// minutách — z okna 10:00–16:00 u půlhodinového úkonu vyjde 10:00, 10:15 …
+// 15:30. Zákazník si tedy vybere čas, ne jen okno. Server si výběr ověřuje
+// znovu (v prohlížeči se dá obejít) a okno kolem rezervace sám rozdělí.
 //
-// Cena, model I PODMÍNKY VÝJEZDU se řídí ÚKONEM (service_item), ne kartou. Každý
-// úkon modelu B může mít vlastní poplatek za nacenění, dopravu i lhůtu nabídky.
-// Město = našeptávač obcí, předvyplní se z profilu. Délka se ukazuje jen u jednotek,
-// kde dává smysl (ukon/hod).
+// Dvě cesty v jednom modalu:
+//  1) Úkon má volná okna dost dlouhá na jeho délku → zákazník vybere čas,
+//     jde přes reserveSlotForItem. Má-li úkon zálohu, rezervace rovnou vrátí
+//     odkaz na platbu — termín se drží 30 minut, pak se sám uvolní.
+//  2) Žádné vhodné okno / model B (nacenění) → poptávka bez termínu přes
+//     createOrder (poskytovatel se ozve).
+//
+// Cena, model I PODMÍNKY VÝJEZDU se řídí ÚKONEM (service_item), ne kartou.
 
 import { useState, useEffect, type MouseEvent } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -34,12 +35,6 @@ export type SlotOption = {
   ends_at: string
 }
 
-/**
- * Podmínky výjezdu a nacenění (model B).
- * Tato pole žijí na ÚKONU (service_items). Typ zůstává exportovaný kvůli
- * ostatním souborům, které si jím popisují data — modal už je ale nebere
- * z karty, čte je přímo z položky.
- */
 export type QuoteTerms = {
   quote_fee?: number | null
   price_per_km?: number | null
@@ -52,19 +47,13 @@ interface Props {
   serviceId: string
   providerId: string
   isLoggedIn: boolean
-  /** 'u_poskytovatele' | 'u_zakaznika' | 'oboji' — z karty */
   locationType?: string | null
-  /** Volná okna poskytovatele, do kterých se tento úkon nabízí (z detailu karty). */
   slots?: SlotOption[]
-  /** Odkud poskytovatel vyjíždí a jak daleko — pro kontrolu dosahu. */
   providerGeo?: { lat: number | null; lng: number | null; radiusKm: number | null }
-  /** Jméno poskytovatele do navádění („… se vám pokusí nabídnout časy"). */
   providerName?: string | null
   onClose: () => void
 }
 
-// Vzdálenost dvou bodů na zemi (km). Vlastní kopie, ať se dá počítat i v prohlížeči
-// a zákazník dostal odpověď hned, ne až po odeslání.
 function distanceKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
   const R = 6371
   const dLat = ((bLat - aLat) * Math.PI) / 180
@@ -86,10 +75,33 @@ function formatDuration(min: number | null): string | null {
   return m ? `${h} h ${m} min` : `${h} h`
 }
 
-// Délka okna v minutách.
 function windowMinutes(s: SlotOption): number {
   return Math.round((new Date(s.ends_at).getTime() - new Date(s.starts_at).getTime()) / 60000)
 }
+
+// ── Mřížka časů ──────────────────────────────────────────────
+// Krok 15 minut. Nabízíme jen začátky, do kterých se úkon vejde do konce okna,
+// a jen budoucí (s pětiminutovou rezervou, ať zákazník nekliká na čas, který
+// mu mezitím utekl). Strop 60 časů na okno drží seznam přehledný i u celodenních oken.
+const STEP_MIN = 15
+const MAX_TIMES_PER_SLOT = 60
+
+type TimeOption = { slotId: string; startIso: string }
+
+function buildTimes(slot: SlotOption, durMin: number | null): TimeOption[] {
+  const start = new Date(slot.starts_at).getTime()
+  const end = new Date(slot.ends_at).getTime()
+  const potrebaMs = ((durMin && durMin > 0) ? durMin : Math.round((end - start) / 60000)) * 60000
+  const hranice = Date.now() + 5 * 60000
+  const out: TimeOption[] = []
+  for (let t = start; t + potrebaMs <= end; t += STEP_MIN * 60000) {
+    if (t >= hranice) out.push({ slotId: slot.id, startIso: new Date(t).toISOString() })
+    if (out.length >= MAX_TIMES_PER_SLOT) break
+  }
+  return out
+}
+
+const dayKey = (iso: string) => new Date(iso).toISOString().slice(0, 10)
 
 export default function OrderItemModal({
   item, serviceId, providerId, isLoggedIn, locationType = 'u_zakaznika', slots = [], providerGeo, providerName, onClose,
@@ -99,20 +111,13 @@ export default function OrderItemModal({
   const [message, setMessage] = useState('')
   const [city, setCity] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
-  const [selectedSlot, setSelectedSlot] = useState<string | null>(null)
-  // Zákazníkovi nevyhovuje žádné z nabízených oken → pošle poptávku a
-  // poskytovatel mu navrhne čas (vrstva 4). Bez tohohle byl v pasti:
-  // tlačítko šlo stisknout jen po výběru okna.
+  // Vybraný konkrétní čas — okno i začátek dohromady.
+  const [selected, setSelected] = useState<TimeOption | null>(null)
   const [skipSlot, setSkipSlot] = useState(false)
-  // Souřadnice vybrané obce — bez nich dosah spočítat nejde.
   const [cityGeo, setCityGeo] = useState<{ lat: number; lng: number } | null>(null)
-  // Jdeme rovnou na Stripe? Ovlivňuje jen text na potvrzovací obrazovce.
   const [goingToPay, setGoingToPay] = useState(false)
 
   const isModelB = item.payment_model === 'B'
-  // Místo výkonu určuje KARTA, ne zákazník. Kdo jezdí za zákazníky i přijímá
-  // v provozovně, má na to dvě karty — jinak by zákazník rozhodoval o tom,
-  // co si poskytovatel nastavil.
   const atCustomer = locationType !== 'u_poskytovatele'
   const needsCity = atCustomer
 
@@ -122,50 +127,54 @@ export default function OrderItemModal({
   const depositType = ((item as any).deposit_type as 'zaloha' | 'plna_platba' | undefined) ?? 'zaloha'
   const noShowFee = (item as any).no_show_fee != null ? Number((item as any).no_show_fee) : 0
   const feeMode = ((item as any).fee_mode as 'noshow' | 'storno' | 'zadny' | undefined) ?? 'noshow'
-  // Známe pevnou konečnou cenu? Jen tehdy má smysl ukazovat rozklad záloha/doplatek.
   const hasFixedPrice = !isModelB && item.price_type !== 'on_agreement' && item.price != null && Number(item.price) > 0
   const isFullPayment = !isModelB && depositType === 'plna_platba' && hasFixedPrice
-  // Kolik zákazník platí předem: u plné platby celá cena, jinak záloha.
   const deposit = isModelB
     ? 0
     : isFullPayment
       ? Number(item.price)
       : (item.deposit_amount ? Number(item.deposit_amount) : 0)
 
-  // ── Podmínky výjezdu (model B) — z ÚKONU ─────────────────────
-  // Dřív se braly z karty, takže všechny úkony modelu B na jedné kartě
-  // ukazovaly stejný poplatek. Teď má každý úkon svůj. Průnik typů drží
-  // kód funkční i kdyby types/database.ts zaostával za databází.
   const q = item as ServiceItem & QuoteTerms
   const quoteFee = Number(q.quote_fee ?? 0)
   const perKm = Number(q.price_per_km ?? 0)
   const freeKm = Number(q.free_km ?? 0)
   const quoteDays = Number(q.quote_days ?? 0)
 
-  // Vhodná okna: budoucí a dost dlouhá na délku úkonu. U modelu B termín nenabízíme
-  // (termín prohlídky se domlouvá zvlášť).
+  // Vhodná okna: budoucí a dost dlouhá na délku úkonu.
   const fitSlots: SlotOption[] = isModelB
     ? []
     : slots
-        .filter((s) => new Date(s.starts_at) > new Date())
+        .filter((s) => new Date(s.ends_at) > new Date())
         .filter((s) => !item.duration_minutes || windowMinutes(s) >= item.duration_minutes)
         .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime())
-  const hasSlots = fitSlots.length > 0
 
-  // ── Dosah poskytovatele ──────────────────────────────────────
-  // Masér z Valmezu nemá jezdit do Prahy. U REZERVACE TERMÍNU objednávku
-  // rovnou nepustíme (přijímá se automaticky, poskytovatel nemá šanci
-  // zasáhnout). U POPTÁVKY jen upozorníme — tam rozhoduje on sám a může
-  // výjimku udělat.
+  // Všechny nabízené časy, seskupené po dnech.
+  const allTimes: TimeOption[] = fitSlots.flatMap((s) => buildTimes(s, item.duration_minutes))
+  const days: { key: string; label: string; times: TimeOption[] }[] = []
+  for (const t of allTimes) {
+    const k = dayKey(t.startIso)
+    let d = days.find((x) => x.key === k)
+    if (!d) {
+      d = {
+        key: k,
+        label: new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'numeric' }).format(new Date(t.startIso)),
+        times: [],
+      }
+      days.push(d)
+    }
+    d.times.push(t)
+  }
+  const hasSlots = allTimes.length > 0
+
   const radius = providerGeo?.radiusKm ?? null
   const distance =
     atCustomer && cityGeo && providerGeo?.lat != null && providerGeo?.lng != null
       ? distanceKm(providerGeo.lat, providerGeo.lng, cityGeo.lat, cityGeo.lng)
       : null
   const outOfRange = distance != null && radius != null && distance > radius
-  const blockedByRange = outOfRange && hasSlots && !!selectedSlot && !skipSlot
+  const blockedByRange = outOfRange && hasSlots && !!selected && !skipSlot
 
-  // Předvyplnění města z profilu.
   useEffect(() => {
     let cancelled = false
     const load = async () => {
@@ -189,8 +198,6 @@ export default function OrderItemModal({
     priceText = `${item.price.toLocaleString('cs-CZ')} Kč ${unit}`.trim()
   else priceText = 'Cena dohodou'
 
-  const fmtDay = (iso: string) =>
-    new Intl.DateTimeFormat('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' }).format(new Date(iso))
   const fmtTime = (iso: string) =>
     new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
 
@@ -207,19 +214,18 @@ export default function OrderItemModal({
     }
     setState('loading'); setErrorMsg('')
 
-    // Cesta 1: vybraný termín → rezervace okna
-    if (hasSlots && selectedSlot && !skipSlot) {
+    // Cesta 1: vybraný čas → rezervace
+    if (hasSlots && selected && !skipSlot) {
       const res = await reserveSlotForItem({
-        slot_id: selectedSlot,
+        slot_id: selected.slotId,
         service_id: serviceId,
         service_item_id: item.id,
+        starts_at: selected.startIso,
         message: message || undefined,
         location_city: needsCity ? city.trim() : undefined,
         service_location: atCustomer ? 'u_zakaznika' : 'u_poskytovatele',
       })
       if (res.success) {
-        // Má-li úkon zálohu, rezervace rovnou založila platbu. Termín se drží
-        // 30 minut — pak ho Stripe prohlásí za propadlý a appka ho uvolní.
         if (res.payUrl) {
           setGoingToPay(true)
           setState('success')
@@ -232,7 +238,7 @@ export default function OrderItemModal({
       } else {
         setState('error'); setErrorMsg(res.error)
         router.refresh()
-        setSelectedSlot(null)
+        setSelected(null)
       }
       return
     }
@@ -250,9 +256,7 @@ export default function OrderItemModal({
     else { setState('error'); setErrorMsg(result.error) }
   }
 
-  // Když jsou termíny, k odeslání je potřeba jeden vybrat. A rezervaci mimo
-  // dosah nepustíme vůbec — poskytovatel by dostal potvrzený termín, kam nedojede.
-  const submitDisabled = state === 'loading' || (hasSlots && !selectedSlot && !skipSlot) || blockedByRange
+  const submitDisabled = state === 'loading' || (hasSlots && !selected && !skipSlot) || blockedByRange
 
   return (
     <AnimatePresence>
@@ -281,11 +285,9 @@ export default function OrderItemModal({
 
           {state === 'success' ? (
             (() => {
-              const bookedSlot = hasSlots && selectedSlot && !skipSlot
-                ? (slots.find((sl) => sl.id === selectedSlot) ?? null)
-                : null
-              const bookedWhen = bookedSlot
-                ? new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(new Date(bookedSlot.starts_at))
+              const bookedIso = hasSlots && selected && !skipSlot ? selected.startIso : null
+              const bookedWhen = bookedIso
+                ? new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(new Date(bookedIso))
                 : null
               return (
                 <div className="flex flex-col items-center gap-2 rounded-xl bg-emerald-50 p-5 text-center">
@@ -293,16 +295,16 @@ export default function OrderItemModal({
                     <CheckCircle2 className="h-7 w-7 text-emerald-600" />
                   </div>
                   <p className="text-lg font-black text-emerald-800">
-                    {bookedSlot
+                    {bookedIso
                       ? (goingToPay ? 'Termín pro vás držíme' : 'Termín je váš! 🎉')
                       : skipSlot ? 'Poptávka odeslána' : 'Objednávka odeslána'}
                   </p>
-                  {bookedSlot ? (
+                  {bookedIso ? (
                     <>
                       <p className="text-sm leading-relaxed text-emerald-700">
                         <strong>{item.name}</strong>{bookedWhen ? <>, {bookedWhen}</> : null}.
                       </p>
-                      {deposit > 0 && hasFixedPrice && (
+                      {deposit > 0 && hasFixedPrice && !isFullPayment && (
                         <p className="text-xs text-emerald-600">
                           Zaplatíte zálohu {deposit.toLocaleString('cs-CZ')} Kč, na místě doplatíte {Math.max(0, Number(item.price) - deposit).toLocaleString('cs-CZ')} Kč.
                         </p>
@@ -324,7 +326,7 @@ export default function OrderItemModal({
                           : 'Živnostník ji potvrdí a ozve se vám.'}
                     </p>
                   )}
-                  {!bookedSlot && (
+                  {!bookedIso && (
                     <Link href="/dashboard/objednavky" className="mt-1 text-xs font-bold text-emerald-700 underline">
                       Sledovat v Objednávkách
                     </Link>
@@ -389,7 +391,6 @@ export default function OrderItemModal({
                   </div>
                 )}
 
-                {/* Storno poplatek — zákazník musí vědět předem, na čem je. */}
                 {!isModelB && noShowFee > 0 && feeMode !== 'zadny' && (
                   <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-2 text-[11px] leading-relaxed text-amber-800">
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
@@ -401,8 +402,6 @@ export default function OrderItemModal({
                   </p>
                 )}
 
-                {/* Model B: co zákazník zaplatí za výjezd a nacenění. Musí to vědět
-                    PŘED objednáním, ne až z faktury. Údaje jsou z tohoto úkonu. */}
                 {isModelB && (quoteFee > 0 || perKm > 0 || quoteDays > 0) && (
                   <div className="mt-2 space-y-1 border-t border-slate-200 pt-2 text-xs leading-relaxed text-slate-600">
                     {quoteFee > 0 && (
@@ -433,7 +432,6 @@ export default function OrderItemModal({
                   </div>
                 )}
 
-                {/* Model B bez poplatků — taky to řekneme, ať zákazník neváhá. */}
                 {isModelB && quoteFee <= 0 && perKm <= 0 && (
                   <p className="mt-1.5 flex items-center gap-1.5 text-xs text-emerald-700">
                     <Truck className="h-3.5 w-3.5" />
@@ -442,51 +440,58 @@ export default function OrderItemModal({
                 )}
               </div>
 
-              {/* Výběr termínu (když jsou vhodná okna) */}
+              {/* Mřížka časů */}
               {hasSlots && (
                 <div>
                   <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
-                    <CalendarDays className="h-3.5 w-3.5 text-emerald-600" /> Vyberte termín *
+                    <CalendarDays className="h-3.5 w-3.5 text-emerald-600" /> Vyberte čas *
                   </label>
-                  <div className="flex flex-wrap gap-2">
-                    {fitSlots.map((s) => {
-                      const isSel = selectedSlot === s.id
-                      return (
-                        <button
-                          key={s.id}
-                          type="button"
-                          onClick={() => { setSelectedSlot(isSel ? null : s.id); setErrorMsg('') }}
-                          className={`rounded-xl border px-3 py-2 text-sm transition-all ${
-                            isSel
-                              ? 'border-emerald-500 bg-emerald-50 font-bold text-emerald-700'
-                              : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-300'
-                          }`}
-                        >
-                          <span className="font-semibold">{fmtDay(s.starts_at)}</span>{' '}
-                          {fmtTime(s.starts_at)}–{fmtTime(s.ends_at)}
-                        </button>
-                      )
-                    })}
+
+                  <div className="space-y-3">
+                    {days.map((d) => (
+                      <div key={d.key}>
+                        <p className="mb-1.5 text-xs font-bold capitalize text-slate-700">{d.label}</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {d.times.map((t) => {
+                            const isSel = selected?.startIso === t.startIso && selected?.slotId === t.slotId
+                            return (
+                              <button
+                                key={`${t.slotId}-${t.startIso}`}
+                                type="button"
+                                onClick={() => { setSelected(isSel ? null : t); setErrorMsg('') }}
+                                className={`rounded-lg border px-2.5 py-1.5 text-sm font-semibold transition-all ${
+                                  isSel
+                                    ? 'border-emerald-500 bg-emerald-500 text-white'
+                                    : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-300 hover:text-emerald-700'
+                                }`}
+                              >
+                                {fmtTime(t.startIso)}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <p className="mt-1.5 text-[11px] text-slate-400">
+
+                  <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+                    {dur ? `Úkon trvá ${dur}. ` : ''}
                     {deposit > 0
-                      ? 'Termín potvrdí zaplacení zálohy — po rezervaci vás rovnou pustíme k platbě.'
-                      : 'Vybraný termín je po rezervaci rovnou potvrzený — první bere.'}
+                      ? 'Termín potvrdí zaplacení zálohy — po výběru vás rovnou pustíme k platbě.'
+                      : 'Vybraný čas je po rezervaci rovnou potvrzený — první bere.'}
                   </p>
 
-                  {/* Únikový východ: žádné z oken nevyhovuje → poptávka, poskytovatel
-                      navrhne čas. Dřív tady zákazník uvízl. */}
                   <button
                     type="button"
                     onClick={() => {
                       setSkipSlot((v) => !v)
-                      setSelectedSlot(null)
+                      setSelected(null)
                       setErrorMsg('')
                       setState('form')
                     }}
                     className={`mt-2 text-xs font-semibold underline ${skipSlot ? 'text-emerald-700' : 'text-slate-500 hover:text-slate-700'}`}
                   >
-                    {skipSlot ? '← Zpět k nabízeným termínům' : 'Žádný termín mi nevyhovuje — napsat poskytovateli'}
+                    {skipSlot ? '← Zpět k nabízeným časům' : 'Žádný čas mi nevyhovuje — napsat poskytovateli'}
                   </button>
 
                   {skipSlot && (
@@ -498,7 +503,7 @@ export default function OrderItemModal({
                 </div>
               )}
 
-              {/* Město — jen když se koná u zákazníka. Našeptávač obcí. */}
+              {/* Město */}
               {needsCity ? (
                 <div>
                   <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
@@ -550,8 +555,6 @@ export default function OrderItemModal({
                 </div>
               )}
 
-              {/* Objednávka naslepo (karta nemá vypsaná okna): navedeme zákazníka,
-                  co se stane dál, ať netápe. Poskytovatel mu navrhne konkrétní čas. */}
               {!isModelB && !hasSlots && (
                 <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
                   <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
@@ -580,11 +583,11 @@ export default function OrderItemModal({
                 className="btn-primary w-full py-3 text-base disabled:opacity-60"
               >
                 {state === 'loading'
-                  ? <><Loader2 className="h-4 w-4 animate-spin" /> {hasSlots && selectedSlot && !skipSlot ? 'Rezervuji…' : 'Odesílám…'}</>
+                  ? <><Loader2 className="h-4 w-4 animate-spin" /> {hasSlots && selected && !skipSlot ? 'Rezervuji…' : 'Odesílám…'}</>
                   : hasSlots && !skipSlot
                     ? (deposit > 0
-                        ? <><Wallet className="h-4 w-4" /> Rezervovat a zaplatit</>
-                        : <><CalendarDays className="h-4 w-4" /> Rezervovat termín</>)
+                        ? <><Wallet className="h-4 w-4" /> {selected ? `Rezervovat ${fmtTime(selected.startIso)} a zaplatit` : 'Rezervovat a zaplatit'}</>
+                        : <><CalendarDays className="h-4 w-4" /> {selected ? `Rezervovat ${fmtTime(selected.startIso)}` : 'Rezervovat termín'}</>)
                     : isModelB ? 'Odeslat poptávku' : skipSlot ? 'Odeslat poptávku' : 'Odeslat objednávku'}
               </button>
 

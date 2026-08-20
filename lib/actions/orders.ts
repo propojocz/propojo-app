@@ -7,6 +7,7 @@ import { newOrderEmail, orderPlacedEmail, orderStatusEmail } from '@/lib/email/t
 import type { ActionResult, OrderStatus } from './types'
 import { createNotification } from '@/lib/actions/notifications'
 import { refundDeposit } from '@/lib/actions/payout'
+import { datumCas } from '@/lib/format'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://propojo.cz'
 
@@ -41,13 +42,13 @@ function fmtMoney(amount?: number | null): string | undefined {
   return a > 0 ? `${a.toLocaleString('cs-CZ')} Kč` : undefined
 }
 
+// Čas termínu do e-mailu. Přes lib/format.ts — e-mail se skládá na serveru,
+// který běží v UTC, a bez pevné zóny by zákazníkovi dorazilo potvrzení
+// s časem o dvě hodiny dřív, než na kdy je objednaný.
 function fmtDate(iso?: string | null): string | undefined {
   if (!iso) return undefined
-  try {
-    return new Date(iso).toLocaleString('cs-CZ', {
-      day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
-    })
-  } catch { return undefined }
+  const text = datumCas(iso)
+  return text === '—' ? undefined : text
 }
 
 // ── Storno podmínky do e-mailu ─────────────────────────────

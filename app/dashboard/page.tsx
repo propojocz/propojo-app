@@ -10,6 +10,7 @@ import Avatar from '@/components/ui/Avatar'
 import FreeSlotReminder, { NoFreeSlotHint, type ReminderSlot } from '@/components/ui/FreeSlotReminder'
 import PushPrompt from '@/components/ui/PushPrompt'
 import ShareProfileStep from '@/components/ui/ShareProfileStep'
+import { denDlouze, denKratce, rozsahCasu, datum } from '@/lib/format'
 
 export const metadata = { title: 'Dashboard | Propojo' }
 
@@ -77,9 +78,8 @@ export default async function DashboardPage() {
 
       if (silent.length > 0) {
         const s = silent[0]
-        const den = new Intl.DateTimeFormat('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' }).format(new Date(s.starts_at))
-        const od = new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(s.starts_at))
-        const doC = new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(s.ends_at))
+        // Přes lib/format.ts — dashboard se vykresluje na serveru (UTC) a bez
+        // pevné zóny by připomínka hlásila termín o dvě hodiny dřív.
         const names = (s.slot_services ?? [])
           .map((l: any) => l.services?.title)
           .filter(Boolean)
@@ -87,11 +87,33 @@ export default async function DashboardPage() {
 
         reminder = {
           id: s.id,
-          label: `${den} · ${od}–${doC}`,
+          label: `${denKratce(s.starts_at)} · ${rozsahCasu(s.starts_at, s.ends_at)}`,
           services: names,
           moreCount: silent.length - 1,
         }
       }
+    }
+
+    // ── Má tenhle poskytovatel vůbec co rezervovat? ──────────────
+    // Termíny fungují jen u úkonů s pevnou cenou a délkou (model A). Kdo dělá
+    // výhradně nacenění na místě — stavař, zahradník u velkých zakázek —
+    // termín vypsat nemůže a nemá smysl mu to připomínat. Připomínka i případné
+    // zvýhodnění v marketplace se proto řídí tímhle, ne tím, že prostě „nemá termín".
+    const { data: mojeKarty } = await supabase
+      .from('services')
+      .select('id')
+      .eq('provider_id', user.id) as { data: { id: string }[] | null }
+    const kartyIds = (mojeKarty ?? []).map((k) => k.id)
+
+    let maRezervovatelneUkony = false
+    if (kartyIds.length > 0) {
+      const { count: rezervovatelne } = await supabase
+        .from('service_items')
+        .select('id', { count: 'exact', head: true })
+        .in('service_id', kartyIds)
+        .eq('is_active', true)
+        .eq('payment_model', 'A')
+      maRezervovatelneUkony = (rezervovatelne ?? 0) > 0
     }
 
     // Odkaz na veřejný profil — musí být úplný, protože ho poskytovatel
@@ -115,7 +137,7 @@ export default async function DashboardPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-black text-slate-900">Dobrý den, {profile?.full_name?.split(' ')[0]} 👋</h1>
-            <p className="mt-0.5 text-sm text-slate-500">{new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}</p>
+            <p className="mt-0.5 text-sm text-slate-500">{denDlouze(new Date())}</p>
           </div>
           <div className="hidden shrink-0 gap-2 sm:flex">
             <Link href="/dashboard/terminy" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700">
@@ -128,7 +150,7 @@ export default async function DashboardPage() {
         </div>
 
         {/* Volný termín, o kterém nikdo neví — nejvýš, hned na očích */}
-        {reminder ? <FreeSlotReminder slot={reminder} /> : (servicesCount ?? 0) > 0 && <NoFreeSlotHint />}
+        {reminder ? <FreeSlotReminder slot={reminder} /> : maRezervovatelneUkony && <NoFreeSlotHint />}
 
         {/* Upozornění do telefonu — schová se samo, když je prohlížeč nepodporuje */}
         <PushPrompt />
@@ -194,7 +216,7 @@ export default async function DashboardPage() {
                   <Link key={o.id} href={`/dashboard/objednavky/${o.id}`} className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-slate-50">
                     <div className="flex-1 min-w-0">
                       <p className="truncate text-sm font-semibold text-slate-800">{o.services?.title ?? 'Neznámá služba'}</p>
-                      <p className="text-xs text-slate-400">{o.profiles?.full_name ?? 'Zákazník'} · {new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'short' }).format(new Date(o.created_at))}</p>
+                      <p className="text-xs text-slate-400">{o.profiles?.full_name ?? 'Zákazník'} · {denKratce(o.created_at)}</p>
                     </div>
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[o.status] ?? 'bg-slate-100 text-slate-500'}`}>{statusLabels[o.status] ?? o.status}</span>
                     <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
@@ -268,7 +290,7 @@ export default async function DashboardPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-black text-slate-900">Dobrý den, {profile?.full_name?.split(' ')[0]} 👋</h1>
-        <p className="mt-0.5 text-sm text-slate-500">{new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}</p>
+        <p className="mt-0.5 text-sm text-slate-500">{denDlouze(new Date())}</p>
       </div>
 
       {/* Upozornění do telefonu — schová se samo, když je prohlížeč nepodporuje */}
@@ -312,7 +334,7 @@ export default async function DashboardPage() {
                   <p className="text-sm text-slate-500">
                     {o.profiles?.full_name ?? 'Živnostník'} ·{' '}
                     {o.services?.price ? `${(o.services.price ?? 0).toLocaleString('cs-CZ')} Kč/${o.services.price_unit}` : ''} ·{' '}
-                    {new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(o.created_at))}
+                    {datum(o.created_at)}
                   </p>
                 </div>
                 <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${statusColors[o.status] ?? 'bg-slate-100 text-slate-500'}`}>

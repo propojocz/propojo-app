@@ -1,5 +1,8 @@
 // app/pridat-sluzbu/page.tsx
 // Stránka pro přidání nové služby – pouze ověření poskytovatelé (s IČO)
+//
+// Texty mluví o NABÍDCE, ne o „kartě". „Karta" je náš vnitřní pojem — poskytovatel
+// nepřemýšlí „chci vytvořit kartu", ale „chci nabídnout svoje služby".
 
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
@@ -118,15 +121,15 @@ export default async function PridatSluzbuPage() {
         {/* Hlavička */}
         <div className="mb-8">
           <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-emerald-600">
-            Nová nabídka
+            Vytvořte nabídku
           </p>
           <h1 className="text-3xl font-black tracking-tight text-slate-900">
-            Čím můžete pomoci?
+            Ukažte okolí, co umíte
           </h1>
-          <p className="mt-2 text-slate-500">
+          <p className="mt-2 max-w-xl leading-relaxed text-slate-500">
             {hasActiveSub
-              ? 'Vyplňte formulář a vaše nabídka se zobrazí zákazníkům v marketplace.'
-              : 'Vyplňte formulář v klidu — uložit si nabídku můžete i bez předplatného.'}
+              ? 'Stačí nám říct, co nabízíte. Ceník, termíny a zbytek nastavíte v dalších krocích.'
+              : 'Stačí nám říct, co nabízíte. Ceník i termíny nastavíte v dalších krocích — uložit si nabídku můžete i bez předplatného.'}
           </p>
         </div>
 

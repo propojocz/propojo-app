@@ -3,12 +3,16 @@
 // čtou z ceníku (service_items). Karta ukazuje „od X Kč" a počet úkonů — proto
 // se ke každé nalezené kartě dotáhnou její zveřejněné úkony a z nich se spočítá
 // minimální cena (řazení/filtr ceny běží v kódu, ne v DB — u desítek karet stačí).
+//
+// MŘÍŽKA: dvě karty vedle sebe na mobilu, tři na širokých obrazovkách.
+// Karty jsou kompaktní (viz ServiceCard), takže se do jedné obrazovky vejde
+// šestkrát víc nabídek než dřív a člověk nemusí donekonečna rolovat.
 
 import { Suspense } from 'react'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import type { ServiceWithProvider, ServiceItem } from '@/types/database'
-import ServiceCard from '@/components/ui/ServiceCard'
+import ServiceCard, { type CardPriceItem } from '@/components/ui/ServiceCard'
 import ServiceListSkeleton from '@/components/ui/ServiceListSkeleton'
 import FilterBar from '@/components/ui/FilterBar'
 import FilterSidebar from '@/components/ui/FilterSidebar'
@@ -207,6 +211,7 @@ async function ServiceList({
       .select('*')
       .in('service_id', idsForItems)
       .eq('is_active', true)
+      .order('sort_order', { ascending: true })
     for (const it of (itemRows ?? []) as ServiceItem[]) {
       ;(itemsByService[it.service_id] ??= []).push(it)
     }
@@ -221,6 +226,24 @@ async function ServiceList({
     return Math.min(...list.map((i) => Number(i.price)))
   }
   const itemCountOf = (sid: string): number => (itemsByService[sid] ?? []).length
+
+  // Jednotka nejlevnějšího úkonu — do „od 500 Kč/m²" na kartě.
+  const minUnitOf = (sid: string): string | null => {
+    const list = (itemsByService[sid] ?? []).filter(
+      (i) => i.payment_model !== 'B' && i.price != null && i.price > 0
+    )
+    if (list.length === 0) return null
+    const nej = list.reduce((a, b) => (Number(a.price) <= Number(b.price) ? a : b))
+    return nej.price_unit ?? null
+  }
+
+  // Pár úkonů do náhledu ceníku — karta je ukáže MÍSTO fotky, když poskytovatel
+  // žádnou nemá. Prázdná plocha v mřížce vypadá jako chyba; ceník nese informaci.
+  const priceItemsOf = (sid: string): CardPriceItem[] =>
+    (itemsByService[sid] ?? [])
+      .filter((i) => i.payment_model !== 'B')
+      .slice(0, 3)
+      .map((i) => ({ name: i.name, price: i.price ?? null, unit: i.price_unit ?? null }))
 
   // Filtr ceny podle min ceny úkonů. Karty bez ceny (dohodou/nacenění) projdou,
   // jen když uživatel cenový filtr nepoužil — jinak by zmizely neprávem.
@@ -355,8 +378,8 @@ async function ServiceList({
   // patří kartě, ne poskytovateli. Jinak by se u někoho se třemi kartami
   // rozsvítil i tam, kde okno není. Okno ↔ karta je přes slot_services.
   const freeSlotServices = new Set<string>()
-  // Časy oken po kartách — karta ukáže první dva termíny a „a další…",
-  // ať zákazník nemusí proklikávat, aby zjistil, kdy se dostane na řadu.
+  // Časy oken po kartách — karta ukáže nejbližší termín, ať zákazník nemusí
+  // proklikávat, aby zjistil, kdy se dostane na řadu.
   const slotTimesOf: Record<string, string[]> = {}
   if (serviceIds.length > 0) {
     const { data: slotRows } = await supabase
@@ -385,10 +408,11 @@ async function ServiceList({
 
   return (
     <div>
-      <p className="mb-6 text-sm text-slate-500">
+      <p className="mb-5 text-sm text-slate-500">
         Nalezeno <strong className="text-slate-800">{sorted.length}</strong> {sorted.length === 1 ? 'nabídka' : sorted.length < 5 ? 'nabídky' : 'nabídek'}
       </p>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      {/* Dvě karty vedle sebe i na mobilu, tři na širokých obrazovkách. */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-3">
         {sorted.map((service, i) => {
           const pid = (service.profiles as any)?.id ?? service.provider_id
           return (
@@ -403,8 +427,10 @@ async function ServiceList({
               isFavorited={favSet.has(pid)}
               isLoggedIn={!!user}
               minItemPrice={minPriceOf(service.id)}
+              minItemUnit={minUnitOf(service.id)}
               itemCount={itemCountOf(service.id)}
               gallery={(service as any).gallery ?? []}
+              priceItems={priceItemsOf(service.id)}
             />
           )
         })}

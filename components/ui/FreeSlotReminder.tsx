@@ -11,7 +11,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Megaphone, CalendarDays, ArrowRight } from 'lucide-react'
+import { Megaphone, CalendarDays, ArrowRight, Zap } from 'lucide-react'
 import SlotNotifyPanel from '@/components/ui/SlotNotifyPanel'
 
 export interface ReminderSlot {
@@ -78,23 +78,35 @@ export default function FreeSlotReminder({ slot }: { slot: ReminderSlot }) {
   )
 }
 
-/** Prázdný stav — poskytovatel nemá vypsané žádné volné okno. */
+/**
+ * Prázdný stav — poskytovatel nemá vypsané žádné volné okno.
+ *
+ * Dřív to byla jen laskavá pobídka („vypadl vám klient?"). Jenže bez termínu
+ * si u něj zákazník nemůže objednat na konkrétní čas — musí poslat poptávku
+ * a čekat, až se poskytovatel ozve. To je přesně ten krok, na kterém většina
+ * lidí odpadne. Proto se to teď říká rovnou: bez termínu přicházíš o objednávky,
+ * které by jinak přišly samy.
+ */
 export function NoFreeSlotHint() {
   return (
     <Link
       href="/dashboard/terminy"
-      className="flex items-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white p-4 transition-all hover:border-emerald-400 hover:bg-emerald-50/40"
+      className="flex items-start gap-3 rounded-2xl border border-dashed border-amber-300 bg-amber-50/50 p-4 transition-all hover:border-emerald-400 hover:bg-emerald-50/50"
     >
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100">
-        <CalendarDays className="h-5 w-5 text-slate-400" />
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100">
+        <CalendarDays className="h-5 w-5 text-amber-600" />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="font-bold text-slate-800">Vypadl vám klient?</p>
-        <p className="text-sm text-slate-500">
-          Vypište volný termín a dejte o něm vědět svým zákazníkům — obsadí se dřív, než stihnete uklidit.
+        <p className="font-bold text-slate-900">Nemáte vypsaný žádný termín</p>
+        <p className="mt-0.5 text-sm leading-relaxed text-slate-600">
+          Zákazník si u vás zatím nemůže rovnou zamluvit čas — musí poslat poptávku
+          a čekat, až se ozvete. U toho, kdo termín vypsaný má, klikne a je hotovo.
+        </p>
+        <p className="mt-1.5 inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700">
+          <Zap className="h-3.5 w-3.5" /> Vypsat volný termín — zabere to půl minuty
         </p>
       </div>
-      <ArrowRight className="h-4 w-4 shrink-0 text-slate-300" />
+      <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-slate-300" />
     </Link>
   )
 }

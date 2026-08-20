@@ -9,12 +9,14 @@
 // Nad ceníkem je blok VOLNÉ TERMÍNY — vypsaná okna poskytovatele. To je
 // hlavní featura Propojo (zaplnit díru v rozvrhu), proto je nahoře a ne
 // schovaná v objednávkovém modalu. Ceník samotný zůstává čistý.
+//
+// Časy se formátují přes lib/format.ts — tahle stránka běží na serveru (UTC)
+// a bez pevné zóny by termíny ukazovala o dvě hodiny dřív.
 
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { CATEGORY_META } from '@/types/database'
 import type { ServiceItem } from '@/types/database'
-import Image from 'next/image'
 import Link from 'next/link'
 import { MapPin, Star, ArrowLeft, ShieldCheck, ListChecks, Zap, ChevronRight, Building2, Camera, Pencil } from 'lucide-react'
 import Avatar from '@/components/ui/Avatar'
@@ -26,6 +28,7 @@ import ServiceFaq from '@/components/ui/ServiceFaq'
 import ServiceFaqEditor from '@/components/ui/ServiceFaqEditor'
 import AskProviderButton from '@/components/ui/AskProviderButton'
 import { getServiceBrand } from '@/lib/actions/brands'
+import { denKratce, rozsahCasu, datum } from '@/lib/format'
 import type { Metadata } from 'next'
 
 interface Props { params: { id: string } }
@@ -273,11 +276,14 @@ export default async function ServiceDetailPage({ params }: Props) {
               </div>
             </div>
 
-            {/* Popis */}
-            <div className="rounded-xl border border-slate-200 bg-white p-6">
-              <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">O nabídce</h2>
-              <p className="whitespace-pre-line leading-relaxed text-slate-700">{s.description}</p>
-            </div>
+            {/* Popis — jen když ho poskytovatel napsal. Prázdný blok „O nabídce"
+                nebo generovaná věta by vypadaly hůř než to, že tam nic není. */}
+            {(s.description ?? '').trim().length > 0 && (
+              <div className="rounded-xl border border-slate-200 bg-white p-6">
+                <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">O nabídce</h2>
+                <p className="whitespace-pre-line leading-relaxed text-slate-700">{s.description}</p>
+              </div>
+            )}
 
             {/* ── VOLNÉ TERMÍNY (last-minute) ── */}
             {freeSlots.length > 0 && (
@@ -290,22 +296,17 @@ export default async function ServiceDetailPage({ params }: Props) {
                   si ho rovnou zamluvte — potvrzení je okamžité.
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {freeSlots.map((slot) => {
-                    const den = new Intl.DateTimeFormat('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' }).format(new Date(slot.starts_at))
-                    const od = new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(slot.starts_at))
-                    const doC = new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(slot.ends_at))
-                    return (
-                      <Link
-                        key={slot.id}
-                        href={`/termin/${slot.id}`}
-                        className="group inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-white px-3.5 py-2.5 text-sm font-bold text-slate-800 shadow-sm transition hover:border-emerald-500 hover:bg-emerald-50"
-                      >
-                        <span>{den}</span>
-                        <span className="tabular-nums text-emerald-700">{od}–{doC}</span>
-                        <ChevronRight className="h-4 w-4 text-emerald-400 transition group-hover:translate-x-0.5" />
-                      </Link>
-                    )
-                  })}
+                  {freeSlots.map((slot) => (
+                    <Link
+                      key={slot.id}
+                      href={`/termin/${slot.id}`}
+                      className="group inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-white px-3.5 py-2.5 text-sm font-bold text-slate-800 shadow-sm transition hover:border-emerald-500 hover:bg-emerald-50"
+                    >
+                      <span>{denKratce(slot.starts_at)}</span>
+                      <span className="tabular-nums text-emerald-700">{rozsahCasu(slot.starts_at, slot.ends_at)}</span>
+                      <ChevronRight className="h-4 w-4 text-emerald-400 transition group-hover:translate-x-0.5" />
+                    </Link>
+                  ))}
                 </div>
               </div>
             )}
@@ -474,7 +475,7 @@ export default async function ServiceDetailPage({ params }: Props) {
             )}
 
             <p className="text-center text-xs text-slate-400">
-              Přidáno {new Intl.DateTimeFormat('cs-CZ', { dateStyle: 'medium' }).format(new Date(s.created_at))}
+              Přidáno {datum(s.created_at)}
             </p>
           </div>
         </div>

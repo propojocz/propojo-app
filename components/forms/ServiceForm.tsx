@@ -1,28 +1,27 @@
 'use client'
 // components/forms/ServiceForm.tsx — model „karta + ceník"
 //
-// Karta = identita provozovny (název, podtitul, foto, galerie, kategorie,
-// podkategorie, kde pracujete, město, adresa, dojezd, telefon, popis).
-// Cena/model/délka/záloha/materiál/storno se sem UŽ NEPÍŠE — nese je ceník
-// (service_items) přes komponentu PriceList níže.
+// PRVNÍ KROK JE ZÁMĚRNĚ HOLÝ. Poskytovatel vyplní tři věci — jak se má
+// zobrazovat, co dělá a kde působí — a jde dál. Popis, podtitul, telefon
+// a fotky jsou schované pod „Doplnit teď", protože nic z toho není potřeba
+// k tomu, aby nabídka fungovala. Zbytek si Propojo poskládá samo: tagy
+// z podkategorií, cenu z ceníku, nejbližší termín z kalendáře.
 //
-// Dostupnost (otevírací doba, pauzy, blokace) má vlastní stránku
-// /dashboard/dostupnost/[id] — tady je na ni jen odkaz, ať nastavení
-// neexistuje na dvou místech.
+// Cena/model/délka/záloha/materiál/storno se sem NEPÍŠE — nese je ceník
+// (service_items) přes komponentu PriceList.
 //
 // Dvě fáze ukládání:
-//  1) Vyplníte kartu → „Uložit kartu a pokračovat k ceníku“ → karta dostane id
-//  2) Pod formulářem se otevře ceník, přidáte úkony → „Hotovo“
-// V režimu edit je karta rovnou ve fázi 2 (id už existuje).
+//  1) Vyplníte základ → „Pokračovat na služby a ceny" → nabídka dostane id
+//  2) Otevře se ceník, přidáte úkony → termíny → zveřejnění
+// V režimu edit je nabídka rovnou ve fázi 2 (id už existuje).
 
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle2, AlertCircle, Loader2, ChevronRight, Store, Home, Lightbulb, Eye, ListChecks, CalendarDays, Plus, Sparkles } from 'lucide-react'
+import { CheckCircle2, AlertCircle, Loader2, ChevronRight, ChevronDown, Store, Home, Lightbulb, Eye, ListChecks, CalendarDays, Plus, Sparkles } from 'lucide-react'
 import { createService, updateService } from '@/lib/actions/services'
 import { createOwnSubcategory } from '@/lib/actions/subcategories'
 import type { Service, ServiceItem } from '@/types/database'
@@ -39,9 +38,11 @@ import type { ServiceTypeOption } from '@/components/ui/ServiceItemEditor'
 import BrandPicker from '@/components/ui/BrandPicker'
 
 const schema = z.object({
-  title: z.string().min(5, 'Název musí mít alespoň 5 znaků').max(100),
+  title: z.string().min(3, 'Napište, jak se chcete zobrazovat (aspoň 3 znaky)').max(100),
   subtitle: z.string().max(80).nullable().optional(),
-  description: z.string().min(20, 'Popis musí mít alespoň 20 znaků').max(2000),
+  // Popis už NENÍ povinný. Kdo ho nevyplní, dostane větu složenou z oboru
+  // a města — prázdná karta by na detailu vypadala opuštěně.
+  description: z.string().max(2000).nullable().optional(),
   category: z.string().min(1, 'Vyberte kategorii'),
   subcategory_id: z.string().optional(),
   subcategory_ids: z.array(z.string()).optional(),
@@ -56,7 +57,6 @@ const schema = z.object({
   // Kde se služba vykonává
   location_type: z.enum(['u_poskytovatele', 'u_zakaznika']),
   radius_km: z.number().int().min(1).max(300).nullable().optional(),
-
 
   // Adresa provozovny (jen u_poskytovatele)
   address: z.string().max(200).nullable().optional(),
@@ -75,16 +75,17 @@ interface Props {
   mode: 'create' | 'edit'
   initialData?: Service
   onSuccess?: (id: string) => void
-  /** Má poskytovatel aktivní předplatné? Bez něj se karta po uložení nezveřejní. */
+  /** Má poskytovatel aktivní předplatné? Bez něj se nabídka po uložení nezveřejní. */
   hasActiveSub?: boolean
 }
 
 export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub = true }: Props) {
   const [categories, setCategories] = useState<Category[]>([])
   const [radiusExpanded, setRadiusExpanded] = useState(false)
-  // Krokovaný průchod: 1 Karta → 2 Ceník → 3 Kdy máte čas → 4 Zveřejnění.
-  // V režimu úprav začínáme rovnou u karty, ale všechny kroky jsou odemčené.
+  // Krokovaný průchod: 1 Co nabízíte → 2 Služby a ceny → 3 Termíny → 4 Zveřejnění.
   const [krok, setKrok] = useState(1)
+  // Nepovinná část prvního kroku (podtitul, popis, telefon, fotky).
+  const [detailyOtevrene, setDetailyOtevrene] = useState(mode === 'edit')
   // Vlastní podkategorie („Nevidím svou službu")
   const [ownSubOpen, setOwnSubOpen] = useState(false)
   const [ownSubName, setOwnSubName] = useState('')
@@ -98,7 +99,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
   const [errorMsg, setErrorMsg] = useState('')
   const [profile, setProfile] = useState<any>(null)
 
-  // ID uložené karty — řídí fázi. V edit režimu je hned, v create až po uložení.
+  // ID uložené nabídky — řídí fázi. V edit režimu je hned, v create až po uložení.
   const [serviceId, setServiceId] = useState<string | null>(initialData?.id ?? null)
   // Položky ceníku (fáze 2)
   const [items, setItems] = useState<ServiceItem[]>([])
@@ -112,7 +113,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
     defaultValues: initialData ? {
       title: initialData.title,
       subtitle: init.subtitle ?? null,
-      description: initialData.description,
+      description: initialData.description ?? '',
       category: initialData.category,
       phone: init.phone ?? null,
       city: initialData.city,
@@ -131,6 +132,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
       address_public: init.address_public ?? true,
     } : {
       subtitle: null,
+      description: '',
       phone: null,
       subcategory_ids: [],
       city_lat: null,
@@ -169,6 +171,13 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
         .eq('id', user.id)
         .single()
       setProfile(data)
+
+      // Město z profilu předvyplníme, ať člověk nepíše to, co už jednou zadal.
+      // Jen když pole ještě prázdné je — v úpravách nabídky nic nepřepisujeme.
+      const mesto = (data as any)?.city
+      if (mode === 'create' && mesto && !watch('city')) {
+        setValue('city', mesto, { shouldValidate: true })
+      }
     }
     load()
   }, [])
@@ -213,6 +222,22 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
     .flatMap(sub => sub.service_types ?? [])
     .map(st => ({ id: st.id, name: st.name }))
 
+  // Názvy vybraných podkategorií — používá je náhled, souhrn i doplňování textů.
+  const previewSubNames = [
+    ...(activeCat?.subcategories ?? [])
+      .filter(sub => selectedSubIds.includes(sub.id))
+      .map(sub => sub.name),
+    ...ownSubs.filter(o => selectedSubIds.includes(o.id)).map(o => o.name),
+  ]
+  const hlavniObor = previewSubNames[0] ?? activeCat?.name ?? ''
+
+  // Podtitul se skládá z vybraných oborů: „Kadeřnictví · Barber". Poskytovatel
+  // nemá vymýšlet marketingovou větu — appka ví, co dělá, z toho, co naklikal.
+  const podtitulZOboru = previewSubNames.slice(0, 3).join(' · ')
+  // Přepsal si ho ručně? Pak platí jeho verze.
+  const vlastniPodtitul = (watch('subtitle') ?? '').trim()
+  const [upravaPodtitulu, setUpravaPodtitulu] = useState(false)
+
   // ── Vlastní podkategorie („Nevidím svou službu") ──
   // Vytvoří se jako NESCHVÁLENÁ: na kartě funguje hned, do zákaznického
   // vyhledávání spadne, až ji projdeme v adminu.
@@ -236,19 +261,32 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
     setOwnSubName(''); setOwnSubOpen(false)
   }
 
-  // ── Uložení KARTY ──
+  // ── Uložení NABÍDKY ──
   const onSubmit = async (data: FormValues) => {
     setSubmitState('loading'); setErrorMsg('')
+
+    // Popis je volitelný a NEDOPLŇUJEME ho automaticky. Generovaná věta typu
+    // „Kadeřnictví ve Vsetíně nabízí kvalitní služby" vypadá uměle a na dvaceti
+    // profilech vedle sebe je vidět, že ji psal stroj. Bez popisu se blok
+    // „O nabídce" na detailu prostě nezobrazí.
+    const popis = (data.description ?? '').trim()
+
+    // Podtitul si Propojo skládá samo z vybraných oborů — poskytovatel ho
+    // nevyplňuje. Kdo si ho přepsal ručně, má přednost.
+    const podtitul = (data.subtitle ?? '').trim() || podtitulZOboru || null
+
+    const payload = { ...data, description: popis, subtitle: podtitul }
+
     const result = serviceId
-      ? await updateService(serviceId, data as any)
-      : await createService(data as any)
+      ? await updateService(serviceId, payload as any)
+      : await createService(payload as any)
 
     if (result.success) {
       setSubmitState('success')
       setServiceId(result.id)
       onSuccess?.(result.id)
       setTimeout(() => setSubmitState('idle'), 2500)
-      // Karta má id → posuneme se rovnou na ceník. Bez tohohle kroku
+      // Nabídka má id → posuneme se rovnou na ceník. Bez tohohle kroku
       // řemeslník uložil a nevěděl, že má pokračovat.
       if (mode === 'create') {
         setKrok(2)
@@ -269,10 +307,6 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
   const wCity = watch('city') ?? ''
   const wImage = watch('image_url') ?? ''
 
-  const previewSubNames = (activeCat?.subcategories ?? [])
-    .filter(sub => selectedSubIds.includes(sub.id))
-    .map(sub => sub.name)
-
   // Cena v náhledu se bere z nejlevnějšího zveřejněného úkonu ceníku (fallback: bez ceny).
   const activeItems = items.filter(i => i.is_active)
   const cheapest = activeItems
@@ -282,7 +316,9 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
   const previewService = {
     id: serviceId ?? 'nahled',
     provider_id: profile?.id ?? 'nahled',
-    title: wTitle.trim() || 'Název vaší karty',
+    title: wTitle.trim() || 'Název vaší nabídky',
+    // Podtitul skládá appka z oborů; ruční verze má přednost.
+    subtitle: vlastniPodtitul || podtitulZOboru || null,
     category: selectedCategory ?? '',
     city: wCity.trim() || 'Vaše město',
     image_url: wImage || null,
@@ -304,24 +340,22 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
   } as any
 
   // ── Kdy je krok hotový ────────────────────────────────────────
-  // Podle toho se odemykají další kroky a mění spodní lišta.
-  const wPopis = watch('description') ?? ''
+  // Popis mezi podmínky nepatří — je volitelný.
   const krok1Hotovy =
-    (watch('title') ?? '').trim().length >= 5 &&
-    wPopis.trim().length >= 20 &&
+    (watch('title') ?? '').trim().length >= 3 &&
     !!selectedCategory &&
-    selectedSubIds.length > 0
+    selectedSubIds.length > 0 &&
+    (watch('city') ?? '').trim().length >= 2
   const krok2Hotovy = items.length > 0 && items.some(i => i.is_active)
 
-  // Krok 3 (dostupnost) navštívil? Pak dostane fajfku. ServiceHours si dny
-  // řídí sám a ven je nedává, tak neblokujeme — dostupnost není nutná k tomu,
-  // aby karta existovala (bez ní chodí jen poptávky). Jen navádíme.
+  // Krok 3 (termíny) navštívil? Pak dostane fajfku. ServiceHours si dny řídí sám,
+  // takže neblokujeme — bez rozvrhu chodí jen poptávky, karta funguje dál.
   const [krok3Navstiven, setKrok3Navstiven] = useState(mode === 'edit')
 
   const KROKY = [
-    { c: 1, nadpis: 'Vaše karta', hotovo: krok1Hotovy, pruchozi: krok1Hotovy },
-    { c: 2, nadpis: 'Ceník', hotovo: krok2Hotovy, pruchozi: krok2Hotovy },
-    { c: 3, nadpis: 'Kdy máte čas', hotovo: krok3Navstiven, pruchozi: true },
+    { c: 1, nadpis: 'Co nabízíte', hotovo: krok1Hotovy, pruchozi: krok1Hotovy },
+    { c: 2, nadpis: 'Služby a ceny', hotovo: krok2Hotovy, pruchozi: krok2Hotovy },
+    { c: 3, nadpis: 'Termíny', hotovo: krok3Navstiven, pruchozi: true },
     { c: 4, nadpis: 'Zveřejnění', hotovo: false, pruchozi: false },
   ]
   // Dopředu jen přes průchozí kroky; v režimu úprav je vše odemčené.
@@ -375,9 +409,42 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
           preview
         />
       </div>
+      {/* Podtitul si appka skládá sama — kdo ho chce jiný, přepíše si ho tady.
+          Schválně nenápadné: 9 z 10 lidí nemá důvod o tom vůbec přemýšlet. */}
+      {podtitulZOboru && (
+        <div className="mt-2">
+          {upravaPodtitulu ? (
+            <div className="space-y-1.5">
+              <input
+                type="text" maxLength={80} autoFocus
+                placeholder={podtitulZOboru}
+                defaultValue={vlastniPodtitul}
+                onChange={e => setValue('subtitle', e.target.value || null)}
+                className="form-input text-sm"
+              />
+              <button
+                type="button"
+                onClick={() => setUpravaPodtitulu(false)}
+                className="text-xs font-semibold text-emerald-600 hover:text-emerald-700"
+              >
+                Hotovo
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setUpravaPodtitulu(true)}
+              className="text-xs text-slate-400 underline hover:text-slate-600"
+            >
+              Upravit řádek pod názvem
+            </button>
+          )}
+        </div>
+      )}
+
       {!wImage && (
         <p className="mt-2.5 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
-          Karty s fotkou dostávají výrazně víc kliknutí než ty bez. Přidejte titulní fotku níže.
+          Nabídky s fotkou dostávají výrazně víc kliknutí. Fotku přidáte v části „Doplnit teď" — nebo kdykoli později.
         </p>
       )}
       {serviceId && cheapest == null && activeItems.length === 0 && (
@@ -401,56 +468,33 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
       >
         {rail}
 
-        {/* ══ KROK 1 — VAŠE KARTA ══ */}
+        {/* ══ KROK 1 — CO NABÍZÍTE ══ */}
         <div className={krok === 1 ? 'space-y-6' : 'hidden'}>
 
         {/* Tip */}
         <div className="flex items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
           <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
           <p className="text-xs leading-relaxed text-slate-600">
-            <strong className="text-slate-800">Karta = jedna provozovna nebo obor.</strong>{' '}
-            Kadeřnictví je jedna karta — jednotlivé úkony (střih, barvení, obočí) přidáte níže do ceníku,
-            každý s vlastní cenou a délkou. Autoservis patří na samostatnou kartu.
+            <strong className="text-slate-800">Jedna nabídka = jeden hlavní obor.</strong>{' '}
+            Jednotlivé služby a jejich ceny přidáte v dalším kroku.
+            <span className="mt-0.5 block text-slate-400">Např. Kadeřnictví → pánský střih, barvení, foukaná…</span>
           </p>
         </div>
 
-        {/* 1. NÁZEV */}
+        {/* 1. JAK SE CHCETE ZOBRAZOVAT */}
         <div className="space-y-1.5">
           <label className="form-label flex items-center justify-between">
-            <span>Název karty *</span>
+            <span>Jak se chcete zákazníkům zobrazovat? *</span>
             <span className="text-xs font-normal text-slate-400">{wTitle.length} / 100</span>
           </label>
-          <input {...f('title')} maxLength={100} placeholder="např. Salon Bella / Jan Novák – malířství" className={`form-input ${errors.title ? 'form-input-error' : ''}`} />
+          <input {...f('title')} maxLength={100} placeholder="např. Salon Bella" className={`form-input ${errors.title ? 'form-input-error' : ''}`} />
+          <p className="text-xs text-slate-400">Může to být název firmy, salonu, nebo prostě vaše jméno.</p>
           {errors.title && <p className="form-error">{errors.title.message}</p>}
         </div>
 
-        {/* 2. PODTITUL */}
-        <div className="space-y-1.5">
-          <label className="form-label">Podtitul <span className="font-normal text-slate-400">(volitelné)</span></label>
-          <input
-            type="text" maxLength={80} placeholder="např. Kadeřnictví a barbershop"
-            defaultValue={watch('subtitle') ?? ''}
-            onChange={e => setValue('subtitle', e.target.value || null)}
-            className="form-input"
-          />
-          <p className="text-xs text-slate-400">Krátké upřesnění pod názvem — pomáhá zákazníkovi hned poznat, co děláte.</p>
-        </div>
-
-        {/* 3. POPIS */}
-        <div className="space-y-1.5">
-          <label className="form-label">Popis *</label>
-          <textarea
-            {...f('description')} rows={4}
-            placeholder="Např.: Salon v centru Vsetína. Stříháme dámy i pány, děláme permanentní make-up. Ceny jednotlivých úkonů najdete v ceníku níže."
-            className={`form-input resize-none ${errors.description ? 'form-input-error' : ''}`}
-          />
-          <p className="text-xs text-slate-400">Ceny sem nepište — patří do ceníku, kde se dají rovnou objednat.</p>
-          {errors.description && <p className="form-error">{errors.description.message}</p>}
-        </div>
-
-        {/* 4. KATEGORIE */}
+        {/* 2. CO NABÍZÍTE — kategorie a obory */}
         <div className="space-y-3">
-          <label className="form-label">Hlavní kategorie *</label>
+          <label className="form-label">Co nabízíte? *</label>
           {loadingCats ? (
             <div className="flex items-center gap-2 text-sm text-slate-400">
               <Loader2 className="h-4 w-4 animate-spin" /> Načítám kategorie…
@@ -488,11 +532,11 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
                 {activeCat && (
                   <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
                     <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-                      <ChevronRight className="h-3 w-3" /> Podkategorie (vyberte i více)
+                      <ChevronRight className="h-3 w-3" /> Obor — vyberte i více
                       <InfoTip align="left">
-                        Podle vybraných podkategorií se vám <strong>v ceníku nabídnou konkrétní
+                        Podle vybraných oborů se vám <strong>v ceníku nabídnou konkrétní
                         úkony</strong> z našeho katalogu — nemusíte je vypisovat ručně.
-                        Vyberte vše, co reálně děláte.
+                        Zákazníkovi se z nich zároveň složí štítky na kartě.
                       </InfoTip>
                     </p>
                     <div className="flex flex-wrap gap-2">
@@ -563,7 +607,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
                           <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
                             <p className="text-xs leading-relaxed text-amber-900">
                               <strong>Napište službu odborně</strong> — tak, jak ji zná zákazník.
-                              Hned si ji dáte na kartu a můžete přijímat objednávky. Ve vyhledávání
+                              Hned si ji dáte do nabídky a můžete přijímat objednávky. Ve vyhledávání
                               se ukáže, jakmile ji zařadíme mezi ostatní.
                             </p>
                             <div className="mt-2 flex gap-2">
@@ -599,17 +643,16 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
           {errors.category && <p className="form-error">{errors.category.message}</p>}
         </div>
 
-        {/* 5. KDE VYKONÁVÁTE */}
+        {/* 3. KDE PŮSOBÍTE */}
         <div className="space-y-3">
           <label className="form-label flex items-center justify-between gap-1">
-            <span>Kde vykonáváte svou službu? *</span>
+            <span>Kde působíte? *</span>
             <InfoTip>
-              Platí pro celou kartu. Děláte obojí, tedy máte salon a zároveň jezdíte za zákazníky?
-              <strong> Založte si dvě karty</strong>, každou s vlastním ceníkem. Zákazník pak hned
+              Platí pro celou nabídku. Děláte obojí, tedy máte salon a zároveň jezdíte za zákazníky?
+              <strong> Založte si dvě nabídky</strong>, každou s vlastním ceníkem. Zákazník pak hned
               ví, co si objednává, a vy nemusíte u každé objednávky řešit, kam se jede.
             </InfoTip>
           </label>
-          <p className="-mt-1 text-xs text-slate-400">Podle toho poznáme, jestli po zákazníkovi chtít adresu.</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {([
               { value: 'u_poskytovatele', icon: Store, title: 'Zákazník přijde za mnou', desc: 'Mám provozovnu (salon, dílna)' },
@@ -633,145 +676,185 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
               )
             })}
           </div>
-        </div>
 
-        {/* 6. MĚSTO */}
-        <div className="space-y-1.5">
-          <label className="form-label">Město působiště *</label>
-          <SearchAutocomplete
-            mode="obce"
-            defaultValue={watch('city')}
-            placeholder="Začněte psát a vyberte obec ze seznamu…"
-            onPickObec={(item) => {
-              setValue('city', item.obec, { shouldValidate: true })
-              setValue('city_lat', item.latitude)
-              setValue('city_lng', item.longitude)
-            }}
-            onFreeText={(text) => {
-              setValue('city', text, { shouldValidate: true })
-              setValue('city_lat', null)
-              setValue('city_lng', null)
-            }}
-          />
-          {errors.city && <p className="form-error">{errors.city.message}</p>}
-          <p className="text-xs text-slate-400">
-            Podle města vás zákazníci najdou ve vyhledávání a zobrazí se na kartě.
-            {locationType !== 'u_zakaznika'
-              ? ' Máte-li provozovnu, doplní se samo z adresy níže.'
-              : ' Vyberte obec ze seznamu (ne jen napište) — jinak nepůjde spočítat dojezdovou vzdálenost.'}
-          </p>
-        </div>
-
-        {/* 6b. ADRESA PROVOZOVNY */}
-        <AnimatePresence>
-          {locationType !== 'u_zakaznika' && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-2 overflow-hidden">
-              <label className="form-label">Přesná adresa provozovny</label>
-              <AddressInput
-                defaultValue={watch('address')}
-                onPick={(a: { address: string; lat: number; lng: number; municipality: string }) => {
-                  setValue('address', a.address, { shouldValidate: true })
-                  setValue('address_lat', a.lat)
-                  setValue('address_lng', a.lng)
-                  if (!watch('city') && a.municipality) {
-                    setValue('city', a.municipality, { shouldValidate: true })
-                  }
-                }}
-                onFreeText={(text: string) => {
-                  setValue('address', text || null)
-                  setValue('address_lat', null)
-                  setValue('address_lng', null)
-                }}
-              />
-              <p className="text-xs text-slate-400">
-                Vyberte adresu ze seznamu — zákazník pak uvidí špendlík na mapě a trefí k vám napoprvé.
-              </p>
-
-              <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <input
-                  type="checkbox"
-                  checked={watch('address_public') ?? true}
-                  onChange={(e) => setValue('address_public', e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                />
-                <span>
-                  <span className="block text-sm font-semibold text-slate-800">Zobrazit adresu veřejně</span>
-                  <span className="block text-xs leading-relaxed text-slate-500">
-                    Když vypnete, zákazníci uvidí jen město — přesnou adresu dostanou až po objednání.
-                    Hodí se, když pracujete z domova.
-                  </span>
-                </span>
-              </label>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* 7. DOJEZD */}
-        <AnimatePresence>
-          {locationType !== 'u_poskytovatele' && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              // overflow-hidden ořezával bublinu InfoTipu. Během animace ho držíme
-              // skrytý (kvůli plynulému rozbalení výšky), po dokončení uvolníme.
-              onAnimationComplete={() => setRadiusExpanded(true)}
-              className={`space-y-1.5 ${radiusExpanded ? 'overflow-visible' : 'overflow-hidden'}`}>
-              <label className="form-label flex items-center justify-between gap-1">
-                <span>Dojezdová vzdálenost (km)</span>
-                <InfoTip>
-                  Jak daleko od svého města ještě dojedete. Zákazník si podle toho vyfiltruje,
-                  jestli je jeho adresa ve vašem dosahu. <strong>Cenu za cestu</strong> nastavíte
-                  níže u konkrétního úkonu s naceněním.
-                </InfoTip>
-              </label>
-              <input
-                type="number" min={1} max={300} placeholder="20"
-                defaultValue={watch('radius_km') ?? ''}
-                onChange={e => setValue('radius_km', (e.target.value === '' ? null : Number(e.target.value)) as any)}
-                className="form-input"
-              />
-              <p className="text-xs text-slate-400">
-                Jak daleko od zadaného města jste ochotní dojet. Zákazníci si podle toho vyfiltrují, jestli je váš dosah pokrývá.
-              </p>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* 8. TELEFON */}
-        <div className="space-y-1.5">
-          <label className="form-label">Telefon na tuto kartu <span className="font-normal text-slate-400">(volitelné)</span></label>
-          <input
-            type="text" maxLength={30} placeholder="+420 777 123 456"
-            defaultValue={watch('phone') ?? ''}
-            onChange={e => setValue('phone', e.target.value || null)}
-            className="form-input"
-          />
-          <p className="text-xs text-slate-400">Když má pobočka vlastní číslo, uveďte ho tady. Jinak platí telefon z profilu.</p>
-        </div>
-
-        {/* 9. FOTKY */}
-        <div className="space-y-5 border-t border-slate-100 pt-5">
+          {/* Město */}
           <div className="space-y-1.5">
-            <label className="form-label">Titulní fotografie <span className="font-normal text-slate-400">(volitelné)</span></label>
-            <p className="text-xs text-slate-400">Hlavní fotka — zobrazí se na kartě v marketplace a nahoře na detailu.</p>
-            <ImageUpload value={watch('image_url')} onChange={url => setValue('image_url', url)} folder="services" />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="form-label flex items-center justify-between gap-1">
-              <span>Ukázky práce <span className="font-normal text-slate-400">(volitelné)</span></span>
-              <InfoTip>
-                Prvních pět fotek si zákazník <strong>prolistuje přímo v marketplace</strong>,
-                aniž by kartu otevřel. Dejte na začátek ty nejlepší — rozhodují o tom,
-                jestli klikne dál.
-              </InfoTip>
-            </label>
+            <SearchAutocomplete
+              mode="obce"
+              defaultValue={watch('city')}
+              placeholder="Město nebo obec — začněte psát a vyberte ze seznamu…"
+              onPickObec={(item) => {
+                setValue('city', item.obec, { shouldValidate: true })
+                setValue('city_lat', item.latitude)
+                setValue('city_lng', item.longitude)
+              }}
+              onFreeText={(text) => {
+                setValue('city', text, { shouldValidate: true })
+                setValue('city_lat', null)
+                setValue('city_lng', null)
+              }}
+            />
+            {errors.city && <p className="form-error">{errors.city.message}</p>}
             <p className="text-xs text-slate-400">
-              Prvních 5 fotek si zákazník prolistuje přímo na kartě v marketplace, zbytek uvidí po otevření profilu.
+              Podle města vás zákazníci najdou ve vyhledávání.
+              {locationType === 'u_zakaznika'
+                ? ' Vyberte obec ze seznamu (ne jen napište) — jinak nepůjde spočítat dojezdovou vzdálenost.'
+                : ' Máte-li provozovnu, doplní se samo z adresy níže.'}
             </p>
-            <GalleryUpload value={watch('gallery') ?? []} onChange={(urls) => setValue('gallery', urls)} />
           </div>
+
+          {/* Adresa provozovny */}
+          <AnimatePresence>
+            {locationType !== 'u_zakaznika' && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-2 overflow-hidden">
+                <label className="form-label">Přesná adresa provozovny</label>
+                <AddressInput
+                  defaultValue={watch('address')}
+                  onPick={(a: { address: string; lat: number; lng: number; municipality: string }) => {
+                    setValue('address', a.address, { shouldValidate: true })
+                    setValue('address_lat', a.lat)
+                    setValue('address_lng', a.lng)
+                    if (!watch('city') && a.municipality) {
+                      setValue('city', a.municipality, { shouldValidate: true })
+                    }
+                  }}
+                  onFreeText={(text: string) => {
+                    setValue('address', text || null)
+                    setValue('address_lat', null)
+                    setValue('address_lng', null)
+                  }}
+                />
+                <p className="text-xs text-slate-400">
+                  Vyberte adresu ze seznamu — zákazník pak uvidí špendlík na mapě a trefí k vám napoprvé.
+                </p>
+
+                <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <input
+                    type="checkbox"
+                    checked={watch('address_public') ?? true}
+                    onChange={(e) => setValue('address_public', e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>
+                    <span className="block text-sm font-semibold text-slate-800">Zobrazit adresu veřejně</span>
+                    <span className="block text-xs leading-relaxed text-slate-500">
+                      Když vypnete, zákazníci uvidí jen město — přesnou adresu dostanou až po objednání.
+                      Hodí se, když pracujete z domova.
+                    </span>
+                  </span>
+                </label>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Dojezd */}
+          <AnimatePresence>
+            {locationType !== 'u_poskytovatele' && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                // overflow-hidden ořezával bublinu InfoTipu. Během animace ho držíme
+                // skrytý (kvůli plynulému rozbalení výšky), po dokončení uvolníme.
+                onAnimationComplete={() => setRadiusExpanded(true)}
+                className={`space-y-1.5 ${radiusExpanded ? 'overflow-visible' : 'overflow-hidden'}`}>
+                <label className="form-label flex items-center justify-between gap-1">
+                  <span>Kam ještě dojedete (km)</span>
+                  <InfoTip>
+                    Jak daleko od svého města ještě dojedete. Zákazník si podle toho vyfiltruje,
+                    jestli je jeho adresa ve vašem dosahu. <strong>Cenu za cestu</strong> nastavíte
+                    u konkrétního úkonu s naceněním.
+                  </InfoTip>
+                </label>
+                <input
+                  type="number" min={1} max={300} placeholder="20"
+                  defaultValue={watch('radius_km') ?? ''}
+                  onChange={e => setValue('radius_km', (e.target.value === '' ? null : Number(e.target.value)) as any)}
+                  className="form-input"
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* ── NEPOVINNÉ: podtitul, popis, telefon, fotky ── */}
+        <div className="rounded-2xl border border-slate-200">
+          <button
+            type="button"
+            onClick={() => setDetailyOtevrene(v => !v)}
+            className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left"
+          >
+            <span className="min-w-0">
+              <span className="block text-sm font-bold text-slate-800">Doplnit teď</span>
+              <span className="block text-xs text-slate-500">
+                Popis, podtitul, telefon a fotky. Nic z toho není potřeba — dá se doplnit kdykoli později.
+              </span>
+            </span>
+            <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${detailyOtevrene ? 'rotate-180' : ''}`} />
+          </button>
+
+          <AnimatePresence>
+            {detailyOtevrene && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="space-y-5 border-t border-slate-100 p-4">
+
+                  {/* Popis */}
+                  <div className="space-y-1.5">
+                    <label className="form-label">Něco o vás <span className="font-normal text-slate-400">(volitelné)</span></label>
+                    <textarea
+                      {...f('description')} rows={4}
+                      placeholder="Např.: Jsme malé kadeřnictví v centru Vsetína. Zaměřujeme se na dámské a pánské střihy, barvení a individuální přístup."
+                      className={`form-input resize-none ${errors.description ? 'form-input-error' : ''}`}
+                    />
+                    <p className="text-xs text-slate-400">
+                      Krátce zákazníkům řekněte, proč si vybrat právě vás. Ceny sem nepište — patří do ceníku,
+                      kde se dají rovnou objednat.
+                    </p>
+                    {errors.description && <p className="form-error">{errors.description.message}</p>}
+                  </div>
+
+                  {/* Telefon */}
+                  <div className="space-y-1.5">
+                    <label className="form-label">Telefon na tuhle nabídku <span className="font-normal text-slate-400">(volitelné)</span></label>
+                    <input
+                      type="text" maxLength={30} placeholder="+420 777 123 456"
+                      defaultValue={watch('phone') ?? ''}
+                      onChange={e => setValue('phone', e.target.value || null)}
+                      className="form-input"
+                    />
+                    <p className="text-xs text-slate-400">Když má pobočka vlastní číslo, uveďte ho tady. Jinak platí telefon z profilu.</p>
+                  </div>
+
+                  {/* Fotky */}
+                  <div className="space-y-5 border-t border-slate-100 pt-5">
+                    <div className="space-y-1.5">
+                      <label className="form-label">Titulní fotografie <span className="font-normal text-slate-400">(volitelné)</span></label>
+                      <p className="text-xs text-slate-400">Hlavní fotka — zobrazí se v marketplace a nahoře na detailu.</p>
+                      <ImageUpload value={watch('image_url')} onChange={url => setValue('image_url', url)} folder="services" />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="form-label flex items-center justify-between gap-1">
+                        <span>Ukázky práce <span className="font-normal text-slate-400">(volitelné)</span></span>
+                        <InfoTip>
+                          Prvních pět fotek si zákazník <strong>prolistuje přímo v marketplace</strong>,
+                          aniž by nabídku otevřel. Dejte na začátek ty nejlepší — rozhodují o tom,
+                          jestli klikne dál.
+                        </InfoTip>
+                      </label>
+                      <GalleryUpload value={watch('gallery') ?? []} onChange={(urls) => setValue('gallery', urls)} />
+                    </div>
+                  </div>
+
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Feedback */}
@@ -785,25 +868,25 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className={`flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm ${hasActiveSub ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-300 bg-amber-50 text-amber-800'}`}>
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
               <span>
-                Karta byla uložena.{' '}
+                Nabídka byla uložena.{' '}
                 {hasActiveSub
-                  ? 'Teď doplňte ceník úkonů níže.'
+                  ? 'Teď doplňte služby a ceny.'
                   : <strong>Zveřejní se zákazníkům, jakmile aktivujete předplatné.</strong>}
               </span>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Uložení karty */}
+        {/* Uložení */}
         <button type="submit" disabled={submitState === 'loading'} className="btn-primary w-full">
           {submitState === 'loading' ? <><Loader2 className="h-4 w-4 animate-spin" /> Ukládám…</>
-           : serviceId ? 'Uložit změny karty'
-           : 'Uložit kartu a pokračovat k ceníku'}
+           : serviceId ? 'Uložit změny'
+           : <>Pokračovat na služby a ceny <ChevronRight className="h-4 w-4" /></>}
         </button>
 
         </div>{/* konec kroku 1 */}
 
-        {/* ══ KROK 2 — CENÍK ══ */}
+        {/* ══ KROK 2 — SLUŽBY A CENY ══ */}
         <div className={krok === 2 ? 'space-y-6' : 'hidden'}>
         <AnimatePresence>
           {serviceId && (
@@ -815,10 +898,10 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
             >
               <div>
                 <label className="form-label flex items-center gap-1.5">
-                  <ListChecks className="h-4 w-4 text-emerald-600" /> Ceník úkonů
+                  <ListChecks className="h-4 w-4 text-emerald-600" /> Služby a ceny
                 </label>
                 <p className="text-xs text-slate-400">
-                  Podle podkategorií, které jste vybrali výše, jsme vám připravili skupiny. Doplňte cenu a délku — a kde nabízíte víc variant, přidejte další úkon.
+                  Podle oborů, které jste vybrali, jsme vám připravili skupiny. Doplňte cenu a délku — a kde nabízíte víc variant, přidejte další úkon.
                 </p>
               </div>
 
@@ -841,7 +924,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
         </AnimatePresence>
         </div>{/* konec kroku 2 */}
 
-        {/* ══ KROK 3 — KDY MÁTE ČAS ══ */}
+        {/* ══ KROK 3 — TERMÍNY ══ */}
         {/* Dostupnost byla na vlastní stránce a řemeslníci ji přeskakovali.
             Teď je součástí formuláře — bez ní chodí jen poptávky bez času. */}
         <div className={krok === 3 ? 'space-y-4' : 'hidden'}>
@@ -864,8 +947,8 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
             <p className="text-sm font-bold text-slate-900">Tohle je jen rámec</p>
             <p className="mt-0.5 text-xs leading-relaxed text-slate-600">
-              Konkrétní volné termíny vypíšete jedním klepnutím po zveřejnění. Právě ty vás
-              v seznamu posunou nahoru — zákazníci hledají hlavně podle toho, kdo je vezme nejdřív.
+              Konkrétní volné termíny vypíšete jedním klepnutím po zveřejnění. Právě u nich
+              si zákazník klikne a rovnou se objedná — nemusí čekat, až se ozvete.
             </p>
           </div>
         </div>
@@ -910,7 +993,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
             <div className="flex gap-2.5 rounded-2xl border border-blue-200 bg-blue-50 p-4">
               <span>💳</span>
               <p className="text-xs leading-relaxed text-blue-900">
-                <strong>Kartu máme uloženou, zveřejní se po zaplacení předplatného.</strong>{' '}
+                <strong>Nabídku máme uloženou, zveřejní se po zaplacení předplatného.</strong>{' '}
                 Zákazníci ji uvidí, jakmile bude aktivní. Do té doby si ji můžete v klidu dopilovat.
               </p>
             </div>
@@ -937,15 +1020,15 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
             )}
             <div className="min-w-0 flex-1">
               <p className="text-sm font-bold text-slate-900">
-                {krok === 1 ? (krok1Hotovy ? 'Karta je vyplněná' : 'Rozpracováno')
+                {krok === 1 ? (krok1Hotovy ? 'Základ je hotový' : 'Rozpracováno')
                   : krok === 2 ? (krok2Hotovy ? 'Ceník hotový' : 'Chybí ceny')
                   : krok === 3 ? 'Rozvrh' : 'Připraveno'}
               </p>
               <p className="text-xs text-slate-500">
-                {krok === 1 ? (krok1Hotovy ? 'Teď ceník — u každé služby cena a délka.' : 'Doplňte název, popis a co děláte.')
+                {krok === 1 ? (krok1Hotovy ? 'Teď služby a ceny — u každé cena a délka.' : 'Doplňte název, obor a město.')
                   : krok === 2 ? (krok2Hotovy ? 'Zbývá říct, kdy máte čas.' : 'Bez ceny si u vás zákazník nemůže objednat.')
                   : krok === 3 ? 'Pak už jen zkontrolovat a zveřejnit.'
-                  : 'Zkontrolujte souhrn a kartu zveřejněte.'}
+                  : 'Zkontrolujte souhrn a nabídku zveřejněte.'}
               </p>
             </div>
             {krok < 4 && (

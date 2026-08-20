@@ -6,10 +6,14 @@
 //
 // Po vytvoření okna se hned na místě otevře „Komu dát vědět?" — rozeslání
 // stálým zákazníkům, oblíbeným a čekajícím + sdílecí odkaz do story.
+//
+// Zabrané okno je klikací — vede na detail objednávky, ať poskytovatel hned
+// vidí, kdo přijde a na co.
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CalendarDays, Clock, Plus, Trash2, Loader2, Info, CheckCircle2, ListChecks, UserPlus, XCircle } from 'lucide-react'
+import Link from 'next/link'
+import { CalendarDays, Clock, Plus, Trash2, Loader2, Info, CheckCircle2, ListChecks, UserPlus, XCircle, ChevronRight } from 'lucide-react'
 import { createSlot, deleteSlot, confirmRemainder, dismissRemainder } from '@/lib/actions/slots'
 import SlotNotifyPanel from '@/components/ui/SlotNotifyPanel'
 import ShareSlotButton from '@/components/ui/ShareSlotButton'
@@ -30,6 +34,8 @@ type SlotRow = {
   status: string
   /** Zbytek okna po rezervaci — čeká, až poskytovatel řekne, jestli ho nabídnout dál. */
   pending_confirm?: boolean | null
+  /** Objednávka, která okno zabrala — odkaz na její detail. */
+  order_id?: string | null
   slot_services: { service_id: string; services: { title: string } | null }[]
 }
 
@@ -288,8 +294,10 @@ export default function TerminyClient({
                 .filter(Boolean) as string[]
               const taken = slot.status === 'zabrano'
               const label = `${fmtDay(slot.starts_at)} ${fmtTime(slot.starts_at)}–${fmtTime(slot.ends_at)}`
-              return (
-                <li key={slot.id} className="flex flex-wrap items-center gap-3 px-6 py-4 sm:flex-nowrap sm:gap-4">
+
+              // Zabrané okno = klikací řádek na detail objednávky.
+              const info = (
+                <>
                   <div className="flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-xl bg-slate-100 text-xs font-bold text-slate-700">
                     <span>{fmtDay(slot.starts_at)}</span>
                   </div>
@@ -302,6 +310,29 @@ export default function TerminyClient({
                     </p>
                     <p className="truncate text-sm text-slate-500">{names.join(' · ') || '—'}</p>
                   </div>
+                </>
+              )
+
+              if (taken && slot.order_id) {
+                return (
+                  <li key={slot.id}>
+                    <Link
+                      href={`/dashboard/objednavky/${slot.order_id}`}
+                      className="flex items-center gap-3 px-6 py-4 transition-colors hover:bg-slate-50 sm:gap-4"
+                    >
+                      {info}
+                      <span className="hidden shrink-0 text-xs font-semibold text-emerald-600 sm:inline">
+                        Detail objednávky
+                      </span>
+                      <ChevronRight className="h-5 w-5 shrink-0 text-slate-300" />
+                    </Link>
+                  </li>
+                )
+              }
+
+              return (
+                <li key={slot.id} className="flex flex-wrap items-center gap-3 px-6 py-4 sm:flex-nowrap sm:gap-4">
+                  {info}
 
                   {!taken && (
                     <div className="flex shrink-0 items-center gap-2">

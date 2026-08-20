@@ -1,9 +1,13 @@
 // app/auth/callback/route.ts
-// Supabase Auth callback handler
+// Supabase Auth callback handler — obsluhuje DVĚ různé cesty:
 //
-// Po prvním potvrzení e-mailu pošleme uvítací e-mail (jednou).
-// Dřív ho dostával jen řemeslník (z register-provider). Zákazník nedostal nic —
-// tady to napravujeme pro obě role, a to až po potvrzení, ať nechodí dva maily naráz.
+//   1) POTVRZENÍ E-MAILU po registraci. Po prvním potvrzení pošleme uvítací
+//      e-mail (jednou, hlídá to příznak welcome_sent) a člověka pustíme rovnou
+//      dovnitř — poskytovatele do dashboardu, zákazníka do marketplace.
+//
+//   2) PŘIHLÁŠENÍ PŘES GOOGLE. Poznáme ho podle ?zdroj=google, který si
+//      přidává přihlašovací stránka. Tam se nepřipisuje „potvrzeno=1" —
+//      hláška „E-mail potvrzen" by po obyčejném přihlášení nedávala smysl.
 
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
@@ -62,19 +66,24 @@ export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
   const next = searchParams.get('next') ?? '/'
+  // Přihlášení Googlem si tenhle příznak přidává samo (viz app/prihlasit).
+  const jeGoogle = searchParams.get('zdroj') === 'google'
 
   if (code) {
     const supabase = createClient()
     const { data, error } = await supabase.auth.exchangeCodeForSession(code)
     if (!error) {
-      // Po úspěšném potvrzení zkusíme (jednorázově) poslat uvítací e-mail.
+      // Uvítací e-mail patří k potvrzení registrace. U Googlu se pošle taky,
+      // ale jen když jde o nový účet — pozná se podle toho, že welcome_sent
+      // ještě není nastavené (řeší maybeSendWelcome).
       if (data.user) {
         await maybeSendWelcome(data.user.id, data.user.email)
       }
-      // Session z potvrzovacího odkazu NECHÁVÁME — uživatel je tím rovnou přihlášený
-      // a nemusí zadávat heslo hned po potvrzení e-mailu. (Dřív jsme ho tu odhlašovali,
-      // což bylo zbytečné otravné: exchangeCodeForSession vytvoří session právě pro ten
-      // účet, který se potvrdil, takže se nikdo nemůže „přepnout" na cizí profil.)
+
+      // Session z odkazu NECHÁVÁME — uživatel je tím rovnou přihlášený a nemusí
+      // zadávat heslo hned po potvrzení e-mailu. exchangeCodeForSession vytvoří
+      // session právě pro ten účet, který se potvrdil, takže se nikdo nemůže
+      // „přepnout" na cizí profil.
       //
       // Kam poslat: poskytovatele do dashboardu, zákazníka do marketplace.
       let target = next !== '/' ? next : '/marketplace'
@@ -92,10 +101,15 @@ export async function GET(request: Request) {
       }
 
       const url = new URL(target, origin)
-      url.searchParams.set('potvrzeno', '1')
+      // „E-mail potvrzen" dává smysl jen u potvrzovacího odkazu.
+      if (!jeGoogle) url.searchParams.set('potvrzeno', '1')
       return NextResponse.redirect(url.toString())
     }
+    console.error('[auth/callback]', error.message)
   }
 
-  return NextResponse.redirect(`${origin}/prihlasit?error=auth`)
+  // Rozlišené hlášky: u Googlu nabídneme přihlášení heslem, jinak obecná chyba.
+  return NextResponse.redirect(
+    `${origin}/prihlasit?${jeGoogle ? 'chyba=oauth' : 'error=auth'}`
+  )
 }

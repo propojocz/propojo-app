@@ -7,12 +7,15 @@
 //
 // Když je termín mezitím zabraný nebo prošlý, NEVRACÍME 404 — ukážeme, že je
 // pryč, a nabídneme kartu s dalšími volnými termíny. Story žije den, termín minuty.
+//
+// ČASOVÁ ZÓNA: tahle stránka se vykresluje na serveru a ten běží v UTC —
+// bez explicitní zóny by termín 8:00 svítil jako 6:00 a zákazník by přišel
+// o dvě hodiny dřív. Proto se všude formátuje napevno v Europe/Prague.
 
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Link from 'next/link'
-import Image from 'next/image'
 import { CalendarDays, Clock, MapPin, ArrowRight, CircleCheck, CircleAlert } from 'lucide-react'
 import type { ServiceItem } from '@/types/database'
 import Avatar from '@/components/ui/Avatar'
@@ -30,10 +33,12 @@ type SlotRow = {
   pending_confirm?: boolean | null
 }
 
+const TZ = 'Europe/Prague'
+
 const fmtDayLong = (iso: string) =>
-  new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(iso))
+  new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long', timeZone: TZ }).format(new Date(iso))
 const fmtTime = (iso: string) =>
-  new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
+  new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit', timeZone: TZ }).format(new Date(iso))
 
 function windowMinutes(startsAt: string, endsAt: string): number {
   return Math.round((new Date(endsAt).getTime() - new Date(startsAt).getTime()) / 60000)

@@ -7,6 +7,7 @@
 // a blokace času. Odsud jde i odškrtnout příchod zákazníka a zablokovat čas.
 
 import { revalidatePath } from 'next/cache'
+import { isoZPrazskehoCasu } from '@/lib/format'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { createNotification } from '@/lib/actions/notifications'
@@ -63,9 +64,10 @@ export async function getDaySchedule(dateStr?: string): Promise<DaySchedule> {
 
   const target = dateStr ?? pragueDate(new Date())
   // Hranice dne v pražském čase → UTC okamžiky.
-  const dayStart = new Date(`${target}T00:00:00+02:00`)
-  const dayEnd = new Date(`${target}T23:59:59+02:00`)
-  // +02:00 je letní čas; drobný přesah přes půlnoc nevadí, filtrujeme < dayEnd.
+  // Hranice dne podle pražského času — v zimě je posun o hodinu jiný a rozvrh
+  // by ukazoval půlnoční objednávku o den vedle.
+  const dayStart = new Date(isoZPrazskehoCasu(target, '00:00'))
+  const dayEnd = new Date(isoZPrazskehoCasu(target, '23:59'))
 
   const admin = getAdminClient()
 
@@ -257,8 +259,10 @@ export async function blockTime(values: {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Nejste přihlášeni.' }
 
-  const startIso = new Date(`${values.date}T${values.from}:00+02:00`).toISOString()
-  const endIso = new Date(`${values.date}T${values.to}:00+02:00`).toISOString()
+  // Posun se nesmí psát natvrdo: „+02:00" platí jen v létě, v zimě je Praha
+  // o hodinu jinde a blokace by seděla vedle. Přepočet zná lib/format.ts.
+  const startIso = isoZPrazskehoCasu(values.date, values.from)
+  const endIso = isoZPrazskehoCasu(values.date, values.to)
   if (new Date(endIso) <= new Date(startIso)) {
     return { success: false, error: 'Konec musí být po začátku.' }
   }
@@ -290,6 +294,28 @@ export async function blockTime(values: {
   if (error) {
     console.error('[blockTime]', error)
     return { success: false, error: 'Blokaci se nepodařilo uložit.' }
+  }
+
+  // Volná okna uvnitř blokace nemají co dělat v nabídce — zákazník by si
+  // rezervoval čas, který jste si právě zavřel. Rezervovaná okna necháváme
+  // být: ta se řeší přes objednávku (kontrola zaplacené rezervace je výš).
+  try {
+    const { data: kolize } = await admin
+      .from('availability_slots')
+      .select('id')
+      .eq('provider_id', user.id)
+      .eq('status', 'volno')
+      .lt('starts_at', endIso)
+      .gt('ends_at', startIso) as { data: { id: string }[] | null }
+
+    const ids = (kolize ?? []).map((s) => s.id)
+    if (ids.length > 0) {
+      await admin.from('slot_services').delete().in('slot_id', ids)
+      await admin.from('availability_slots').delete().in('id', ids).eq('status', 'volno')
+    }
+  } catch (err) {
+    // Úklid není kritický — blokace platí tak jako tak.
+    console.error('[blockTime] úklid volných oken:', err)
   }
 
   revalidatePath('/dashboard/terminy')

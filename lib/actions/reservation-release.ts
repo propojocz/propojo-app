@@ -16,6 +16,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { stripe } from '@/lib/stripe'
 import { createNotification } from '@/lib/actions/notifications'
+import { releaseSlotAndMerge } from '@/lib/slot-merge'
 
 function getAdminClient() {
   return createAdminClient(
@@ -57,12 +58,9 @@ export async function releaseUnpaidReservation(orderId: string): Promise<{ relea
     }
   }
 
-  // 2) Uvolnit termín — jen pokud na něm pořád sedí tahle objednávka
-  const { data: freed } = await (admin.from('availability_slots') as any)
-    .update({ status: 'volno', order_id: null, pending_confirm: false })
-    .eq('id', order.slot_id)
-    .eq('order_id', orderId)
-    .select('id')
+  // 2) Uvolnit termín a slepit ho se sousedy — ať se okno vrátí vcelku,
+  //    ne jako úlomek po rezervaci.
+  const uvolneno = await releaseSlotAndMerge(admin, order.slot_id, orderId)
 
   // 3) Zrušit objednávku
   await (admin.from('orders') as any)
@@ -71,7 +69,6 @@ export async function releaseUnpaidReservation(orderId: string): Promise<{ relea
     .eq('status', 'prijato')
     .eq('deposit_status', 'pending')
 
-  const uvolneno = Array.isArray(freed) && freed.length > 0
   const nazev = order.service_items?.name || order.services?.title || 'Rezervace'
 
   if (uvolneno) {

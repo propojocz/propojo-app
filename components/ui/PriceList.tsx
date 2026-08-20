@@ -276,30 +276,6 @@ export default function PriceList({
         <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
       )}
 
-      {/* ── UPOZORNĚNÍ NA SLUŽBY, ZE KTERÝCH NEJDE OBJEDNAT ──
-          Zákazník objednává ÚKON, ne podkategorii. Bez jediného úkonu se
-          služba na kartě sice ukáže, ale nikdo si ji nemůže objednat —
-          a poskytovatel neví proč. */}
-      {prazdneSkupiny.length > 0 && subcategories.length > 0 && (
-        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4">
-          <p className="flex items-center gap-2 text-sm font-bold text-amber-900">
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            {prazdneSkupiny.length === 1
-              ? 'Z jedné vaší služby si zákazník nemůže objednat'
-              : `Z ${prazdneSkupiny.length} vašich služeb si zákazník nemůže objednat`}
-          </p>
-          <p className="mt-1 text-xs leading-relaxed text-amber-800">
-            <strong>{prazdneSkupiny.map(g => g.name).join(', ')}</strong> {prazdneSkupiny.length === 1 ? 'nemá' : 'nemají'} zatím
-            žádný úkon. I když vypíšete volný termín, nabídne se z něj jen to, co je níž v ceníku.
-          </p>
-          <p className="mt-1.5 text-xs leading-relaxed text-amber-700">
-            Ceny vypisovat nemusíte — stačí přidat úkon a zvolit <strong>„Cena dohodou"</strong>
-            {' '}nebo <strong>výjezd a nacenění na místě</strong>. Jde hlavně o to, aby měl zákazník
-            na co kliknout.
-          </p>
-        </div>
-      )}
-
       {/* ── SKUPINY PODLE PODKATEGORIÍ ── */}
       {subcategories.map((sub) => {
         const groupItems = itemsOf(sub.id)
@@ -396,6 +372,24 @@ export default function PriceList({
           <ul className="divide-y divide-slate-100">
             {orphans.map(renderItem)}
           </ul>
+        </div>
+      )}
+
+      {/* ── CHYBĚJÍCÍ CENÍK ──
+          Dole, ne nahoře: nahoře strašilo dřív, než měl člověk šanci něco
+          přidat. Zmizí samo, jakmile má každá služba aspoň jeden úkon. */}
+      {prazdneSkupiny.length > 0 && subcategories.length > 0 && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4">
+          <p className="flex items-center gap-2 text-sm font-bold text-amber-900">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            {prazdneSkupiny.length === 1
+              ? 'Jedna služba je zatím bez úkonu'
+              : `${prazdneSkupiny.length} služby jsou zatím bez úkonu`}
+          </p>
+          <p className="mt-1 text-xs leading-relaxed text-amber-800">
+            <strong>{prazdneSkupiny.map(g => g.name).join(', ')}</strong> — objednat se z nich nedá.
+            Stačí přidat úkon; cenu můžete nechat dohodou.
+          </p>
         </div>
       )}
 

@@ -22,6 +22,8 @@ import {
 } from '@/lib/email/templates'
 import { Resend } from 'resend'
 import { createNotification } from '@/lib/actions/notifications'
+import { releaseSlotAndMerge } from '@/lib/slot-merge'
+import { datum } from '@/lib/format'
 
 export const dynamic = 'force-dynamic'
 
@@ -277,15 +279,11 @@ async function handleDepositExpired(
     return // běží novější pokus o platbu
   }
 
-  // 1) Uvolnit termín
+  // 1) Uvolnit termín a slepit ho zpátky se sousedy — po zrušené rezervaci
+  //    má mít poskytovatel v kalendáři původní okno, ne dva úlomky.
   let uvolneno = false
   if (order.slot_id) {
-    const { data: freed } = await (db.from('availability_slots') as any)
-      .update({ status: 'volno', order_id: null, pending_confirm: false })
-      .eq('id', order.slot_id)
-      .eq('order_id', orderId)
-      .select('id')
-    uvolneno = Array.isArray(freed) && freed.length > 0
+    uvolneno = await releaseSlotAndMerge(db, order.slot_id, orderId)
   }
 
   // 2) Zrušit objednávku
@@ -380,7 +378,7 @@ export async function POST(req: Request) {
             providerName: p.name,
             isTrial,
             trialEndsAt: sub.trial_end
-              ? new Intl.DateTimeFormat('cs-CZ', { dateStyle: 'long' }).format(new Date(sub.trial_end * 1000))
+              ? datum(new Date(sub.trial_end * 1000))
               : undefined,
             priceText: priceText(billing),
             dashboardUrl: `${APP_URL}/dashboard/predplatne`,
@@ -425,9 +423,7 @@ export async function POST(req: Request) {
             providerName: p.name,
             activeUntil: (() => {
               const { end } = periodBounds(sub)
-              return end
-                ? new Intl.DateTimeFormat('cs-CZ', { dateStyle: 'long' }).format(new Date(end * 1000))
-                : '—'
+              return end ? datum(new Date(end * 1000)) : '—'
             })(),
             subscriptionUrl: `${APP_URL}/dashboard/predplatne`,
           })
@@ -458,7 +454,7 @@ export async function POST(req: Request) {
             providerName: p.name,
             priceText: priceText(sub.billing_period),
             retryDate: invoice.next_payment_attempt
-              ? new Intl.DateTimeFormat('cs-CZ', { dateStyle: 'long' }).format(new Date(invoice.next_payment_attempt * 1000))
+              ? datum(new Date(invoice.next_payment_attempt * 1000))
               : undefined,
             subscriptionUrl: `${APP_URL}/dashboard/predplatne`,
           })

@@ -11,15 +11,22 @@ import type { ServiceFormValues, ActionResult } from './types'
 // (smažou se v kroku 7), takže když je někdo pošle, nespadne to.
 
 const serviceSchema = z.object({
-  title: z.string().min(5).max(100),
+  // Minimum tři znaky — sedí s formulářem i s podmínkou v databázi.
+  // Salon „Bea" nebo „Luky" je legitimní název, pětiznakové minimum ho vyhazovalo.
+  title: z.string()
+    .min(3, 'napište aspoň tři znaky')
+    .max(100, 'nejvýš sto znaků'),
   subtitle: z.string().max(80).nullable().optional(),
-  description: z.string().min(20).max(2000),
-  category: z.string().min(1).max(50),
+  // Popis je VOLITELNÝ. Formulář ho schválně nevyžaduje — kdo ho nevyplní,
+  // má na detailu karty blok „O nabídce" skrytý. Generovanou náhradní větu
+  // nepíšeme: na dvaceti profilech vedle sebe je poznat, že ji psal stroj.
+  description: z.string().max(2000, 'popis je moc dlouhý').nullable().optional(),
+  category: z.string().min(1, 'vyberte kategorii').max(50),
   subcategory_id: z.string().optional(),
   subcategory_ids: z.array(z.string()).optional(),
   service_type: z.string().optional(),
   phone: z.string().max(30).nullable().optional(),
-  city: z.string().min(2).max(100),
+  city: z.string().min(2, 'zadejte město nebo obec').max(100),
   city_lat: z.number().nullable().optional(),
   city_lng: z.number().nullable().optional(),
   image_url: z.string().url().optional().or(z.literal('')),
@@ -51,6 +58,27 @@ const serviceSchema = z.object({
   quote_days: z.number().int().min(0).max(365).nullable().optional(),
   cancellation_policy: z.enum(['zadna', 'mirna', 'standardni', 'prisna'] as const).optional(),
 })
+
+// Ze zodí chyby vytáhne první srozumitelnou větu. „Formulář obsahuje chyby"
+// je k ničemu — člověk kouká na vyplněný formulář a neví, co je špatně.
+function prvniChyba(err: z.ZodError): string | null {
+  const prvni = err.errors[0]
+  if (!prvni) return null
+  const pole: Record<string, string> = {
+    title: 'název',
+    description: 'popis',
+    category: 'kategorie',
+    city: 'město',
+    radius_km: 'dojezd',
+    address: 'adresa',
+  }
+  const nazev = pole[String(prvni.path[0] ?? '')]
+  // Zod bez vlastní hlášky vrací angličtinu („String must contain…"). Tu
+  // uživateli neukazujeme — radši obecná česká věta.
+  const anglicky = /[A-Za-z]{4,}/.test(prvni.message) && !/[ěščřžýáíéúůťďň]/i.test(prvni.message)
+  const zprava = anglicky ? 'zkontrolujte prosím hodnotu' : prvni.message
+  return nazev ? `Zkontrolujte pole ${nazev}: ${zprava}` : zprava
+}
 
 type ServiceParsed = z.infer<typeof serviceSchema>
 
@@ -100,7 +128,7 @@ export async function createService(values: ServiceFormValues): Promise<ActionRe
   if (!parsed.success) {
     return {
       success: false,
-      error: 'Formulář obsahuje chyby.',
+      error: prvniChyba(parsed.error) ?? 'Formulář obsahuje chyby.',
       fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]>,
     }
   }
@@ -130,7 +158,9 @@ export async function updateService(id: string, values: ServiceFormValues): Prom
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return { success: false, error: 'Nejste přihlášeni.' }
   const parsed = serviceSchema.safeParse(values)
-  if (!parsed.success) return { success: false, error: 'Formulář obsahuje chyby.' }
+  if (!parsed.success) {
+    return { success: false, error: prvniChyba(parsed.error) ?? 'Formulář obsahuje chyby.' }
+  }
 
   const norm = normalize(parsed.data)
   const { image_url, subcategory_ids, ...rest } = norm
