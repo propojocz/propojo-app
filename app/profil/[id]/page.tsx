@@ -271,6 +271,21 @@ export default async function ProfilPage({ params }: Props) {
             <Clock className="h-4 w-4 text-slate-400" /> Na Propojo od {memberYear}
           </span>
         )}
+        {/* Adresa jako štítek v pruhu důvěry — na mobilu je celý pravý sloupec
+            až úplně dole za recenzemi a „kde to je" je přitom jedna z prvních
+            otázek. Na širokých obrazovkách zůstává plnohodnotný blok s mapou
+            vpravo, takže tenhle se schová. */}
+        {profile.address_public === true && profile.address && (
+          <a
+            href={`https://mapy.cz/zakladni?q=${encodeURIComponent(profile.address)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex max-w-full items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:border-emerald-300 lg:hidden"
+          >
+            <MapPin className="h-4 w-4 shrink-0 text-slate-400" />
+            <span className="truncate">{profile.address}</span>
+          </a>
+        )}
       </div>
 
       {/* Dvousloupcový layout */}

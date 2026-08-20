@@ -120,9 +120,19 @@ export default function ServiceItemEditor({
   const [v, setV] = useState<ServiceItemValues>({ ...EMPTY, ...initial })
   const [error, setError] = useState<string | null>(null)
   const [detailyOtevrene, setDetailyOtevrene] = useState(false)
+  // Našeptávač názvů z katalogu — otevře se při psaní i při kliknutí do pole.
+  const [naseptavacOtevreny, setNaseptavacOtevreny] = useState(false)
 
   const set = <K extends keyof ServiceItemValues>(key: K, val: ServiceItemValues[K]) =>
     setV(prev => ({ ...prev, [key]: val }))
+
+  // Filtrované návrhy z katalogu. Bez textu ukážeme prvních osm, ať je vidět,
+  // že se z čeho vybírat — s textem hledáme kdekoli v názvu (ne jen na začátku).
+  const hledany = v.name.trim().toLowerCase()
+  const navrhy = serviceTypes
+    .filter(st => !hledany || st.name.toLowerCase().includes(hledany))
+    .filter(st => st.name.toLowerCase() !== hledany)   // přesnou shodu už nabízet nemusíme
+    .slice(0, 8)
 
   const zpusob = zpusobZHodnot(v)
   const jeNaceneni = zpusob === 'naceneni'
@@ -265,31 +275,51 @@ export default function ServiceItemEditor({
           </p>
         )}
 
-        {/* ── 1. CO TO JE ── */}
+        {/* ── 1. NÁZEV SLUŽBY ──
+            Našeptávač z katalogu: poskytovatel začne psát a vybere hotový název.
+            Jednotné názvy pomáhají vyhledávání — zákazník hledá „barvení", ne
+            „barvení vlasů dámské dlouhé". Vlastní název jde napsat pořád. */}
         <div>
-          <label className="mb-1.5 block text-[13px] font-bold text-slate-800">Co to je?</label>
-          <input
-            type="text"
-            value={v.name}
-            onChange={e => set('name', e.target.value)}
-            maxLength={80}
-            placeholder="např. Pánský střih"
-            className="w-full rounded-xl border-[1.5px] border-slate-200 bg-white px-3.5 py-2.5 text-[15px] outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-          />
-          {serviceTypes.length > 0 && !v.name && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {serviceTypes.slice(0, 8).map(st => (
-                <button
-                  key={st.id}
-                  type="button"
-                  onClick={() => { set('name', st.name); set('service_type_id', st.id) }}
-                  className="rounded-lg border border-dashed border-slate-300 bg-white px-2.5 py-1 text-xs text-slate-600 transition hover:border-emerald-400 hover:text-emerald-700"
-                >
-                  {st.name}
-                </button>
-              ))}
-            </div>
-          )}
+          <label className="mb-1.5 block text-[13px] font-bold text-slate-800">Název služby</label>
+          <div className="relative">
+            <input
+              type="text"
+              value={v.name}
+              onChange={e => { set('name', e.target.value); set('service_type_id', null); setNaseptavacOtevreny(true) }}
+              onFocus={() => setNaseptavacOtevreny(true)}
+              onBlur={() => setTimeout(() => setNaseptavacOtevreny(false), 150)}
+              maxLength={80}
+              placeholder="např. Barvení vlasů, Stěrka, Výměna baterie…"
+              className="w-full rounded-xl border-[1.5px] border-slate-200 bg-white px-3.5 py-2.5 text-[15px] outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
+            />
+
+            {naseptavacOtevreny && navrhy.length > 0 && (
+              <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+                {navrhy.map(st => (
+                  <li key={st.id}>
+                    <button
+                      type="button"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => {
+                        set('name', st.name)
+                        set('service_type_id', st.id)
+                        setNaseptavacOtevreny(false)
+                      }}
+                      className="block w-full px-3.5 py-2 text-left text-sm text-slate-700 transition hover:bg-emerald-50 hover:text-emerald-800"
+                    >
+                      {st.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-400">
+            {serviceTypes.length > 0
+              ? 'Vyberte z návrhů, nebo napište vlastní — zákazníci hledají podle názvu služby.'
+              : 'Napište službu tak, jak ji zná zákazník.'}
+          </p>
         </div>
 
         {/* ── 2. KOLIK TO STOJÍ ── */}

@@ -35,7 +35,6 @@ import PriceList from '@/components/ui/PriceList'
 import ServiceHours from '@/components/forms/ServiceHours'
 import InfoTip from '@/components/ui/InfoTip'
 import type { ServiceTypeOption } from '@/components/ui/ServiceItemEditor'
-import BrandPicker from '@/components/ui/BrandPicker'
 
 const schema = z.object({
   title: z.string().min(3, 'Napište, jak se chcete zobrazovat (aspoň 3 znaky)').max(100),
@@ -86,6 +85,9 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
   const [krok, setKrok] = useState(1)
   // Nepovinná část prvního kroku (podtitul, popis, telefon, fotky).
   const [detailyOtevrene, setDetailyOtevrene] = useState(mode === 'edit')
+  // Karta bez adresy dědí adresu z profilu. Tenhle přepínač otevře pole,
+  // když má nabídka adresu vlastní (druhá pobočka).
+  const [vlastniAdresa, setVlastniAdresa] = useState(false)
   // Vlastní podkategorie („Nevidím svou službu")
   const [ownSubOpen, setOwnSubOpen] = useState(false)
   const [ownSubName, setOwnSubName] = useState('')
@@ -167,7 +169,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
       if (!user) return
       const { data } = await supabase
         .from('profiles')
-        .select('id, full_name, display_name, company_name, avatar_url, city, ico_verified, rating, review_count')
+        .select('id, full_name, display_name, company_name, avatar_url, city, ico_verified, rating, review_count, address, address_lat, address_lng, address_public')
         .eq('id', user.id)
         .single()
       setProfile(data)
@@ -705,9 +707,35 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
 
           {/* Adresa provozovny */}
           <AnimatePresence>
-            {locationType !== 'u_zakaznika' && (
+            {/* Adresa se nabízí u OBOU možností. Kdo má provozovnu, ji zadá
+                skoro určitě. Kdo jezdí za zákazníky, ji mít může taky — dílna
+                nebo kancelář je důkaz, že za nabídkou někdo stojí. Rozdíl je
+                jen v tom, jak moc ji doporučujeme. */}
+            {true && (
               <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-2 overflow-hidden">
-                <label className="form-label">Přesná adresa provozovny</label>
+                <label className="form-label">
+                  Přesná adresa provozovny
+                  {locationType === 'u_zakaznika' && <span className="font-normal text-slate-400"> (volitelné)</span>}
+                </label>
+
+                {/* Zděděná adresa z profilu. Kdo má jednu provozovnu, nevyplňuje
+                    nic — adresa se bere z profilu a při stěhování ji mění na
+                    jednom místě. Vlastní adresu potřebuje jen druhá pobočka. */}
+                {!vlastniAdresa && !watch('address') && profile?.address ? (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Z vašeho profilu</p>
+                      <p className="truncate text-sm font-semibold text-slate-800">{profile.address}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setVlastniAdresa(true)}
+                      className="shrink-0 text-xs font-bold text-emerald-600 underline hover:text-emerald-700"
+                    >
+                      Tahle nabídka má jinou adresu
+                    </button>
+                  </div>
+                ) : (
                 <AddressInput
                   defaultValue={watch('address')}
                   onPick={(a: { address: string; lat: number; lng: number; municipality: string }) => {
@@ -724,8 +752,26 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
                     setValue('address_lng', null)
                   }}
                 />
-                <p className="text-xs text-slate-400">
-                  Vyberte adresu ze seznamu — zákazník pak uvidí špendlík na mapě a trefí k vám napoprvé.
+                )}
+
+                {vlastniAdresa && profile?.address && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVlastniAdresa(false)
+                      setValue('address', null)
+                      setValue('address_lat', null)
+                      setValue('address_lng', null)
+                    }}
+                    className="text-xs text-slate-400 underline hover:text-slate-600"
+                  >
+                    Zpět na adresu z profilu
+                  </button>
+                )}
+                <p className="text-xs leading-relaxed text-slate-400">
+                  {locationType === 'u_zakaznika'
+                    ? 'Máte dílnu nebo kancelář? Zadejte adresu a zákazníkům se ukáže i s mapou. Nemáte-li kam pozvat, nechte prázdné.'
+                    : 'Vyberte adresu ze seznamu — zákazník pak uvidí špendlík na mapě a trefí k vám napoprvé.'}
                 </p>
 
                 <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -738,8 +784,9 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
                   <span>
                     <span className="block text-sm font-semibold text-slate-800">Zobrazit adresu veřejně</span>
                     <span className="block text-xs leading-relaxed text-slate-500">
-                      Když vypnete, zákazníci uvidí jen město — přesnou adresu dostanou až po objednání.
-                      Hodí se, když pracujete z domova.
+                      {locationType === 'u_zakaznika'
+                        ? 'Adresu uvidí kdokoli na vaší nabídce. Pracujete-li z domova, nechte vypnuté — ukáže se jen město.'
+                        : 'Když vypnete, zákazníci uvidí jen město — přesnou adresu dostanou až po objednání. Hodí se, když pracujete z domova.'}
                     </span>
                   </span>
                 </label>
@@ -969,7 +1016,10 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
             />
           </div>
 
-          {serviceId && <BrandPicker serviceId={serviceId} />}
+          {/* Značka (salon, firma) se tady dřív připínala — vyhozeno.
+              Kdo zakládá první nabídku, žádnou značku nemá a prázdný výběr
+              jen mate; kdo ji má, připne kartu později v Moje nabídky nebo
+              na stránce Značka. Poslední krok patří kontrole a zveřejnění. */}
 
           <dl className="overflow-hidden rounded-2xl border border-slate-200 bg-white text-sm">
             {[

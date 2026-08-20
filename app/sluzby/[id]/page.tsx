@@ -82,7 +82,7 @@ export default async function ServiceDetailPage({ params }: Props) {
 
   const { data: service, error } = await supabase
     .from('services')
-    .select(`*, profiles (id, full_name, display_name, company_name, ico, ico_verified, avatar_url, rating, review_count, city, bio, phone, is_suspended)`)
+    .select(`*, profiles (id, full_name, display_name, company_name, ico, ico_verified, avatar_url, rating, review_count, city, bio, phone, is_suspended, address, address_lat, address_lng, address_public)`)
     .eq('id', params.id)
     .single() as { data: any; error: any }
 
@@ -175,10 +175,20 @@ export default async function ServiceDetailPage({ params }: Props) {
   ]
 
   // Adresa + mapa (jen když je provozovna, adresa veřejná a máme souřadnice)
+  // Adresa se dědí z PROFILU, když ji karta nemá vlastní. Kdo má jednu
+  // provozovnu, ji vyplňuje jen jednou; druhá pobočka si přepíše kartu.
+  // Zděděná adresa se řídí přepínačem z profilu, vlastní přepínačem karty.
+  const zdedenaAdresa = !s.address && s.profiles?.address_public === true && !!s.profiles?.address
+  const adresa = s.address || (zdedenaAdresa ? s.profiles.address : null)
+  const adresaLat = s.address ? s.address_lat : (zdedenaAdresa ? s.profiles.address_lat : null)
+  const adresaLng = s.address ? s.address_lng : (zdedenaAdresa ? s.profiles.address_lng : null)
+  const addressPublic = s.address ? s.address_public !== false : zdedenaAdresa
+
+  // Adresu ukazujeme i u karet s výjezdem — dílna nebo kancelář je důkaz,
+  // že za nabídkou někdo stojí. Dřív se schovávala všem, kdo jezdí za zákazníkem.
   const hasEstablishment = s.location_type === 'u_poskytovatele' || s.location_type === 'oboji'
-  const addressPublic = s.address_public !== false
-  const showAddress = hasEstablishment && addressPublic && !!s.address
-  const showMap = showAddress && s.address_lat != null && s.address_lng != null
+  const showAddress = addressPublic && !!adresa
+  const showMap = showAddress && adresaLat != null && adresaLng != null
 
   // JSON-LD
   const jsonLd = {
@@ -197,7 +207,7 @@ export default async function ServiceDetailPage({ params }: Props) {
       },
     } : {}),
     areaServed: { '@type': 'City', name: s.city },
-    ...(showAddress ? { address: { '@type': 'PostalAddress', streetAddress: s.address, addressLocality: s.city } } : {}),
+    ...(showAddress ? { address: { '@type': 'PostalAddress', streetAddress: adresa, addressLocality: s.city } } : {}),
     ...(s.profiles.rating ? { aggregateRating: { '@type': 'AggregateRating', ratingValue: s.profiles.rating, reviewCount: s.profiles.review_count } } : {}),
     url: `${APP_URL}/sluzby/${s.id}`,
   }
@@ -458,9 +468,9 @@ export default async function ServiceDetailPage({ params }: Props) {
                 <h3 className="mb-2 flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-slate-500">
                   <MapPin className="h-4 w-4 text-slate-400" /> Kde nás najdete
                 </h3>
-                <p className="mb-3 text-sm text-slate-700">{s.address}</p>
+                <p className="mb-3 text-sm text-slate-700">{adresa}</p>
                 {showMap && (
-                  <ServiceMap lat={Number(s.address_lat)} lng={Number(s.address_lng)} label={s.title} />
+                  <ServiceMap lat={Number(adresaLat)} lng={Number(adresaLng)} label={s.title} />
                 )}
               </div>
             )}
