@@ -18,7 +18,7 @@ import { createClient } from '@/lib/supabase/server'
 import { CATEGORY_META } from '@/types/database'
 import type { ServiceItem } from '@/types/database'
 import Link from 'next/link'
-import { MapPin, Star, ArrowLeft, ShieldCheck, ListChecks, Zap, ChevronRight, Building2, Camera, Pencil } from 'lucide-react'
+import { MapPin, Star, ArrowLeft, ShieldCheck, ListChecks, ChevronRight, Building2, Pencil, CalendarDays, CheckCircle2 } from 'lucide-react'
 import Avatar from '@/components/ui/Avatar'
 import PriceListPublic from '@/components/ui/PriceListPublic'
 import ServiceMap from '@/components/ui/ServiceMap'
@@ -213,115 +213,189 @@ export default async function ServiceDetailPage({ params }: Props) {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main className="min-h-screen bg-slate-50 pb-28 lg:pb-0">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
 
-      <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
-        <Link href="/marketplace" className="mb-6 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
+      <div className="mx-auto max-w-6xl px-3 py-4 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
+        <Link
+          href="/marketplace"
+          className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition hover:text-slate-800 sm:mb-6"
+        >
           <ArrowLeft className="h-4 w-4" /> Zpět na Marketplace
         </Link>
 
-        <div className="grid gap-8 lg:grid-cols-3">
-          {/* ── LEVÝ SLOUPEC: identita + galerie + ceník ── */}
-          <div className="space-y-6 lg:col-span-2">
-
-            {/* Galerie (prolistovatelná) nebo fallback dlaždice */}
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-7 xl:grid-cols-[minmax(0,1fr)_340px]">
+          {/* ── HLAVNÍ OBSAH ── */}
+          <div className="min-w-0 space-y-5 sm:space-y-6">
+            {/* Galerie – používá stávající komponentu, takže logo i globální navigace zůstávají beze změny. */}
             {galleryPhotos.length > 0 ? (
-              <div>
+              <div className="overflow-hidden rounded-2xl bg-white">
                 <ServiceGallery photos={galleryPhotos} title={s.title} />
-                <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-slate-400">
-                  <Camera className="h-3.5 w-3.5" />
-                  Fotky prací{galleryPhotos.length > 1 ? ` · ${galleryPhotos.length}` : ''}
-                </p>
               </div>
             ) : (
-              <div className="relative flex h-64 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-50 to-blue-50 sm:h-80">
-                <span className="text-8xl">{meta.emoji}</span>
-                <div className="absolute left-4 top-4">
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-sm font-semibold text-slate-700 backdrop-blur-sm">{meta.emoji} {meta.label}</span>
+              <div className="relative flex h-56 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-50 to-blue-50 sm:h-72">
+                <span className="text-7xl sm:text-8xl">{meta.emoji}</span>
+                <div className="absolute left-3 top-3 sm:left-4 sm:top-4">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm backdrop-blur-sm sm:text-sm">
+                    {meta.emoji} {meta.label}
+                  </span>
                 </div>
               </div>
             )}
 
-            {/* Název + podtitul */}
-            <div>
+            {/* Identita služby – kompaktní mobile-first blok podle druhého návrhu. */}
+            <section>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 text-sm font-bold text-emerald-700">
+                  <span>{meta.emoji}</span>{categoryName}
+                </span>
+                {s.profiles?.ico_verified && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+                    <ShieldCheck className="h-3.5 w-3.5" /> Ověřený poskytovatel
+                  </span>
+                )}
+              </div>
+
               <div className="flex items-start justify-between gap-3">
-                <h1 className="text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">{s.title}</h1>
+                <div className="min-w-0">
+                  <h1 className="text-2xl font-black tracking-tight text-slate-950 sm:text-3xl lg:text-4xl">{s.title}</h1>
+                  {s.subtitle && <p className="mt-1 text-base text-slate-500 sm:text-lg">{s.subtitle}</p>}
+                </div>
                 {jeMoje && (
                   <Link
                     href={`/dashboard/nabidky/${s.id}/upravit`}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:border-emerald-300 hover:text-emerald-700"
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-emerald-300 hover:text-emerald-700"
                   >
                     <Pencil className="h-3.5 w-3.5" /> Upravit
                   </Link>
                 )}
               </div>
-              {s.subtitle && <p className="mt-1 text-lg text-slate-500">{s.subtitle}</p>}
 
-              <div className="mt-3 flex flex-wrap items-center gap-4">
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
+                <span className="inline-flex items-center gap-1.5">
+                  <MapPin className="h-4 w-4 text-slate-400" /> {s.city}
+                  {(s as any).radius_km ? ` · okolí do ${(s as any).radius_km} km` : ''}
+                </span>
+                {providerRating > 0 && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+                    <strong className="text-slate-800">{providerRating.toFixed(1)}</strong>
+                    <span>({providerReviews})</span>
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-2">
                 {cheapest && (
-                  <span className="text-2xl font-black text-emerald-600">
+                  <span className="text-2xl font-black text-emerald-600 sm:text-3xl">
                     od {Number(cheapest.price).toLocaleString('cs-CZ')} Kč
                   </span>
                 )}
-                <div className="flex items-center gap-1.5 text-sm text-slate-500">
-                  <MapPin className="h-4 w-4 text-slate-400" />{s.city}
-                </div>
+                {subcatNames.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pb-0.5">
+                    {subcatNames.slice(0, 4).map((name) => (
+                      <span key={name} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
+            </section>
 
-              {/* Kategorie + podkategorie */}
-              <div className="mt-3 flex flex-wrap gap-2">
-                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-600">
-                  {meta.emoji} {categoryName}
-                </span>
-                {subcatNames.map((name) => (
-                  <span key={name} className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
-                    {name}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {/* Popis — jen když ho poskytovatel napsal. Prázdný blok „O nabídce"
-                nebo generovaná věta by vypadaly hůř než to, že tam nic není. */}
-            {(s.description ?? '').trim().length > 0 && (
-              <div className="rounded-xl border border-slate-200 bg-white p-6">
-                <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-slate-500">O nabídce</h2>
-                <p className="whitespace-pre-line leading-relaxed text-slate-700">{s.description}</p>
-              </div>
-            )}
-
-            {/* ── VOLNÉ TERMÍNY (last-minute) ── */}
+            {/* ── TERMÍNY – převzatá logika z prvního návrhu: 3 kompaktní termíny + další. ── */}
             {freeSlots.length > 0 && (
-              <div id="volne-terminy" className="scroll-mt-24 rounded-2xl border-2 border-emerald-200 bg-emerald-50/70 p-5">
-                <h2 className="flex items-center gap-2 text-lg font-black text-slate-900">
-                  <Zap className="h-5 w-5 fill-emerald-500 text-emerald-500" /> Volné termíny
-                </h2>
-                <p className="mt-0.5 text-sm leading-relaxed text-slate-600">
-                  Tyhle časy má {providerDisplayName} volné. Vyberte termín, zvolte úkon a zálohou
-                  si ho rovnou zamluvte — potvrzení je okamžité.
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {freeSlots.map((slot) => (
+              <section id="volne-terminy" className="scroll-mt-24">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h2 className="text-lg font-black text-slate-950">Nejbližší volné termíny</h2>
+                  {freeSlots.length > 3 && (
+                    <a href="#dalsi-terminy" className="shrink-0 text-sm font-bold text-emerald-700 hover:underline">
+                      Další termíny →
+                    </a>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                  {freeSlots.slice(0, 3).map((slot, index) => (
                     <Link
                       key={slot.id}
                       href={`/termin/${slot.id}`}
-                      className="group inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-white px-3.5 py-2.5 text-sm font-bold text-slate-800 shadow-sm transition hover:border-emerald-500 hover:bg-emerald-50"
+                      className={`group rounded-2xl border px-2.5 py-3 text-center transition sm:px-4 sm:py-3.5 ${
+                        index === 0
+                          ? 'border-emerald-400 bg-emerald-50 text-emerald-900 shadow-sm'
+                          : 'border-slate-200 bg-white text-slate-800 hover:border-emerald-300 hover:bg-emerald-50/60'
+                      }`}
                     >
-                      <span>{denKratce(slot.starts_at)}</span>
-                      <span className="tabular-nums text-emerald-700">{rozsahCasu(slot.starts_at, slot.ends_at)}</span>
-                      <ChevronRight className="h-4 w-4 text-emerald-400 transition group-hover:translate-x-0.5" />
+                      <span className="mx-auto mb-1 flex w-fit items-center gap-1.5 text-xs font-black sm:text-sm">
+                        <CalendarDays className={`h-4 w-4 ${index === 0 ? 'text-emerald-600' : 'text-slate-400'}`} />
+                        {denKratce(slot.starts_at)}
+                      </span>
+                      <span className={`block whitespace-nowrap text-[11px] font-semibold tabular-nums sm:text-sm ${index === 0 ? 'text-emerald-800' : 'text-slate-500'}`}>
+                        {rozsahCasu(slot.starts_at, slot.ends_at)}
+                      </span>
                     </Link>
                   ))}
                 </div>
-              </div>
+
+                {freeSlots.length > 3 && (
+                  <details id="dalsi-terminy" className="mt-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                    <summary className="cursor-pointer list-none text-center text-sm font-bold text-emerald-700">
+                      Zobrazit další termíny ({freeSlots.length - 3})
+                    </summary>
+                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {freeSlots.slice(3).map((slot) => (
+                        <Link
+                          key={slot.id}
+                          href={`/termin/${slot.id}`}
+                          className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-center text-xs font-bold text-slate-700 transition hover:border-emerald-300 hover:bg-emerald-50"
+                        >
+                          <span className="block">{denKratce(slot.starts_at)}</span>
+                          <span className="mt-0.5 block tabular-nums text-slate-500">{rozsahCasu(slot.starts_at, slot.ends_at)}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  </details>
+                )}
+
+                <p className="mt-2.5 flex flex-wrap items-center gap-1.5 text-sm text-slate-500">
+                  <CalendarDays className="h-4 w-4 text-slate-400" />
+                  Nehodí se vám žádný termín?
+                  <a href="#cenik" className="font-bold text-emerald-700 hover:underline">Navrhnout jiný</a>
+                </p>
+              </section>
+            )}
+
+            {/* Hlavní akce – podle druhého návrhu. */}
+            {!jeMoje && (
+              <section className="space-y-2">
+                <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                  <a
+                    href="#cenik"
+                    className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-3 py-3 text-sm font-black text-white shadow-sm transition hover:bg-emerald-600 sm:text-base"
+                  >
+                    <CalendarDays className="h-5 w-5" /> Objednat službu
+                  </a>
+                  <div className="min-w-0 [&>*]:h-full [&>*]:w-full">
+                    <AskProviderButton serviceId={s.id} isLoggedIn={!!user} variant="siroke" />
+                  </div>
+                </div>
+                <p className="flex items-center gap-1.5 text-xs text-slate-500 sm:text-sm">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  Rychlá domluva · komunikace zůstává v Propoju
+                </p>
+              </section>
             )}
 
             {/* ── CENÍK ── */}
-            <div>
-              <h2 className="mb-3 flex items-center gap-2 text-lg font-bold text-slate-900">
-                <ListChecks className="h-5 w-5 text-emerald-600" /> Ceník úkonů
-              </h2>
+            <section id="cenik" className="scroll-mt-24">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h2 className="flex items-center gap-2 text-lg font-black text-slate-950">
+                  <ListChecks className="h-5 w-5 text-emerald-600" /> Ceník úkonů
+                </h2>
+                {items.filter(i => i.is_active).length > 3 && (
+                  <span className="text-xs font-bold text-emerald-700 sm:text-sm">{items.filter(i => i.is_active).length} úkonů</span>
+                )}
+              </div>
               <PriceListPublic
                 items={items}
                 serviceId={s.id}
@@ -338,35 +412,42 @@ export default async function ServiceDetailPage({ params }: Props) {
                 categoryName={categoryName}
                 city={s.city}
               />
-              <p className="mt-3 text-xs leading-relaxed text-slate-400">
+              <p className="mt-2.5 text-xs leading-relaxed text-slate-400">
                 Nevyhovuje žádný z volných termínů? Vyberte úkon a pošlete poptávku — poskytovatel vám navrhne čas.
               </p>
-            </div>
+            </section>
 
-            {/* ── RECENZE ZÁKAZNÍKŮ ──
-                Rozhodovací informace patří k nabídce, ne až na profil. */}
+            {/* O nabídce – zachováno, ale až po rozhodovacích informacích. */}
+            {(s.description ?? '').trim().length > 0 && (
+              <section className="border-t border-slate-200 pt-5 sm:pt-6">
+                <h2 className="mb-2 text-lg font-black text-slate-950">O nabídce</h2>
+                <p className="whitespace-pre-line text-sm leading-6 text-slate-600 sm:text-base sm:leading-7">{s.description}</p>
+              </section>
+            )}
+
+            {/* Recenze – stále součást detailu služby, ale bez zbytečného velkého boxu kolem celé sekce. */}
             {reviews.length > 0 && (
-              <div>
+              <section className="border-t border-slate-200 pt-5 sm:pt-6">
                 <div className="mb-3 flex items-end justify-between gap-3">
-                  <h2 className="flex items-center gap-2 text-lg font-bold text-slate-900">
-                    <Star className="h-5 w-5 fill-amber-400 text-amber-400" /> Recenze zákazníků
-                  </h2>
+                  <div>
+                    <h2 className="flex items-center gap-2 text-lg font-black text-slate-950">
+                      <Star className="h-5 w-5 fill-amber-400 text-amber-400" /> Recenze ({providerReviews})
+                    </h2>
+                    {providerRating > 0 && (
+                      <p className="mt-1 text-sm text-slate-500">
+                        <strong className="text-slate-800">{providerRating.toFixed(1)} ★</strong> průměrné hodnocení
+                      </p>
+                    )}
+                  </div>
                   {providerReviews > 3 && (
-                    <Link href={`/profil/${s.provider_id}`} className="shrink-0 text-sm font-semibold text-emerald-600 hover:underline">
-                      Všech {providerReviews} →
+                    <Link href={`/profil/${s.provider_id}`} className="shrink-0 text-sm font-bold text-emerald-700 hover:underline">
+                      Všechny recenze →
                     </Link>
                   )}
                 </div>
 
-                {providerRating > 0 && (
-                  <p className="mb-3 text-sm text-slate-500">
-                    Průměr <strong className="text-slate-800">{providerRating.toFixed(1)} ★</strong>
-                    {' '}z {providerReviews} {providerReviews === 1 ? 'hodnocení' : 'hodnocení'}
-                  </p>
-                )}
-
                 <div className="space-y-3">
-                  {reviews.map((r: any) => (
+                  {reviews.slice(0, 2).map((r: any) => (
                     <ReviewCard
                       key={r.id}
                       isOwner={false}
@@ -384,115 +465,114 @@ export default async function ServiceDetailPage({ params }: Props) {
                     />
                   ))}
                 </div>
-              </div>
+              </section>
             )}
           </div>
 
-          {/* ── PRAVÝ SLOUPEC: poskytovatel + adresa/mapa ── */}
-          <div className="space-y-4">
-
+          {/* ── BOČNÍ SLOUPEC; na mobilu pokračuje přirozeně pod recenzemi. ── */}
+          <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
             {/* Poskytovatel */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
               <Link href={`/profil/${s.provider_id}`} className="flex items-center gap-3 transition-opacity hover:opacity-80">
-                <Avatar name={providerDisplayName} url={s.profiles.avatar_url} size={48} />
-                <div className="min-w-0">
-                  <p className="truncate font-bold text-slate-900">{providerDisplayName}</p>
-                  {providerRating > 0 ? (
-                    <div className="flex items-center gap-1">
-                      <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                      <span className="text-sm text-slate-600">
-                        {providerRating.toFixed(1)} ({providerReviews} {providerReviews < 5 ? 'recenze' : 'recenzí'})
+                <Avatar name={providerDisplayName} url={s.profiles.avatar_url} size={52} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-base font-black text-slate-950">{providerDisplayName}</p>
+                  <p className="truncate text-sm text-slate-500">{s.subtitle || categoryName} · {s.profiles.city ?? s.city}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                    {s.profiles?.ico_verified && (
+                      <span className="inline-flex items-center gap-1 font-bold text-emerald-700">
+                        <ShieldCheck className="h-3.5 w-3.5" /> Ověřený poskytovatel
                       </span>
-                    </div>
-                  ) : (
-                    <span className="text-xs text-slate-400">Zatím bez recenzí</span>
-                  )}
+                    )}
+                    {providerReviews > 0 && <span className="text-slate-500">· {providerReviews} recenzí</span>}
+                  </div>
                 </div>
+                <ChevronRight className="h-5 w-5 shrink-0 text-slate-300" />
               </Link>
 
               {(showLegalName || s.profiles.ico) && (
-                <p className="mt-2.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 border-t border-slate-100 pt-2.5 text-xs text-slate-500">
-                  {s.profiles.ico_verified && <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />}
-                  {showLegalName && <span className="font-semibold text-slate-600">{providerLegalName}</span>}
-                  {showLegalName && s.profiles.ico && <span className="text-slate-300">·</span>}
-                  {s.profiles.ico && <span>IČO {s.profiles.ico}</span>}
-                </p>
+                <div className="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-500">
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    {showLegalName && <span className="font-semibold text-slate-600">{providerLegalName}</span>}
+                    {showLegalName && s.profiles.ico && <span className="text-slate-300">·</span>}
+                    {s.profiles.ico && <span>IČO {s.profiles.ico}</span>}
+                  </div>
+                </div>
               )}
 
-              {/* Značka (salon/firma), pod kterou karta patří */}
               {brand && (
                 <Link
                   href={`/znacka/${brand.slug}`}
-                  className="mt-2.5 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 transition hover:border-emerald-300 hover:bg-emerald-50"
+                  className="mt-3 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 transition hover:border-emerald-300 hover:bg-emerald-50"
                 >
                   <Building2 className="h-4 w-4 shrink-0 text-emerald-600" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-bold text-slate-800">{brand.name}</span>
-                    <span className="block text-xs text-slate-500">
-                      Součást značky{brand.city ? ` · ${brand.city}` : ''}
-                    </span>
+                    <span className="block text-xs text-slate-500">Součást značky{brand.city ? ` · ${brand.city}` : ''}</span>
                   </span>
                   <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
                 </Link>
               )}
 
-              {s.profiles.bio && <p className="mt-3 text-sm leading-relaxed text-slate-600 line-clamp-4">{s.profiles.bio}</p>}
-              <div className="mt-3 flex items-center gap-1.5 text-sm text-slate-500">
-                <MapPin className="h-4 w-4 text-slate-400" />{s.profiles.city ?? s.city}
-              </div>
-
               <Link
                 href={`/profil/${s.provider_id}`}
-                className="mt-3 block text-center text-xs font-semibold text-emerald-600 hover:underline"
+                className="mt-3 inline-flex w-full items-center justify-center rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700"
               >
-                Zobrazit celý profil →
+                Zobrazit profil
               </Link>
+            </section>
 
-              {!jeMoje && (
-                <div className="mt-3">
-                  <AskProviderButton serviceId={s.id} isLoggedIn={!!user} variant="siroke" />
-                  <p className="mt-1.5 text-center text-[11px] leading-relaxed text-slate-400">
-                    Na zprávy odpovídá poskytovatel v Propoju — konverzaci najdete v Objednávkách.
-                  </p>
-                </div>
-              )}
-            </div>
+            {/* Časté dotazy – o patro výš, tedy před mapou / adresou. */}
+            <section>
+              {jeMoje
+                ? <ServiceFaqEditor serviceId={s.id} faqs={faqs} />
+                : <ServiceFaq faqs={faqs} />}
+            </section>
 
             {/* Adresa + mapa */}
             {showAddress && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h3 className="mb-2 flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-slate-500">
-                  <MapPin className="h-4 w-4 text-slate-400" /> Kde nás najdete
+              <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                <h3 className="mb-2 flex items-center gap-2 text-sm font-black text-slate-800">
+                  <MapPin className="h-4 w-4 text-emerald-600" /> Kde nás najdete
                 </h3>
-                <p className="mb-3 text-sm text-slate-700">{adresa}</p>
-                {showMap && (
-                  <ServiceMap lat={Number(adresaLat)} lng={Number(adresaLng)} label={s.title} />
-                )}
-              </div>
+                <p className="mb-3 text-sm text-slate-600">{adresa}</p>
+                {showMap && <ServiceMap lat={Number(adresaLat)} lng={Number(adresaLng)} label={s.title} />}
+              </section>
             )}
 
-            {/* Když je provozovna, ale adresa skrytá */}
             {hasEstablishment && !addressPublic && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-sm">
-                <p className="flex items-center gap-2">
-                  <MapPin className="h-4 w-4 text-slate-400" /> {s.city} — přesnou adresu dostanete po objednání.
+              <section className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm sm:p-5">
+                <p className="flex items-start gap-2">
+                  <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                  {s.city} — přesnou adresu dostanete po objednání.
                 </p>
-              </div>
+              </section>
             )}
 
-            <p className="text-center text-xs text-slate-400">
-              Přidáno {datum(s.created_at)}
-            </p>
-          </div>
-        </div>
-
-        {/* ── ČASTÉ DOTAZY — až úplně dole pod obsahem nabídky ── */}
-        <div className="mt-8">
-          {jeMoje
-            ? <ServiceFaqEditor serviceId={s.id} faqs={faqs} />
-            : <ServiceFaq faqs={faqs} />}
+            <p className="text-center text-xs text-slate-400">Přidáno {datum(s.created_at)}</p>
+          </aside>
         </div>
       </div>
+
+      {/* Mobilní sticky CTA podle druhého návrhu. Na desktopu se nepřekrývá s obsahem. */}
+      {!jeMoje && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2.5 shadow-[0_-8px_30px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
+          <div className="mx-auto flex max-w-2xl items-center gap-2">
+            {cheapest && (
+              <div className="min-w-0 flex-1 pl-1">
+                <p className="truncate text-sm font-black text-slate-950">od {Number(cheapest.price).toLocaleString('cs-CZ')} Kč</p>
+                <p className="text-[11px] text-slate-400">Orientační cena</p>
+              </div>
+            )}
+            <a
+              href="#cenik"
+              className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-black text-white shadow-sm transition hover:bg-emerald-600"
+            >
+              <CalendarDays className="h-4 w-4" /> Objednat službu
+            </a>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
