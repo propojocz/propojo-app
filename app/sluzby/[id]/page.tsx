@@ -243,10 +243,6 @@ export default async function ServiceDetailPage({ params }: Props) {
               </div>
             )}
 
-            {jeMoje
-              ? <ServiceFaqEditor serviceId={s.id} faqs={faqs} />
-              : <ServiceFaq faqs={faqs} />}
-
             {/* Název + podtitul */}
             <div>
               <div className="flex items-start justify-between gap-3">
@@ -488,6 +484,13 @@ export default async function ServiceDetailPage({ params }: Props) {
               Přidáno {datum(s.created_at)}
             </p>
           </div>
+        </div>
+
+        {/* ── ČASTÉ DOTAZY — až úplně dole pod obsahem nabídky ── */}
+        <div className="mt-8">
+          {jeMoje
+            ? <ServiceFaqEditor serviceId={s.id} faqs={faqs} />
+            : <ServiceFaq faqs={faqs} />}
         </div>
       </div>
     </main>
