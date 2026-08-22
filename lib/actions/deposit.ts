@@ -4,23 +4,17 @@
 // Peníze přitečou na Propojo a DRŽÍ se (separate charges and transfers).
 // Převod poskytovateli / vratka = vrstva 4.
 //
-// ČÁSTKA se bere v tomto pořadí:
-//   1) orders.deposit_amount — zamrzlá při objednání, platí i když poskytovatel
-//      mezitím ceník změnil (zákazník platí to, co viděl),
-//   2) service_items — úkon, který si zákazník objednal,
-//   3) services — karta, jen jako záloha pro objednávky z doby před ceníkem.
+// Opakovaný pokus o platbu je podporovaný: návrat z Checkout přes „zpět" neznamená,
+// že zákazník objednávku ruší. Nový checkout nahradí předchozí session a obnoví hold.
+
 import { createClient } from '@/lib/supabase/server'
 import { stripe } from '@/lib/stripe'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-
-// Stripe má minimální částku platby (pro CZK ~ekvivalent 0,50 €). Držíme bezpečné minimum.
 const MIN_AMOUNT_CZK = 20
-
-// Jak dlouho platí odkaz na platbu. Bez tohoto pole ho Stripe drží 24 hodin —
-// zákazník by mohl zaplatit druhý den za termín, který mezitím dostal někdo
-// jiný. 30 minut je nejkratší doba, kterou Stripe dovolí.
 const CHECKOUT_MINUTES = 30
+// O pár minut déle než checkout kvůli případnému zpoždění webhooku.
+const HOLD_MINUTES = 35
 
 type Result = { success: true; url: string } | { success: false; error: string }
 
@@ -33,8 +27,9 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
     .from('orders')
     .select(`
       id, customer_id, provider_id, status, deposit_status, deposit_amount, service_item_id,
+      scheduled_at, hold_expires_at, stripe_checkout_session_id,
       services(title, payment_model, deposit_amount, quote_fee),
-      service_items(name, payment_model, deposit_amount, quote_fee),
+      service_items(name, payment_model, deposit_amount, quote_fee, deposit_type, price),
       profiles!orders_provider_id_fkey(stripe_account_id, stripe_payouts_enabled)
     `)
     .eq('id', orderId)
@@ -47,7 +42,7 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
   }
 
   if (order.status !== 'prijato') {
-    return { success: false, error: 'Zálohu lze zaplatit až po přijetí objednávky poskytovatelem.' }
+    return { success: false, error: 'Platbu lze dokončit až po potvrzení termínu.' }
   }
 
   if (order.deposit_status === 'paid' || order.deposit_status === 'released') {
@@ -62,30 +57,47 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
 
   const svc = order.services
   const item = order.service_items ?? null
-
-  // Model určuje ÚKON (má-li ho objednávka), jinak karta — starý tok.
   const isModelB = (item?.payment_model ?? svc?.payment_model) === 'B'
 
-  // U modelu B se platí poplatek za nacenění, u modelu A rezervační záloha.
-  // Zamrzlá částka na objednávce má u modelu A přednost před ceníkem.
-  // U plné platby předem se účtuje CELÁ cena úkonu (deposit_amount je u ní null).
-  const isFullPayment = !isModelB && (item as any)?.deposit_type === 'plna_platba'
+  if (!isModelB && !order.scheduled_at) {
+    return { success: false, error: 'Nejdřív musí být potvrzený termín.' }
+  }
+
+  const isFullPayment = !isModelB && item?.deposit_type === 'plna_platba'
   const amount = isModelB
     ? Number(item?.quote_fee ?? svc?.quote_fee ?? 0)
     : isFullPayment
-      ? Number(order.deposit_amount ?? (item as any)?.price ?? 0)
+      ? Number(order.deposit_amount ?? item?.price ?? 0)
       : Number(order.deposit_amount ?? item?.deposit_amount ?? svc?.deposit_amount ?? 0)
 
   if (!amount || amount <= 0) {
     return { success: false, error: 'Pro tuto objednávku není nastavena žádná platba předem.' }
   }
 
-  // Stripe minimum – pod 20 Kč platbu nelze spustit
   if (amount < MIN_AMOUNT_CZK) {
     return { success: false, error: `Minimální částka platby je ${MIN_AMOUNT_CZK} Kč.` }
   }
 
-  // V názvu platby chceme úkon, který si zákazník objednal — ne název celé karty.
+  // Když už existuje předchozí checkout, nejdřív zjistíme, jestli náhodou nebyl
+  // zaplacený a jen ještě nedorazil webhook. Nechceme vytvořit druhou platbu.
+  let previousSessionId: string | null = order.stripe_checkout_session_id ?? null
+  if (previousSessionId) {
+    try {
+      const previous = await stripe.checkout.sessions.retrieve(previousSessionId)
+      if (previous.payment_status === 'paid') {
+        return {
+          success: false,
+          error: 'Platba už byla odeslána. Chvíli počkejte a obnovte stránku — potvrzení se právě zpracovává.',
+        }
+      }
+    } catch (err) {
+      // Starou session nemusíme umět načíst (už mohla být odstraněná/expirnutá).
+      // Nový pokus tím neblokujeme.
+      console.warn('[deposit] předchozí checkout nelze načíst:', err)
+      previousSessionId = null
+    }
+  }
+
   const nazev = item?.name || svc?.title || 'služba'
   const popis = isModelB
     ? `Poplatek za nacenění – ${nazev}`
@@ -107,10 +119,9 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
       payment_intent_data: {
         metadata: { order_id: orderId, kind: 'deposit' },
       },
-      // Po vypršení Stripe pošle událost checkout.session.expired — podle ní
-      // se uvolní zamluvený termín.
       expires_at: Math.floor(Date.now() / 1000) + CHECKOUT_MINUTES * 60,
       success_url: `${APP_URL}/dashboard/objednavky/${orderId}?platba=uspech`,
+      // Návrat sem znamená jen „checkout nebyl dokončen", ne zrušení objednávky.
       cancel_url: `${APP_URL}/dashboard/objednavky/${orderId}?platba=zruseno`,
       locale: 'cs',
       metadata: { order_id: orderId, kind: 'deposit' },
@@ -118,9 +129,36 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
 
     if (!session.url) return { success: false, error: 'Nepodařilo se vytvořit platbu.' }
 
-    await (supabase.from('orders') as any)
-      .update({ stripe_checkout_session_id: session.id, deposit_amount: amount })
+    // Nejdřív označíme NOVOU session jako aktuální. Když pak expirujeme starou,
+    // její webhook objednávku neukončí, protože kontroluje stripe_checkout_session_id.
+    const holdExpiresAt = new Date(Date.now() + HOLD_MINUTES * 60_000).toISOString()
+    const { error: updateError } = await (supabase.from('orders') as any)
+      .update({
+        stripe_checkout_session_id: session.id,
+        deposit_amount: amount,
+        deposit_status: 'pending',
+        hold_expires_at: holdExpiresAt,
+      })
       .eq('id', orderId)
+      .eq('customer_id', user.id)
+      .eq('status', 'prijato')
+
+    if (updateError) {
+      try { await stripe.checkout.sessions.expire(session.id) } catch {}
+      console.error('[deposit] nepodařilo se uložit novou session:', updateError)
+      return { success: false, error: 'Platbu se nepodařilo připravit. Zkuste to znovu.' }
+    }
+
+    // Starý otevřený checkout zneplatníme, aby zákazník nemohl omylem zaplatit
+    // dvě různé session za stejnou objednávku.
+    if (previousSessionId && previousSessionId !== session.id) {
+      try {
+        const previous = await stripe.checkout.sessions.retrieve(previousSessionId)
+        if (previous.status === 'open') await stripe.checkout.sessions.expire(previousSessionId)
+      } catch (err) {
+        console.warn('[deposit] starý checkout se nepodařilo ukončit:', err)
+      }
+    }
 
     return { success: true, url: session.url }
   } catch (err) {

@@ -7,7 +7,7 @@
 // rovnou uzavírá zakázku tlačítkem „Potvrdit pro uvolnění výplaty" → ceka_potvrzeni,
 // čímž se u zákazníka objeví potvrzení + hodnocení a spustí se výplata.
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Loader2, CheckCircle2, XCircle, Wallet } from 'lucide-react'
 import { updateOrderStatus } from '@/lib/actions/orders'
 
@@ -25,6 +25,7 @@ export default function OrderStatusButton({
   depositStatus = null,
   scheduledAt = null,
   durationMinutes = null,
+  canAcceptWithoutTime = false,
 }: {
   orderId: string
   currentStatus: string
@@ -34,14 +35,11 @@ export default function OrderStatusButton({
   /** Délka úkonu v minutách — uzavírat jde až po jejím uplynutí,
       ne hned na začátku termínu (barvení trvá 90 minut). */
   durationMinutes?: number | null
+  /** Model B / jiný tok, kde lze objednávku přijmout i bez přesného termínu. */
+  canAcceptWithoutTime?: boolean
 }) {
   const [loading, setLoading] = useState<string | null>(null)
   const [err, setErr] = useState('')
-
-  // Hláška platí jen k tomu pokusu, u kterého vznikla. Když se mezitím
-  // objednávka posune (doplní se termín, přijde platba), musí zmizet —
-  // jinak visí na stránce rada, která už neplatí.
-  useEffect(() => { setErr('') }, [currentStatus, depositStatus, scheduledAt])
 
   const handleAction = async (status: string) => {
     setErr('')
@@ -49,6 +47,28 @@ export default function OrderStatusButton({
     const res = await updateOrderStatus(orderId, status as any)
     if (!res.success) setErr(res.error ?? 'Nepodařilo se změnit stav.')
     setLoading(null)
+  }
+
+  // Běžná služba bez termínu se nejdřív musí domluvit. Server to stejně hlídá,
+  // ale v UI nedává smysl ukazovat tlačítko, které vždy skončí chybou.
+  // Model B je výjimka: výjezd/nacenění lze přijmout i bez scheduled_at.
+  if (currentStatus === 'cekajici' && !scheduledAt && !canAcceptWithoutTime) {
+    return (
+      <div className="w-full">
+        <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm leading-relaxed text-amber-800">
+          Nejdřív zákazníkovi navrhněte termín výše. Objednávka se potvrdí, až si zákazník jeden vybere.
+        </p>
+        <button
+          onClick={() => handleAction('zruseno')}
+          disabled={!!loading}
+          className="mt-2 flex items-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-60"
+        >
+          {loading === 'zruseno' ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+          Odmítnout objednávku
+        </button>
+        {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
+      </div>
+    )
   }
 
   // Ve stavu "čeká na potvrzení" poskytovatel jen čeká na zákazníka.

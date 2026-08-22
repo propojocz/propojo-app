@@ -39,15 +39,13 @@ type OrderRow = {
   deposit_amount: number | null
   location_city: string | null
   location_address: string | null
-   location_lat: number | null
+  location_lat: number | null
   location_lng: number | null
   service_location: string | null
   scheduled_at: string | null
   scheduled_end: string | null
   service_item_id: string | null
   services: ServiceLite | null
-  // duration_minutes: kvůli tomu, aby šlo zakázku uzavřít až po SKONČENÍ
-  // služby, ne hned na začátku termínu.
   service_items: { name: string | null; deposit_amount: number | null; payment_model: string | null; duration_minutes: number | null } | null
 }
 
@@ -75,11 +73,9 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/prihlasit')
 
-  // Zákazník se vrátil z platby tlačítkem zpět → platit nebude. Termín pustíme
-  // hned dál, ať neblokuje dalších 30 minut, než platba vyprší sama.
-  // Funkce si sama ověří, že jde o zákazníka a o rezervaci čekající na platbu;
-  // u ostatních objednávek neudělá nic. Musí běžet PŘED načtením objednávky,
-  // aby stránka rovnou ukázala aktuální stav.
+  // Návrat ze Stripe přes „zpět". Přímá rezervace se zruší a slot uvolní;
+  // objednávka domluvená bez slotu se jen vrátí do stavu čekající, aby se mohli
+  // domluvit na jiném termínu ve stejném chatu.
   if (searchParams.platba === 'zruseno') {
     await releaseUnpaidReservation(params.id)
   }
@@ -91,25 +87,32 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
     .single() as { data: OrderRow | null; error: any }
 
   if (error || !order) notFound()
-
   if (order.customer_id !== user.id && order.provider_id !== user.id) notFound()
 
   const isProvider = order.provider_id === user.id
   const otherId = isProvider ? order.customer_id : order.provider_id
 
-  // Návrhy termínů (vrstva 4). Panel se ukazuje jen u objednávky bez
-  // potvrzeného termínu; jakmile zákazník přijme a zaplatí, scheduled_at
-  // se vyplní a panel sám zmizí.
   const proposals = await getProposals(order.id)
   const depositForPanel = Number(
     order.deposit_amount ?? order.service_items?.deposit_amount ?? order.services?.deposit_amount ?? 0
   )
-  const showProposalPanel =
-    !order.scheduled_at &&
+
+  const proposalModel = order.service_items?.payment_model ?? order.services?.payment_model
+  const futureConfirmedTerm = !!order.scheduled_at && new Date(order.scheduled_at).getTime() > Date.now()
+  const proposalFlowOpen =
     order.status !== 'zruseno' &&
     order.status !== 'dokonceno' &&
-    order.service_items?.payment_model !== 'B' &&
-    (isProvider || proposals.length > 0)
+    order.status !== 'ceka_potvrzeni' &&
+    proposalModel !== 'B'
+
+  // Bez termínu: provider panel vidí vždy, zákazník až když má co vybírat.
+  // S potvrzeným budoucím termínem: provider má kompaktní „Navrhnout změnu",
+  // zákazník panel uvidí jen tehdy, když provider opravdu poslal nové návrhy.
+  const showProposalPanel = proposalFlowOpen && (
+    !order.scheduled_at
+      ? (isProvider || proposals.length > 0)
+      : (futureConfirmedTerm && (isProvider || proposals.length > 0))
+  )
 
   const [myProfileRes, otherProfileRes] = await Promise.all([
     supabase.from('profiles').select('id, full_name, avatar_url, phone, city, created_at').eq('id', user.id).single(),
@@ -125,21 +128,16 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
     .eq(otherCompletedField, otherId)
     .eq('status', 'dokonceno')
 
-  // Historie zpráv
   const { data: messages } = await supabase
     .from('messages')
     .select('*')
     .eq('order_id', params.id)
     .order('created_at', { ascending: true }) as { data: MessageRow[] | null }
 
-  // Mapa jmen VŠECH, kdo v chatu psali (vč. admina/Propojo, pokud zasáhl).
-  // Slouží k zobrazení jména nad cizími bublinami.
   const senderIds = Array.from(new Set((messages ?? []).map((m) => m.sender_id)))
   const namesMap: Record<string, string> = {}
-  // Předvyplníme z už načtených profilů
   if (myProfile?.id) namesMap[myProfile.id] = myProfile.full_name ?? 'Já'
   if (otherProfile?.id) namesMap[otherProfile.id] = otherProfile.full_name ?? (isProvider ? 'Zákazník' : 'Živnostník')
-  // Dohledáme zbylé (typicky admin/Propojo)
   const missing = senderIds.filter((id) => !namesMap[id])
   if (missing.length > 0) {
     const { data: extraProfiles } = await supabase
@@ -166,19 +164,24 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
         <ArrowLeft className="h-4 w-4" /> Zpět na objednávky
       </Link>
 
-      {/* Zrušená platba u rezervace termínu — termín je pryč, řekneme to rovnou
-          a nabídneme cestu zpátky. Bez toho by zákazník koukal na zrušenou
-          objednávku a nevěděl proč. */}
+      {/* Přímá rezervace: zrušená platba ruší i rezervaci. */}
       {searchParams.platba === 'zruseno' && order.status === 'zruseno' && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-800">
           <strong>Platba nebyla dokončena, termín jsme uvolnili.</strong>{' '}
-          Rezervaci potvrzuje až zaplacení zálohy — držet vám čas bez ní bohužel nemůžeme.
-          Objednat se můžete znovu, pokud je termín pořád volný.
+          Rezervaci potvrzuje až zaplacení zálohy. Objednat se můžete znovu, pokud je termín pořád volný.
           <div className="mt-2">
             <Link href={`/sluzby/${order.service_id}`} className="font-bold underline">
               Zpět na nabídku →
             </Link>
           </div>
+        </div>
+      )}
+
+      {/* Domluvený termín bez slotu: objednávka zůstává otevřená. */}
+      {searchParams.platba === 'zruseno' && order.status === 'cekajici' && !order.scheduled_at && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-800">
+          <strong>Platba nebyla dokončena, ale objednávku jsme nezrušili.</strong>{' '}
+          Zvolený termín už není potvrzený. Můžete pokračovat v chatu a domluvit si s poskytovatelem jiný.
         </div>
       )}
 
@@ -190,6 +193,8 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
           isProvider={isProvider}
           proposals={proposals}
           depositAmount={depositForPanel}
+          scheduledAt={order.scheduled_at}
+          depositStatus={order.deposit_status}
           itemName={order.service_items?.name ?? order.services?.title ?? null}
           customerName={isProvider ? (otherProfile?.full_name ?? null) : null}
           prefFrom={(order as any).pref_date_from ?? null}
@@ -198,8 +203,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
         />
       )}
 
-      {/* Preference zákazníka (od–do + denní doba) — jen dokud poskytovatel
-          nenavrhl konkrétní časy. Jakmile jsou návrhy, zákazník už jen vybírá. */}
+      {/* Preference zákazníka jen před prvním potvrzeným termínem. */}
       {isCustomer && !order.scheduled_at && order.status === 'cekajici' && proposals.length === 0 && (
         <TimePreferenceForm
           orderId={order.id}

@@ -19,7 +19,7 @@
 
 import { useState, useEffect, type MouseEvent } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle2, Loader2, MapPin, Store, X, Clock, Wallet, CalendarDays, Truck, AlertTriangle } from 'lucide-react'
+import { CheckCircle2, Loader2, MapPin, Store, X, Clock, Wallet, CalendarDays, Truck, AlertTriangle, MessageCircle } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createOrder } from '@/lib/actions/orders'
@@ -116,6 +116,9 @@ export default function OrderItemModal({
   const [skipSlot, setSkipSlot] = useState(false)
   const [cityGeo, setCityGeo] = useState<{ lat: number; lng: number } | null>(null)
   const [goingToPay, setGoingToPay] = useState(false)
+  // Modal může zůstat otevřený delší dobu. Každých 30 s ho přepočítáme, aby
+  // časy, které mezitím přešly do minulosti, samy zmizely bez obnovy stránky.
+  const [timeTick, setTimeTick] = useState(0)
 
   const isModelB = item.payment_model === 'B'
   const atCustomer = locationType !== 'u_poskytovatele'
@@ -174,6 +177,21 @@ export default function OrderItemModal({
       : null
   const outOfRange = distance != null && radius != null && distance > radius
   const blockedByRange = outOfRange && hasSlots && !!selected && !skipSlot
+
+  useEffect(() => {
+    const id = window.setInterval(() => setTimeTick((v) => v + 1), 30_000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  // Pokud zákazník nechá modal otevřený a zvolený čas mezitím přestane být
+  // rezervovatelný, výběr zrušíme stejně jako tlačítko v mřížce.
+  useEffect(() => {
+    if (!selected) return
+    if (new Date(selected.startIso).getTime() < Date.now() + 5 * 60_000) {
+      setSelected(null)
+      setErrorMsg('Vybraný čas už není aktuální. Vyberte prosím jiný.')
+    }
+  }, [timeTick, selected])
 
   useEffect(() => {
     let cancelled = false
@@ -274,7 +292,7 @@ export default function OrderItemModal({
           <div className="mb-4 flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-wider text-emerald-600">
-                {isModelB ? 'Poptávka nacenění' : skipSlot ? 'Poptávka termínu' : hasSlots ? 'Rezervace termínu' : 'Objednávka úkonu'}
+                {isModelB ? 'Poptávka nacenění' : skipSlot ? 'Domluva termínu' : hasSlots ? 'Rezervace termínu' : 'Objednávka úkonu'}
               </p>
               <h3 className="mt-0.5 truncate text-lg font-black text-slate-900">{item.name}</h3>
             </div>
@@ -297,7 +315,7 @@ export default function OrderItemModal({
                   <p className="text-lg font-black text-emerald-800">
                     {bookedIso
                       ? (goingToPay ? 'Termín pro vás držíme' : 'Termín je váš! 🎉')
-                      : skipSlot ? 'Poptávka odeslána' : 'Objednávka odeslána'}
+                      : skipSlot ? 'Objednávka odeslána' : 'Objednávka odeslána'}
                   </p>
                   {bookedIso ? (
                     <>
@@ -320,7 +338,7 @@ export default function OrderItemModal({
                   ) : (
                     <p className="text-xs leading-relaxed text-emerald-700">
                       {skipSlot
-                        ? 'Živnostník vám navrhne konkrétní termíny — přijde vám upozornění a vyberete si.'
+                        ? 'Teď se můžete s poskytovatelem domluvit v chatu. Až navrhne konkrétní časy, vyberete si jeden.'
                         : isModelB
                           ? 'Živnostník se vám ozve a domluvíte se na termínu prohlídky.'
                           : 'Živnostník ji potvrdí a ozve se vám.'}
@@ -359,7 +377,9 @@ export default function OrderItemModal({
                     <div className="flex items-center justify-between">
                       <span className="flex items-center gap-1.5 font-semibold text-slate-700">
                         <Wallet className="h-3.5 w-3.5 text-emerald-600" />
-                        {isFullPayment ? 'Zaplatíte teď (celá cena)' : 'Zaplatíte teď (záloha)'}
+                        {(skipSlot || !hasSlots)
+                          ? (isFullPayment ? 'Zaplatíte po potvrzení termínu' : 'Záloha po potvrzení termínu')
+                          : (isFullPayment ? 'Zaplatíte teď (celá cena)' : 'Zaplatíte teď (záloha)')}
                       </span>
                       <strong className="text-emerald-700">{deposit.toLocaleString('cs-CZ')} Kč</strong>
                     </div>
@@ -382,11 +402,13 @@ export default function OrderItemModal({
                       </div>
                     )}
                     <p className="pt-0.5 text-[11px] leading-relaxed text-slate-400">
-                      {isFullPayment
-                        ? 'Platíte celou cenu předem — na místě už nic nedoplácíte.'
-                        : hasFixedPrice
-                          ? 'Záloha se započítá do konečné ceny — na místě doplatíte jen rozdíl.'
-                          : 'Záloha se započítá do konečné ceny. Zbytek doplatíte na místě podle skutečného rozsahu.'}
+                      {(skipSlot || !hasSlots)
+                        ? 'Platbu provedete až poté, co si s poskytovatelem potvrdíte konkrétní termín.'
+                        : isFullPayment
+                          ? 'Platíte celou cenu předem — na místě už nic nedoplácíte.'
+                          : hasFixedPrice
+                            ? 'Záloha se započítá do konečné ceny — na místě doplatíte jen rozdíl.'
+                            : 'Záloha se započítá do konečné ceny. Zbytek doplatíte na místě podle skutečného rozsahu.'}
                     </p>
                   </div>
                 )}
@@ -440,64 +462,102 @@ export default function OrderItemModal({
                 )}
               </div>
 
-              {/* Mřížka časů */}
+              {/* Jak chce zákazník termín vyřešit */}
               {hasSlots && (
                 <div>
-                  <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
-                    <CalendarDays className="h-3.5 w-3.5 text-emerald-600" /> Vyberte čas *
+                  <label className="mb-2 block text-xs font-semibold text-slate-600">
+                    Jak chcete domluvit termín?
                   </label>
 
-                  <div className="space-y-3">
-                    {days.map((d) => (
-                      <div key={d.key}>
-                        <p className="mb-1.5 text-xs font-bold capitalize text-slate-700">{d.label}</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {d.times.map((t) => {
-                            const isSel = selected?.startIso === t.startIso && selected?.slotId === t.slotId
-                            return (
-                              <button
-                                key={`${t.slotId}-${t.startIso}`}
-                                type="button"
-                                onClick={() => { setSelected(isSel ? null : t); setErrorMsg('') }}
-                                className={`rounded-lg border px-2.5 py-1.5 text-sm font-semibold transition-all ${
-                                  isSel
-                                    ? 'border-emerald-500 bg-emerald-500 text-white'
-                                    : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-300 hover:text-emerald-700'
-                                }`}
-                              >
-                                {fmtTime(t.startIso)}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    ))}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSkipSlot(false)
+                        setErrorMsg('')
+                        setState('form')
+                      }}
+                      className={`rounded-xl border p-3 text-left transition-all ${
+                        !skipSlot
+                          ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-200'
+                          : 'border-slate-200 bg-white hover:border-emerald-300'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5 text-sm font-bold text-slate-900">
+                        <CalendarDays className="h-4 w-4 text-emerald-600" /> Vybrat volný termín
+                      </span>
+                      <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
+                        Vyberete konkrétní čas a rezervujete ho rovnou.
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSkipSlot(true)
+                        setSelected(null)
+                        setErrorMsg('')
+                        setState('form')
+                      }}
+                      className={`rounded-xl border p-3 text-left transition-all ${
+                        skipSlot
+                          ? 'border-emerald-500 bg-emerald-50 ring-1 ring-emerald-200'
+                          : 'border-slate-200 bg-white hover:border-emerald-300'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5 text-sm font-bold text-slate-900">
+                        <MessageCircle className="h-4 w-4 text-emerald-600" /> Nejdřív se domluvit
+                      </span>
+                      <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
+                        Objednávku odešlete bez času a termín doladíte s poskytovatelem.
+                      </span>
+                    </button>
                   </div>
 
-                  <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
-                    {dur ? `Úkon trvá ${dur}. ` : ''}
-                    {deposit > 0
-                      ? 'Termín potvrdí zaplacení zálohy — po výběru vás rovnou pustíme k platbě.'
-                      : 'Vybraný čas je po rezervaci rovnou potvrzený — první bere.'}
-                  </p>
+                  {!skipSlot ? (
+                    <div className="mt-3">
+                      <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                        <CalendarDays className="h-3.5 w-3.5 text-emerald-600" /> Vyberte čas *
+                      </label>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSkipSlot((v) => !v)
-                      setSelected(null)
-                      setErrorMsg('')
-                      setState('form')
-                    }}
-                    className={`mt-2 text-xs font-semibold underline ${skipSlot ? 'text-emerald-700' : 'text-slate-500 hover:text-slate-700'}`}
-                  >
-                    {skipSlot ? '← Zpět k nabízeným časům' : 'Žádný čas mi nevyhovuje — napsat poskytovateli'}
-                  </button>
+                      <div className="space-y-3">
+                        {days.map((d) => (
+                          <div key={d.key}>
+                            <p className="mb-1.5 text-xs font-bold capitalize text-slate-700">{d.label}</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {d.times.map((t) => {
+                                const isSel = selected?.startIso === t.startIso && selected?.slotId === t.slotId
+                                return (
+                                  <button
+                                    key={`${t.slotId}-${t.startIso}`}
+                                    type="button"
+                                    onClick={() => { setSelected(isSel ? null : t); setErrorMsg('') }}
+                                    className={`rounded-lg border px-2.5 py-1.5 text-sm font-semibold transition-all ${
+                                      isSel
+                                        ? 'border-emerald-500 bg-emerald-500 text-white'
+                                        : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-300 hover:text-emerald-700'
+                                    }`}
+                                  >
+                                    {fmtTime(t.startIso)}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
 
-                  {skipSlot && (
-                    <p className="mt-2 rounded-xl bg-emerald-50 px-3 py-2 text-xs leading-relaxed text-emerald-800">
-                      Pošlete poptávku a napište níže, kdy se vám to hodí. Poskytovatel vám
-                      navrhne konkrétní termín, který pak potvrdíte zaplacením zálohy.
+                      <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+                        {dur ? `Úkon trvá ${dur}. ` : ''}
+                        {deposit > 0
+                          ? 'Termín potvrdí zaplacení zálohy — po výběru vás rovnou pustíme k platbě.'
+                          : 'Vybraný čas je po rezervaci rovnou potvrzený — první bere.'}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2.5 text-xs leading-relaxed text-emerald-800">
+                      Objednávku odešlete bez pevného času. V detailu objednávky můžete napsat, kdy se vám to hodí,
+                      a poskytovatel vám navrhne konkrétní termíny. Dokud jeden nepotvrdíte, nic se nerezervuje ani neplatí.
                     </p>
                   )}
                 </div>
@@ -588,7 +648,7 @@ export default function OrderItemModal({
                     ? (deposit > 0
                         ? <><Wallet className="h-4 w-4" /> {selected ? `Rezervovat ${fmtTime(selected.startIso)} a zaplatit` : 'Rezervovat a zaplatit'}</>
                         : <><CalendarDays className="h-4 w-4" /> {selected ? `Rezervovat ${fmtTime(selected.startIso)}` : 'Rezervovat termín'}</>)
-                    : isModelB ? 'Odeslat poptávku' : skipSlot ? 'Odeslat poptávku' : 'Odeslat objednávku'}
+                    : isModelB ? 'Odeslat poptávku' : skipSlot ? 'Odeslat objednávku bez termínu' : 'Odeslat objednávku'}
               </button>
 
               <p className="text-center text-[11px] leading-relaxed text-slate-400">

@@ -23,6 +23,7 @@ import {
 import { Resend } from 'resend'
 import { createNotification } from '@/lib/actions/notifications'
 import { releaseSlotAndMerge } from '@/lib/slot-merge'
+import { claimMatchingAvailabilitySlot } from '@/lib/slot-claim'
 import { datum } from '@/lib/format'
 
 export const dynamic = 'force-dynamic'
@@ -142,10 +143,9 @@ async function handleDepositPaid(
       ? session.payment_intent
       : (session.payment_intent as Stripe.PaymentIntent | null)?.id ?? null
 
-  // Objednávka a její termín — potřebujeme je na kontrolu i na notifikaci.
   const { data: order } = await db
     .from('orders')
-    .select('id, status, slot_id, provider_id, customer_id, deposit_amount, service_items(name), services(title)')
+    .select('id, status, slot_id, service_id, scheduled_at, scheduled_end, provider_id, customer_id, deposit_status, deposit_amount, hold_expires_at, stripe_checkout_session_id, service_items(name, duration_minutes), services(title)')
     .eq('id', orderId)
     .single() as { data: any }
 
@@ -156,8 +156,14 @@ async function handleDepositPaid(
 
   const nazev = order.service_items?.name || order.services?.title || null
 
-  // ── Platí objednávka ještě? ─────────────────────────────────
-  let platna = order.status !== 'zruseno'
+  // Platná je jen poslední aktivní checkout session u objednávky, která pořád čeká
+  // na tuhle platbu. U domluveného termínu (bez slot_id) navíc musí pořád existovat
+  // scheduled_at. Fyzický slot se kontroluje jen u přímé rezervace.
+  let platna = order.status === 'prijato' && order.deposit_status === 'pending'
+
+  if (platna && order.stripe_checkout_session_id && order.stripe_checkout_session_id !== session.id) {
+    platna = false
+  }
 
   if (platna && order.slot_id) {
     const { data: slot } = await db
@@ -166,15 +172,16 @@ async function handleDepositPaid(
       .eq('id', order.slot_id)
       .maybeSingle() as { data: { id: string; status: string; order_id: string | null } | null }
 
-    // Termín musí pořád patřit téhle objednávce. Když je zpátky volný nebo ho
-    // mezitím dostal někdo jiný, platbu nepřijímáme.
     if (!slot || slot.order_id !== orderId || slot.status !== 'zabrano') {
       platna = false
     }
+  } else if (platna && !order.slot_id && !order.scheduled_at) {
+    // Domluvený termín už byl mezitím zrušen / vrácen do domlouvání.
+    platna = false
   }
 
   if (!platna) {
-    console.warn('[webhook] platba za propadlou rezervaci', orderId, '— vracím peníze')
+    console.warn('[webhook] platba za neplatnou/propadlou rezervaci', orderId, '— vracím peníze')
 
     let vraceno = false
     if (paymentIntentId) {
@@ -191,7 +198,7 @@ async function handleDepositPaid(
 
     if (vraceno) {
       await (db.from('orders') as any)
-        .update({ deposit_status: 'refunded', stripe_payment_intent_id: paymentIntentId })
+        .update({ deposit_status: 'refunded', stripe_payment_intent_id: paymentIntentId, hold_expires_at: null })
         .eq('id', orderId)
     }
 
@@ -201,9 +208,9 @@ async function handleDepositPaid(
         type: 'status_change',
         orderId,
         actorId: order.customer_id,
-        title: vraceno ? 'Termín už byl obsazený — peníze vracíme' : 'Termín už byl obsazený',
+        title: vraceno ? 'Rezervace už nebyla platná — peníze vracíme' : 'Rezervace už nebyla platná',
         preview: vraceno
-          ? `${nazev ?? 'Rezervace'} · platba se vrací na kartu, vyberte prosím jiný termín.`
+          ? `${nazev ?? 'Rezervace'} · platba se vrací na kartu, domluvte prosím nový termín.`
           : `${nazev ?? 'Rezervace'} · ozvěte se nám na admin@propojo.cz, vyřešíme to.`,
       })
     } catch (err) {
@@ -212,19 +219,38 @@ async function handleDepositPaid(
     return
   }
 
-  // ── Standardní cesta: platba potvrzena ──────────────────────
+  // U termínu domluveného přes návrhy nemusí být slot_id. Po úspěšné platbě
+  // zkusíme potvrzený interval vyříznout z odpovídajícího volného okna, aby se
+  // už v přímém rezervačním modalu nezobrazoval jako volný.
+  let claimedSlotId: string | null = null
+  if (!order.slot_id && order.scheduled_at && order.service_id) {
+    const fallbackDur = Number(order.service_items?.duration_minutes ?? 60) || 60
+    const scheduledEnd = order.scheduled_end
+      ?? new Date(new Date(order.scheduled_at).getTime() + fallbackDur * 60_000).toISOString()
+    claimedSlotId = await claimMatchingAvailabilitySlot(db, {
+      orderId,
+      providerId: order.provider_id,
+      serviceId: order.service_id,
+      startsAt: order.scheduled_at,
+      endsAt: scheduledEnd,
+    })
+  }
+
   const { error } = await (db.from('orders') as any)
-    .update({ deposit_status: 'paid' })
+    .update({
+      deposit_status: 'paid',
+      hold_expires_at: null,
+      ...(claimedSlotId ? { slot_id: claimedSlotId } : {}),
+    })
     .eq('id', orderId)
+    .eq('deposit_status', 'pending')
 
   if (error) {
     console.error('[webhook] zápis deposit_status:', error)
+    if (claimedSlotId) await releaseSlotAndMerge(db, claimedSlotId, orderId)
     return
   }
 
-  // Uložení payment intentu je NEPOVINNÉ — hodí se pro pozdější převod
-  // poskytovateli a vratky. Když sloupec v tabulce není, jen to zalogujeme
-  // a jedeme dál; potvrzení platby je důležitější než tenhle údaj.
   if (paymentIntentId) {
     const { error: piErr } = await (db.from('orders') as any)
       .update({ stripe_payment_intent_id: paymentIntentId })
@@ -232,7 +258,6 @@ async function handleDepositPaid(
     if (piErr) console.warn('[webhook] payment_intent neuložen:', piErr.message)
   }
 
-  // Dát vědět poskytovateli — do zvonečku i jako push do telefonu.
   if (!order.provider_id) return
 
   try {
@@ -241,7 +266,7 @@ async function handleDepositPaid(
       type: 'status_change',
       orderId,
       actorId: order.customer_id ?? null,
-      title: 'Záloha zaplacena — můžete začít',
+      title: 'Záloha zaplacena — termín je potvrzený',
       preview: nazev,
     })
   } catch (err) {
@@ -268,31 +293,64 @@ async function handleDepositExpired(
 
   const { data: order } = await db
     .from('orders')
-    .select('id, status, deposit_status, slot_id, customer_id, provider_id, stripe_checkout_session_id, service_items(name), services(title)')
+    .select('id, status, deposit_status, slot_id, scheduled_at, customer_id, provider_id, stripe_checkout_session_id, service_items(name), services(title)')
     .eq('id', orderId)
     .single() as { data: any }
 
   if (!order) return
-  if (order.deposit_status !== 'pending') return   // zaplaceno nebo už vyřešeno
-  if (order.status !== 'prijato') return           // mezitím zrušeno či posunuto dál
-  if (order.stripe_checkout_session_id && order.stripe_checkout_session_id !== session.id) {
-    return // běží novější pokus o platbu
-  }
-
-  // 1) Uvolnit termín a slepit ho zpátky se sousedy — po zrušené rezervaci
-  //    má mít poskytovatel v kalendáři původní okno, ne dva úlomky.
-  let uvolneno = false
-  if (order.slot_id) {
-    uvolneno = await releaseSlotAndMerge(db, order.slot_id, orderId)
-  }
-
-  // 2) Zrušit objednávku
-  await (db.from('orders') as any)
-    .update({ status: 'zruseno' })
-    .eq('id', orderId)
-    .eq('deposit_status', 'pending')
+  if (order.deposit_status !== 'pending') return
+  if (order.status !== 'prijato') return
+  if (order.stripe_checkout_session_id && order.stripe_checkout_session_id !== session.id) return
 
   const nazev = order.service_items?.name || order.services?.title || 'Rezervace'
+
+  if (order.slot_id) {
+    // Přímá rezervace: objednávka bez platby končí a fyzický slot se vrací.
+    const uvolneno = await releaseSlotAndMerge(db, order.slot_id, orderId)
+
+    await (db.from('orders') as any)
+      .update({ status: 'zruseno', hold_expires_at: null, stripe_checkout_session_id: null })
+      .eq('id', orderId)
+      .eq('deposit_status', 'pending')
+
+    try {
+      await createNotification({
+        userId: order.customer_id,
+        type: 'status_change',
+        orderId,
+        actorId: order.customer_id,
+        title: 'Rezervace vypršela — nebyla zaplacena',
+        preview: `${nazev} · termín jsme uvolnili. Objednat se můžete znovu.`,
+      })
+      if (uvolneno) {
+        await createNotification({
+          userId: order.provider_id,
+          type: 'status_change',
+          orderId,
+          actorId: order.provider_id,
+          title: 'Termín je zase volný',
+          preview: `${nazev} · zákazník zálohu nezaplatil.`,
+        })
+      }
+    } catch (err) {
+      console.error('[webhook] notifikace o vypršení:', err)
+    }
+    return
+  }
+
+  // Domluvený termín: vypršení platby neruší celou zakázku. Jen vrátí objednávku
+  // do fáze domluvy. Stejný chat a objednávka zůstávají zachované.
+  await (db.from('orders') as any)
+    .update({
+      status: 'cekajici',
+      scheduled_at: null,
+      scheduled_end: null,
+      deposit_status: 'none',
+      hold_expires_at: null,
+      stripe_checkout_session_id: null,
+    })
+    .eq('id', orderId)
+    .eq('deposit_status', 'pending')
 
   try {
     await createNotification({
@@ -300,21 +358,19 @@ async function handleDepositExpired(
       type: 'status_change',
       orderId,
       actorId: order.customer_id,
-      title: 'Rezervace vypršela — nebyla zaplacena',
-      preview: `${nazev} · termín jsme uvolnili. Objednat se můžete znovu.`,
+      title: 'Platba vypršela — objednávka zůstává otevřená',
+      preview: `${nazev} · termín není potvrzený, můžete se domluvit na jiném.`,
     })
-    if (uvolneno) {
-      await createNotification({
-        userId: order.provider_id,
-        type: 'status_change',
-        orderId,
-        actorId: order.provider_id,
-        title: 'Termín je zase volný',
-        preview: `${nazev} · zákazník zálohu nezaplatil.`,
-      })
-    }
+    await createNotification({
+      userId: order.provider_id,
+      type: 'status_change',
+      orderId,
+      actorId: order.customer_id,
+      title: 'Zákazník termín nezaplatil',
+      preview: `${nazev} · objednávka zůstává otevřená pro další domluvu.`,
+    })
   } catch (err) {
-    console.error('[webhook] notifikace o vypršení:', err)
+    console.error('[webhook] notifikace o vypršení domluveného termínu:', err)
   }
 }
 

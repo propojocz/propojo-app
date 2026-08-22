@@ -434,6 +434,9 @@ export async function reserveSlotForItem(values: {
   const zacatekUkonu = bookedStart
   const durMin = item.duration_minutes ?? minutesBetween(bookedStart, loadedEnd)
   let bookedEnd = plusMinutes(bookedStart, durMin)
+  // Skutečný konec služby si držíme zvlášť. bookedEnd se níž může roztáhnout o
+  // nepoužitelný zbytek fyzického okna, ale kolize objednávek se řeší podle služby.
+  const serviceEnd = bookedEnd
 
   // Které služby okno nabízelo — potřebujeme je na dvě věci: dopočítat
   // nejkratší možný zbytek a předat je zbytku za rezervací.
@@ -519,6 +522,34 @@ export async function reserveSlotForItem(values: {
   const chybaBloku = await kryjeSeSBlokaci(admin, slot.provider_id, [values.service_id], bookedStart, bookedEnd)
   if (chybaBloku) {
     return { success: false, error: 'Tenhle čas už poskytovatel nemá volný. Vyberte prosím jiný.' }
+  }
+
+  // Pojistka proti dvojí rezervaci mezi dvěma kalendářovými vrstvami.
+  // Termín domluvený přes návrhy nemusí mít availability_slot, ale blokuje čas přes
+  // orders.scheduled_at. Starší fyzické okno může přesto zůstat „volno", proto před
+  // jeho zabráním kontrolujeme i existující objednávky poskytovatele.
+  const { data: orderClashes } = await admin
+    .from('orders')
+    .select('id, scheduled_at, scheduled_end, deposit_status, hold_expires_at, service_items(duration_minutes)')
+    .eq('provider_id', slot.provider_id)
+    .neq('status', 'zruseno')
+    .not('scheduled_at', 'is', null)
+    .lt('scheduled_at', serviceEnd) as { data: any[] | null }
+
+  const liveClash = (orderClashes ?? []).some((o) => {
+    if (o.deposit_status === 'pending' && o.hold_expires_at) {
+      if (new Date(o.hold_expires_at).getTime() <= Date.now()) return false
+    }
+    const startMs = new Date(o.scheduled_at).getTime()
+    const fallbackDur = Number(o.service_items?.duration_minutes ?? 60) || 60
+    const endMs = o.scheduled_end
+      ? new Date(o.scheduled_end).getTime()
+      : startMs + fallbackDur * 60_000
+    return new Date(zacatekUkonu).getTime() < endMs && new Date(serviceEnd).getTime() > startMs
+  })
+
+  if (liveClash) {
+    return { success: false, error: 'Tento čas mezitím obsadila jiná objednávka. Vyberte prosím jiný termín.' }
   }
 
   const depositForOrder = item.payment_model === 'B' ? null : (item.deposit_amount ?? null)

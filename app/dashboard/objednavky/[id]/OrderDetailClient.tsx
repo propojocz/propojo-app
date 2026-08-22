@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import OrderStatusButton from '../OrderStatusButton'
 import { sendOrderMessage, updateOrderStatus, setOrderAddress } from '@/lib/actions/orders'
 import { createDepositCheckout } from '@/lib/actions/deposit'
+import { releaseUnpaidReservation } from '@/lib/actions/reservation-release'
 import ConfirmCompletionButton from '@/components/ui/ConfirmCompletionButton'
 import ChatThread from '@/components/ui/ChatThread'
 import Avatar from '@/components/ui/Avatar'
@@ -46,6 +47,8 @@ type OrderRow = {
   location_lng: number | null
   service_location: string | null
   scheduled_at: string | null
+  slot_id: string | null
+  hold_expires_at: string | null
   services: ServiceLite | null
 }
 
@@ -98,6 +101,7 @@ export default function OrderDetailClient({
   isProvider,
   userId,
   platbaStav,
+  hasTimeProposals = false,
 }: {
   order: OrderRow
   myProfile: ProfileLite | null
@@ -108,6 +112,7 @@ export default function OrderDetailClient({
   isProvider: boolean
   userId: string
   platbaStav?: string | null
+  hasTimeProposals?: boolean
 }) {
   const [messages, setMessages] = useState<MessageRow[]>(initialMessages)
   const [text, setText] = useState('')
@@ -117,8 +122,13 @@ export default function OrderDetailClient({
   const fileRef = useRef<HTMLInputElement>(null)
   const [payBusy, setPayBusy] = useState(false)
   const [payError, setPayError] = useState('')
+  const [switchBusy, setSwitchBusy] = useState(false)
+  const [switchErr, setSwitchErr] = useState('')
   const [cancelBusy, setCancelBusy] = useState(false)
   const [cancelErr, setCancelErr] = useState('')
+  const [changeBusy, setChangeBusy] = useState(false)
+  const [changeSent, setChangeSent] = useState(false)
+  const [changeErr, setChangeErr] = useState('')
   // Adresa: text + souřadnice (souřadnice máme jen když zákazník vybral z našeptávače).
   const [addressInput, setAddressInput] = useState(order.location_address ?? '')
   const [addrCoords, setAddrCoords] = useState<{ lat: number | null; lng: number | null }>({
@@ -140,7 +150,7 @@ export default function OrderDetailClient({
     ? new Intl.DateTimeFormat('cs-CZ', { month: 'long', year: 'numeric' }).format(new Date(otherProfile.created_at))
     : null
 
-  const isModelB = service?.payment_model === 'B'
+  const isModelB = ((order as any).service_items?.payment_model ?? service?.payment_model) === 'B'
   // Částka zálohy: přednost má hodnota uložená PŘÍMO NA OBJEDNÁVCE (bere se
   // z úkonu při vytvoření) — karta je jen fallback pro staré objednávky.
   // Poskytovatel tak vždy vidí, kolik zákazník skutečně platí, a na místě
@@ -151,7 +161,6 @@ export default function OrderDetailClient({
   const isCustomer = !isProvider
   const payLabel = isModelB ? 'poplatek za výjezd' : 'rezervační zálohu'
   const paidTitle = isModelB ? 'Poplatek za výjezd uhrazen' : 'Rezervační záloha uhrazena'
-  const notPaidLabel = isModelB ? 'Poplatek za výjezd zatím nebyl uhrazen.' : 'Rezervační záloha zatím nebyla uhrazena.'
   const isPaid = order.deposit_status === 'paid' || order.deposit_status === 'released'
   // Vratka se zákazníkovi dřív ukázala jen v notifikaci, která zapadne.
   // Tady zůstane natrvalo, ať je dohledatelná i za měsíc.
@@ -178,6 +187,17 @@ export default function OrderDetailClient({
   const atCustomer = order.service_location
     ? order.service_location === 'u_zakaznika'
     : (service?.location_type ? service.location_type !== 'u_poskytovatele' : true)
+  // Platba je stále otevřený úkol vždy, když existuje částka k úhradě,
+  // objednávka má termín a peníze ještě nejsou zaplacené. Nespoléháme jen na
+  // deposit_status='pending' ani na ?platba=zruseno — browser Back nemusí
+  // cancel_url vůbec použít a starší objednávky mohou mít deposit_status prázdný.
+  const paymentDue = isCustomer
+    && hasDeposit
+    && !!order.scheduled_at
+    && (order.status === 'prijato' || order.status === 'v_procesu')
+    && !isPaid
+    && !isRefunded
+  const paymentInterrupted = paymentDue && platbaStav === 'zruseno'
 
   const handleSaveAddress = async () => {
     if (addressInput.trim().length < 5) {
@@ -242,6 +262,33 @@ export default function OrderDetailClient({
     }
   }
 
+  const handleChooseDifferentTerm = async () => {
+    if (switchBusy) return
+    const ok = confirm(
+      order.slot_id
+        ? 'Uvolnit tento nezaplacený termín a vrátit se k výběru jiného?'
+        : 'Zrušit tento nezaplacený termín a pokračovat v domluvě na jiném?'
+    )
+    if (!ok) return
+
+    setSwitchBusy(true)
+    setSwitchErr('')
+    const res = await releaseUnpaidReservation(order.id, 'change_term')
+    if (!res.released) {
+      setSwitchErr('Termín se nepodařilo uvolnit. Obnovte stránku a zkuste to znovu.')
+      setSwitchBusy(false)
+      return
+    }
+
+    if (res.outcome === 'cancelled') {
+      window.location.href = `/sluzby/${order.service_id}`
+      return
+    }
+
+    // Domluvený termín: stejná objednávka i chat zůstávají, jen se vrátíme do domlouvání.
+    window.location.href = `/dashboard/objednavky/${order.id}`
+  }
+
   const handleCustomerCancel = async () => {
     const zprava = stornoRezim && stornoCastka > 0
       ? `Opravdu zrušit? Poskytovatel si nechá storno poplatek ${stornoCastka.toLocaleString('cs-CZ')} Kč.`
@@ -256,6 +303,21 @@ export default function OrderDetailClient({
     }
   }
 
+  const handleRequestTimeChange = async () => {
+    if (!order.scheduled_at || changeBusy) return
+    setChangeBusy(true)
+    setChangeErr('')
+    const text = `Prosím o změnu potvrzeného termínu ${terminDlouze(order.scheduled_at)}. Navrhněte mi prosím jiné možnosti.`
+    const res = await sendOrderMessage(order.id, text)
+    if (res.success) {
+      if (res.message) setMessages((prev) => [...prev, res.message as MessageRow])
+      setChangeSent(true)
+    } else {
+      setChangeErr(res.error ?? 'Požadavek se nepodařilo odeslat.')
+    }
+    setChangeBusy(false)
+  }
+
   const cardInner = (
     <div className="flex items-center gap-3">
       <Avatar name={otherProfile?.full_name} url={otherProfile?.avatar_url} size={48} />
@@ -268,6 +330,13 @@ export default function OrderDetailClient({
   )
 
   const canCustomerCancel = isCustomer && ['cekajici', 'prijato', 'v_procesu'].includes(order.status)
+  const canRequestTimeChange = isCustomer
+    && order.status === 'prijato'
+    && !!order.scheduled_at
+    && new Date(order.scheduled_at).getTime() > Date.now()
+    // Dokud je potřeba zaplatit, změna termínu se řeší přímo v platebním bloku
+    // přes „Vybrat jiný termín“, ne jako nový požadavek v chatu.
+    && (!hasDeposit || isPaid)
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
@@ -374,6 +443,26 @@ export default function OrderDetailClient({
             </div>
           )}
 
+          {canRequestTimeChange && (
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={handleRequestTimeChange}
+                disabled={changeBusy || changeSent}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800 disabled:opacity-60"
+              >
+                {changeBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                {changeSent ? 'Požadavek na změnu odeslán' : 'Požádat o změnu termínu'}
+              </button>
+              {changeSent && (
+                <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+                  Původní termín zatím platí. Poskytovatel vám může navrhnout nové možnosti; změní se až po vašem potvrzení.
+                </p>
+              )}
+              {changeErr && <p className="mt-1.5 text-xs text-red-600">{changeErr}</p>}
+            </div>
+          )}
+
           {/* Místo výkonu */}
           {order.status !== 'zruseno' && (atCustomer ? (order.location_city || order.location_address) : true) && (
             <div className="mt-4 flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
@@ -406,7 +495,14 @@ export default function OrderDetailClient({
           {/* Akce poskytovatele */}
           {isProvider && (
             <div className="mt-5 border-t border-slate-100 pt-5">
-              <OrderStatusButton orderId={order.id} currentStatus={order.status} depositStatus={order.deposit_status} scheduledAt={order.scheduled_at} durationMinutes={(order as any).service_items?.duration_minutes ?? null} />
+              <OrderStatusButton
+                orderId={order.id}
+                currentStatus={order.status}
+                depositStatus={order.deposit_status}
+                scheduledAt={order.scheduled_at}
+                durationMinutes={(order as any).service_items?.duration_minutes ?? null}
+                canAcceptWithoutTime={isModelB}
+              />
             </div>
           )}
 
@@ -519,9 +615,17 @@ export default function OrderDetailClient({
                 <CheckCircle2 className="h-4 w-4 shrink-0" /> Platba proběhla. Potvrzení se může projevit do pár sekund – obnovte stránku.
               </div>
             )}
-            {platbaStav === 'zruseno' && (
-              <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                <Clock className="h-4 w-4 shrink-0" /> Platba byla zrušena. {notPaidLabel}
+            {paymentInterrupted && (
+              <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                <div className="flex items-start gap-2.5">
+                  <Clock className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div>
+                    <p className="font-bold">Platba nebyla dokončena.</p>
+                    <p className="mt-0.5 leading-relaxed">
+                      Termín pro vás zatím držíme. Můžete platbu zkusit znovu, nebo tento termín uvolnit a zvolit jiný.
+                    </p>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -560,10 +664,34 @@ export default function OrderDetailClient({
                   </div>
                 ) : (
                   <>
-                    <button onClick={handlePay} disabled={payBusy} className="btn-primary w-full justify-center disabled:opacity-60">
-                      {payBusy ? <><Loader2 className="h-4 w-4 animate-spin" /> Přesměrovávám…</> : <><CreditCard className="h-4 w-4" /> Zaplatit {depositAmount.toLocaleString('cs-CZ')} Kč</>}
+                    <button onClick={handlePay} disabled={payBusy || switchBusy} className="btn-primary w-full justify-center disabled:opacity-60">
+                      {payBusy
+                        ? <><Loader2 className="h-4 w-4 animate-spin" /> Přesměrovávám…</>
+                        : <><CreditCard className="h-4 w-4" /> {paymentInterrupted
+                            ? 'Zkusit platbu znovu'
+                            : order.deposit_status === 'pending'
+                              ? 'Pokračovat k platbě'
+                              : `Zaplatit ${depositAmount.toLocaleString('cs-CZ')} Kč`}</>}
                     </button>
+
+                    {/* Jiný termín není jen reakce na cancel_url. Uživatel se může
+                        vrátit tlačítkem Back bez query parametru nebo se rozhodnout
+                        ještě před zaplacením. Dokud není zaplaceno, tahle cesta je
+                        proto dostupná vždy. */}
+                    {paymentDue && !isModelB && (
+                      <button
+                        type="button"
+                        onClick={handleChooseDifferentTerm}
+                        disabled={payBusy || switchBusy}
+                        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
+                      >
+                        {switchBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                        Vybrat jiný termín
+                      </button>
+                    )}
+
                     {payError && <p className="mt-2 text-center text-sm text-red-600">{payError}</p>}
+                    {switchErr && <p className="mt-2 text-center text-sm text-red-600">{switchErr}</p>}
                   </>
                 )}
               </div>
@@ -660,6 +788,8 @@ export default function OrderDetailClient({
           hasDeposit={hasDeposit}
           isCustomer={isCustomer}
           isInquiry={(order as any).is_inquiry === true}
+          hasTimeProposals={hasTimeProposals}
+          paymentInterrupted={paymentInterrupted}
         />
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
