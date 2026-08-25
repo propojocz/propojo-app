@@ -14,6 +14,7 @@ import {
   MapPin,
   Banknote,
 } from 'lucide-react'
+import { CategoryIcon } from '@/lib/categoryIcons'
 
 interface Subcategory {
   id: string
@@ -44,6 +45,10 @@ interface Props {
 
 type MobileSection = 'availability' | 'category' | 'price' | 'rating' | 'range'
 
+// Kolik kategorií je vidět, dokud si uživatel neřekne o zbytek.
+// Rozumné rozpětí je 5–8; víc už je z bočního sloupce dlouhý seznam.
+const COLLAPSED_COUNT = 6
+
 export default function FilterSidebar({
   categories,
   subcategories = [],
@@ -65,11 +70,10 @@ export default function FilterSidebar({
   const [max, setMax] = useState(currentPriceMax ?? '')
   const [mobileOpen, setMobileOpen] = useState(false)
   const [openSection, setOpenSection] = useState<MobileSection | null>(null)
-  const [showAllMobileCategories, setShowAllMobileCategories] = useState(!!activeCategory)
+  const [showAllCategories, setShowAllCategories] = useState(false)
 
   useEffect(() => setMin(currentPriceMin ?? ''), [currentPriceMin])
   useEffect(() => setMax(currentPriceMax ?? ''), [currentPriceMax])
-  useEffect(() => setShowAllMobileCategories(!!activeCategory), [activeCategory])
 
   useEffect(() => {
     if (!mobileOpen) return
@@ -89,9 +93,12 @@ export default function FilterSidebar({
     startTransition(() => router.push(`${pathname}?${params.toString()}`, { scroll: false }))
   }
 
+  // Klik na UŽ VYBRANOU kategorii ji odznačí — tím se sbalí i její
+  // podkategorie. Bez toho šlo zpátky jen přes „Vše".
   const selectCategory = (slug?: string) => {
     const params = new URLSearchParams(searchParams.toString())
-    if (slug) params.set('category', slug)
+    const next = slug && slug !== activeCategory ? slug : undefined
+    if (next) params.set('category', next)
     else params.delete('category')
     params.delete('subcats')
     startTransition(() => router.push(`${pathname}?${params.toString()}`, { scroll: false }))
@@ -187,10 +194,17 @@ export default function FilterSidebar({
     </div>
   )
 
-  const renderCategories = (mobile = false) => {
-    const shownCategories = mobile && !showAllMobileCategories && !activeCategory
-      ? categories.slice(0, 6)
-      : categories
+  // Seznam se zkracuje na mobilu i na desktopu — 16 kategorií je dlouhý sloupec.
+  // Když je nějaká vybraná a nevejde se do zkráceného výpisu, přidá se k němu,
+  // ať uživatel vidí, co má zapnuté, a přesto může seznam nechat sbalený.
+  const renderCategories = () => {
+    const zkraceny = categories.slice(0, COLLAPSED_COUNT)
+    const vybrana = categories.find((c) => c.slug === activeCategory)
+    const shownCategories = showAllCategories
+      ? categories
+      : vybrana && !zkraceny.some((c) => c.slug === vybrana.slug)
+        ? [...zkraceny, vybrana]
+        : zkraceny
 
     return (
       <div className="space-y-1">
@@ -217,7 +231,7 @@ export default function FilterSidebar({
                     : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
-                <span className="shrink-0">{cat.icon}</span>
+                <CategoryIcon slug={cat.slug} className="h-4 w-4 shrink-0 text-emerald-600" />
                 <span className="min-w-0 flex-1">{cat.name}</span>
               </button>
 
@@ -250,14 +264,14 @@ export default function FilterSidebar({
           )
         })}
 
-        {mobile && !activeCategory && categories.length > 6 && (
+        {categories.length > COLLAPSED_COUNT && (
           <button
             type="button"
-            onClick={() => setShowAllMobileCategories((value) => !value)}
+            onClick={() => setShowAllCategories((value) => !value)}
             className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"
           >
-            {showAllMobileCategories ? 'Zobrazit méně' : `Zobrazit dalších ${categories.length - 6}`}
-            <ChevronDown className={`h-4 w-4 transition-transform ${showAllMobileCategories ? 'rotate-180' : ''}`} />
+            {showAllCategories ? 'Zobrazit méně' : 'Zobrazit více'}
+            <ChevronDown className={`h-4 w-4 transition-transform ${showAllCategories ? 'rotate-180' : ''}`} />
           </button>
         )}
       </div>
@@ -336,7 +350,7 @@ export default function FilterSidebar({
     content: ReactNode
   }> = [
     { id: 'availability', label: 'Dostupnost', value: availabilityLabel, icon: Zap, content: renderAvailability() },
-    { id: 'category', label: 'Kategorie', value: activeCategoryName ?? 'Všechny', icon: SlidersHorizontal, content: renderCategories(true) },
+    { id: 'category', label: 'Kategorie', value: activeCategoryName ?? 'Všechny', icon: SlidersHorizontal, content: renderCategories() },
     { id: 'price', label: 'Cena', value: priceLabel, icon: Banknote, content: renderPrice() },
     { id: 'rating', label: 'Hodnocení', value: ratingLabel, icon: Star, content: renderRating() },
     { id: 'range', label: 'Dojezd', value: currentDosah === '1' ? 'Jen v mém dosahu' : 'Kdekoli', icon: MapPin, content: renderRange() },
@@ -480,7 +494,7 @@ export default function FilterSidebar({
 
         <div className="mb-6">
           <h3 className="mb-3 text-sm font-semibold text-slate-800">Kategorie</h3>
-          {renderCategories(false)}
+          {renderCategories()}
         </div>
 
         <div className="mb-6">

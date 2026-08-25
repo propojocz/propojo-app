@@ -34,6 +34,7 @@ import SearchAutocomplete from '@/components/ui/SearchAutocomplete'
 import PriceList from '@/components/ui/PriceList'
 import ServiceHours from '@/components/forms/ServiceHours'
 import InfoTip from '@/components/ui/InfoTip'
+import { CategoryIcon } from '@/lib/categoryIcons'
 import type { ServiceTypeOption } from '@/components/ui/ServiceItemEditor'
 
 const schema = z.object({
@@ -523,7 +524,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
                       }`}
                       style={isSelected ? { borderColor: cat.color, backgroundColor: `${cat.color}10`, color: cat.color } : {}}
                     >
-                      <span className="text-lg">{cat.icon}</span>
+                      <CategoryIcon slug={cat.slug} boxed className="h-4 w-4" boxClassName="h-9 w-9 rounded-xl" />
                       <span className="leading-tight">{cat.name}</span>
                     </button>
                   )

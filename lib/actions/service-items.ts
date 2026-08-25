@@ -23,6 +23,7 @@ const itemSchema = z.object({
   price_unit: z.enum(['ukon', 'hod', 'kus', 'den', 'projekt', 'm2', 'bm'] as const),
   price_max: z.number().min(0).max(999999).nullable().optional(),
   duration_minutes: z.number().int().min(0).max(100000).nullable().optional(),
+  hourly_started_billing: z.boolean().optional(),
   deposit_amount: z.number().min(0).max(999999).nullable().optional(),
   deposit_type: z.enum(['zaloha', 'plna_platba', 'bez_platby'] as const).optional(),
   no_show_fee: z.number().min(0).max(999999).nullable().optional(),
@@ -40,12 +41,46 @@ const itemSchema = z.object({
 
 type ItemParsed = z.infer<typeof itemSchema>
 
+// Stropy pro peníze. Klient je hlídá kvůli srozumitelnosti, server kvůli
+// bezpečnosti — obojí musí sedět s konstantami v components/ui/ServiceItemEditor.tsx.
+const MIN_DEPOSIT = 200
+const MAX_NO_SHOW_FEE = 1000
+
+// Nejvyšší přípustná záloha u úkonu. Bere se NEJNIŽŠÍ deklarovaná cena:
+// u rozmezí 500–1500 Kč je to 500, ne 1500. Kdyby zákazník složil 1200 Kč
+// a konečná cena byla 500, museli bychom mu vracet — a záloha, která se
+// „započítá do ceny", by najednou byla vyšší než cena.
+// U hodinové sazby konečnou cenu předem neznáme, takže se nestropuje.
+function stropZalohy(d: ItemParsed): number | null {
+  if (d.payment_model === 'B') return null
+  if (d.price_unit === 'hod') return null
+  if (d.price_type !== 'fixed' && d.price_type !== 'range') return null
+  return d.price != null && d.price > 0 ? d.price : null
+}
+
+// Kolik peněz platforma v okamžiku nedostavení/storna skutečně drží. Z ničeho
+// jiného se poplatek strhnout nedá, takže tohle je jeho tvrdý strop:
+//   'zaloha'      → složená záloha
+//   'plna_platba' → celá cena (povolená jen u pevné ceny, takže ji známe)
+//   'bez_platby'  → nic
+// Volat AŽ po srovnání deposit_amount, jinak by se stropovalo podle
+// neuklizené hodnoty.
+function drzenaCastka(d: ItemParsed): number | null {
+  if (d.payment_model === 'B') return null
+  if (d.deposit_type === 'bez_platby') return 0
+  if (d.deposit_type === 'plna_platba') return d.price != null && d.price > 0 ? d.price : null
+  return d.deposit_amount ?? null
+}
+
 // Sjednotí hodnoty podle modelu/typu ceny — stejná logika jako normalize() u služeb,
 // ať do DB nejdou nekonzistentní data (např. záloha u modelu B).
 function normalizeItem(d: ItemParsed): ItemParsed {
   const out: ItemParsed = { ...d }
   out.name = out.name.trim()
-  if (out.price_includes_material === undefined) out.price_includes_material = true
+  // Materiál je NEPOVINNÝ údaj. Když se poskytovatel nevyjádří, necháme
+  // „neuvedeno" (null) — dřív se tiše doplnilo true, takže karta tvrdila
+  // „materiál je v ceně", aniž to kdokoli řekl.
+  if (out.price_includes_material === undefined) out.price_includes_material = null
   if (out.is_active == null) out.is_active = true
 
   if (out.payment_model === 'B') {
@@ -54,6 +89,7 @@ function normalizeItem(d: ItemParsed): ItemParsed {
     out.price_max = null
     out.deposit_amount = null
     out.deposit_type = 'zaloha'
+    out.hourly_started_billing = false
     out.no_show_fee = null
     out.fee_mode = 'noshow'
     out.price_includes_material = null
@@ -70,6 +106,23 @@ function normalizeItem(d: ItemParsed): ItemParsed {
       out.price_max = null
     }
     if (out.price_type !== 'range') out.price_max = null
+
+    // DÉLKA ÚKONU PODLE JEDNOTKY. Délka má smysl jen tam, kde se z ní dá
+    // spočítat termín v kalendáři:
+    //   'ukon' → zadává poskytovatel
+    //   'hod'  → interně vždy hodinový blok (boolean řeší jen účtování)
+    //   ostatní (kus, m2, bm, den, projekt) → délku neznáme, nulujeme
+    // Bez tohohle úklidu zůstala po přepnutí jednotky viset stará hodnota
+    // a zákazníkovi svítilo „45 min" u ceny za m².
+    if (out.price_unit === 'hod') {
+      out.duration_minutes = 60
+      out.hourly_started_billing = out.hourly_started_billing === true
+      if (out.deposit_type === 'plna_platba') out.deposit_type = 'zaloha'
+    } else {
+      out.hourly_started_billing = false
+      if (out.price_unit !== 'ukon') out.duration_minutes = null
+    }
+
     if (out.deposit_type == null) out.deposit_type = 'zaloha'
     if (out.deposit_type === 'bez_platby') {
       out.deposit_amount = null
@@ -78,12 +131,22 @@ function normalizeItem(d: ItemParsed): ItemParsed {
     } else if (out.deposit_type === 'plna_platba') {
       out.deposit_amount = null   // platí se celá cena, záloha se neřeší
     } else {
-      if (out.deposit_amount != null && out.deposit_amount < 200) out.deposit_amount = 200
-      if (out.deposit_amount == null) out.deposit_amount = 200
+      if (out.deposit_amount != null && out.deposit_amount < MIN_DEPOSIT) out.deposit_amount = MIN_DEPOSIT
+      if (out.deposit_amount == null) out.deposit_amount = MIN_DEPOSIT
+      // Strop až NAKONEC — u úkonu levnějšího než minimální záloha vyhrává cena
+      // (jinak by záloha přesáhla to, co má zákazník celkem zaplatit).
+      const strop = stropZalohy(out)
+      if (strop != null && out.deposit_amount > strop) out.deposit_amount = strop
     }
     if (out.fee_mode == null) out.fee_mode = 'noshow'
     if (out.fee_mode === 'zadny') out.no_show_fee = null
     if (out.no_show_fee != null && out.no_show_fee <= 0) out.no_show_fee = null
+    if (out.no_show_fee != null && out.no_show_fee > MAX_NO_SHOW_FEE) out.no_show_fee = MAX_NO_SHOW_FEE
+    // Nikdy víc, než kolik zákazník složil.
+    const drzeno = drzenaCastka(out)
+    if (out.no_show_fee != null && drzeno != null && out.no_show_fee > drzeno) {
+      out.no_show_fee = drzeno > 0 ? drzeno : null
+    }
     out.price_note = out.price_note?.trim() || null
   }
   return out

@@ -46,6 +46,8 @@ export interface ServiceItemValues {
   price_unit: PriceUnit
   price_max: number | null
   duration_minutes: number | null
+  /** U hodinové sazby: true = každá započatá hodina celá, false = poměrně podle skutečného času. */
+  hourly_started_billing: boolean
   deposit_amount: number | null
   deposit_type: 'zaloha' | 'plna_platba' | 'bez_platby'
   no_show_fee: number | null
@@ -82,11 +84,12 @@ const EMPTY: ServiceItemValues = {
   price_unit: 'ukon',
   price_max: null,
   duration_minutes: null,
+  hourly_started_billing: false,
   deposit_amount: MIN_DEPOSIT,
   deposit_type: 'zaloha',
   no_show_fee: null,
   fee_mode: 'noshow',
-  price_includes_material: true,
+  price_includes_material: null,   // nepovinné — „neuvedeno", dokud se poskytovatel nevyjádří
   price_note: null,
   is_active: true,
   quote_fee: null,
@@ -137,17 +140,40 @@ export default function ServiceItemEditor({
   const zpusob = zpusobZHodnot(v)
   const jeNaceneni = zpusob === 'naceneni'
   const jePevna = zpusob === 'pevna'
+  const jeHodinova = !jeNaceneni && v.price_unit === 'hod'
 
-  // „Celou cenu předem" jen u pevné ceny. Jinde cenu neznáme dopředu.
-  const lzeCelaPlatba = jePevna
+  // „Celou cenu předem" jen tam, kde známe konečnou cenu už při rezervaci.
+  // U hodinové sazby nevíme předem, jak dlouho bude práce skutečně trvat.
+  const lzeCelaPlatba = jePevna && !jeHodinova
   const platba = v.deposit_type
 
-  // Záloha vyšší než cena úkonu (jen pevná cena) — blokuje uložení.
-  const zalohaMoc =
-    platba === 'zaloha' && jePevna && (v.price ?? 0) > 0 && (v.deposit_amount ?? 0) > (v.price ?? 0)
+  // Strop zálohy = NEJNIŽŠÍ deklarovaná cena. U rozmezí 500–1500 Kč je to 500:
+  // kdyby zákazník složil 1200 Kč a konečná cena byla 500, vracelo by se mu.
+  // U hodinové sazby konečnou cenu předem neznáme, tam se nestropuje.
+  const cenovyStrop: number | null =
+    !jeNaceneni && !jeHodinova && (jePevna || zpusob === 'rozmezi') && (v.price ?? 0) > 0
+      ? (v.price as number)
+      : null
 
-  // Délka je potřeba tam, kde se objednává čas — podle ní se počítá termín.
-  const potrebaDelku = !jeNaceneni && (v.price_unit === 'ukon' || v.price_unit === 'hod')
+  // Záloha vyšší než ta cena — blokuje uložení.
+  const zalohaMoc =
+    platba === 'zaloha' && cenovyStrop != null && (v.deposit_amount ?? 0) > cenovyStrop
+
+  // Poplatek za nedostavení jde strhnout jen z toho, co zákazník složil.
+  // U zálohy je to její výše, u platby celé ceny předem ta cena.
+  const drzenaCastka: number | null = jeNaceneni
+    ? null
+    : platba === 'bez_platby'
+      ? 0
+      : platba === 'plna_platba'
+        ? ((v.price ?? 0) > 0 ? (v.price as number) : null)
+        : (v.deposit_amount ?? null)
+  const stropPoplatku = Math.min(MAX_NO_SHOW_FEE, drzenaCastka ?? MAX_NO_SHOW_FEE)
+
+  // Délku poskytovatel vyplňuje jen u ceny „za úkon".
+  // U hodinové sazby používáme interně hodinový rezervační blok, takže ho tímto
+  // dalším polem nezatěžujeme.
+  const potrebaDelku = !jeNaceneni && v.price_unit === 'ukon'
 
   const prepniZpusob = (z: ZpusobCeny) => {
     setV(prev => {
@@ -165,6 +191,20 @@ export default function ServiceItemEditor({
     })
   }
 
+  const prepniJednotku = (unit: PriceUnit) => {
+    setV(prev => ({
+      ...prev,
+      price_unit: unit,
+      // Délka má smysl jen u ceny za úkon (zadává ji poskytovatel) a u hodinovky
+      // (interní hodinový blok). U kusu/m²/bm/dne/projektu ji zahodíme, ať po
+      // přepnutí jednotky nezůstane viset stará hodnota a nesvítila zákazníkovi.
+      duration_minutes: unit === 'hod' ? 60 : unit === 'ukon' ? prev.duration_minutes : null,
+      // U hodinové sazby není předem známá konečná cena, takže celou platbu předem nepovolíme.
+      deposit_type: unit === 'hod' && prev.deposit_type === 'plna_platba' ? 'zaloha' : prev.deposit_type,
+      hourly_started_billing: unit === 'hod' ? prev.hourly_started_billing : false,
+    }))
+  }
+
   const handleSave = () => {
     if (!v.name || v.name.trim().length < 2) { setError('Zadejte název úkonu.'); return }
     if (jePevna && (v.price == null || v.price <= 0)) {
@@ -176,7 +216,14 @@ export default function ServiceItemEditor({
     if (potrebaDelku && (v.duration_minutes == null || v.duration_minutes <= 0)) {
       setError('Zadejte délku úkonu — podle ní se v kalendáři počítá termín.'); return
     }
-    if (zalohaMoc) { setError('Záloha nemůže být vyšší než cena úkonu.'); return }
+    if (zalohaMoc) {
+      setError(
+        zpusob === 'rozmezi'
+          ? 'Záloha nemůže být vyšší než spodní hranice ceny.'
+          : 'Záloha nemůže být vyšší než cena úkonu.',
+      )
+      return
+    }
     setError(null)
 
     // Očištění hodnot — ať do databáze nejdou nesmysly.
@@ -191,7 +238,7 @@ export default function ServiceItemEditor({
       out.deposit_type = 'zaloha'
       out.no_show_fee = null
       out.fee_mode = 'noshow'
-      out.price_includes_material = true
+      out.price_includes_material = null   // u nacenění na místě se materiál neřeší
     } else {
       out.payment_model = 'A'
       if (zpusob === 'dohodou') { out.price = null; out.price_max = null }
@@ -205,21 +252,43 @@ export default function ServiceItemEditor({
         out.deposit_amount = null   // platí se celá cena, záloha se neřeší
       } else {
         if (out.deposit_amount == null || out.deposit_amount < MIN_DEPOSIT) out.deposit_amount = MIN_DEPOSIT
-        if (jePevna && out.price != null && out.price > 0 && out.deposit_amount > out.price) {
-          out.deposit_amount = out.price
-        }
+        // Strop až nakonec — u úkonu levnějšího než minimální záloha vyhrává cena.
+        if (cenovyStrop != null && out.deposit_amount > cenovyStrop) out.deposit_amount = cenovyStrop
       }
 
       if (out.fee_mode == null) out.fee_mode = 'noshow'
       if (out.fee_mode === 'zadny') out.no_show_fee = null
       if (out.no_show_fee != null && out.no_show_fee <= 0) out.no_show_fee = null
       if (out.no_show_fee != null && out.no_show_fee > MAX_NO_SHOW_FEE) out.no_show_fee = MAX_NO_SHOW_FEE
+      // Strop podle SROVNANÉ částky výše — poplatek nemůže být vyšší než to,
+      // co platforma drží. Stejné pravidlo běží i na serveru.
+      const drzeno = out.deposit_type === 'bez_platby'
+        ? 0
+        : out.deposit_type === 'plna_platba'
+          ? ((out.price ?? 0) > 0 ? (out.price as number) : null)
+          : (out.deposit_amount ?? null)
+      if (out.no_show_fee != null && drzeno != null && out.no_show_fee > drzeno) {
+        out.no_show_fee = drzeno > 0 ? drzeno : null
+      }
 
       // Výjezdové podmínky patří jen k naceňovacímu úkonu.
       out.quote_fee = null
       out.price_per_km = null
       out.free_km = null
       out.quote_days = null
+    }
+
+    // Délka podle jednotky — stejné pravidlo jako na serveru v normalizeItem().
+    // U nacenění je duration_minutes délka PROHLÍDKY, tu necháváme být.
+    if (jeNaceneni) {
+      out.hourly_started_billing = false
+    } else if (out.price_unit === 'hod') {
+      out.duration_minutes = 60
+      out.hourly_started_billing = !!out.hourly_started_billing
+      if (out.deposit_type === 'plna_platba') out.deposit_type = 'zaloha'
+    } else {
+      out.hourly_started_billing = false
+      if (out.price_unit !== 'ukon') out.duration_minutes = null
     }
 
     out.price_note = out.price_note?.trim() || null
@@ -240,6 +309,11 @@ export default function ServiceItemEditor({
     : platba === 'zaloha'
       ? `záloha ${Number(v.deposit_amount ?? 0).toLocaleString('cs-CZ')} Kč`
       : platba === 'plna_platba' ? 'platba předem' : 'platí až po službě'
+  const hodinoveUctovani = jeHodinova
+    ? (v.hourly_started_billing
+        ? 'každá započatá hodina se účtuje celá'
+        : 'účtuje se poměrně podle skutečného času')
+    : null
 
   const btn = (aktivni: boolean, disabled = false) =>
     `rounded-xl border-[1.5px] px-3 py-2.5 text-left transition ${
@@ -352,7 +426,7 @@ export default function ServiceItemEditor({
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Za co</label>
-                <select value={v.price_unit} onChange={e => set('price_unit', e.target.value as PriceUnit)}
+                <select value={v.price_unit} onChange={e => prepniJednotku(e.target.value as PriceUnit)}
                   className="w-full rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 outline-none focus:border-emerald-500">
                   {PRICE_UNITS.map(u => <option key={u} value={u}>{PRICE_UNIT_LABELS[u] ?? u}</option>)}
                 </select>
@@ -376,7 +450,29 @@ export default function ServiceItemEditor({
             </div>
           )}
 
-          {/* Délka — všude, kde se objednává čas */}
+          {/* Hodinová sazba — jedno jednoduché rozhodnutí, bez nastavování délky. */}
+          {jeHodinova && (
+            <div className="mt-3 rounded-xl border border-slate-200 bg-white px-3.5 py-3">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={v.hourly_started_billing}
+                  onChange={e => set('hourly_started_billing', e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span className="min-w-0">
+                  <span className="block text-xs font-bold text-slate-700">Účtovat každou započatou hodinu</span>
+                  <span className="mt-0.5 block text-[11.5px] leading-relaxed text-slate-400">
+                    {v.hourly_started_billing
+                      ? 'Např. 1 h 30 min = 2 celé hodiny.'
+                      : 'Vypnuto: cena se počítá poměrně podle skutečného času, např. 300kč/1h = 450kč/1,5h.'}
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
+
+          {/* Délka — poskytovatel ji zadává jen u ceny za konkrétní úkon. */}
           {potrebaDelku && (
             <div className="mt-3">
               <label className="mb-1 block text-xs font-semibold text-slate-600">Jak dlouho (min)</label>
@@ -457,7 +553,10 @@ export default function ServiceItemEditor({
             {!lzeCelaPlatba && (
               <p className="mt-2 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-[11.5px] leading-relaxed text-amber-800">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span><strong>Celou cenu předem</strong> jde vybrat jen u pevné ceny — jinak zákazník neví, kolik platí.</span>
+                <span>
+                  <strong>Celou cenu předem</strong> jde vybrat jen tehdy, když je konečná částka známá už při rezervaci.
+                  {jeHodinova ? ' U hodinové sazby se konečná cena odvíjí od skutečné délky práce.' : ''}
+                </span>
               </p>
             )}
 
@@ -467,7 +566,8 @@ export default function ServiceItemEditor({
                 <input type="number" min={MIN_DEPOSIT} value={v.deposit_amount ?? ''} onChange={e => set('deposit_amount', numOrNull(e.target.value))}
                   className={`w-full rounded-xl border-[1.5px] bg-white px-3 py-2.5 outline-none focus:border-emerald-500 ${zalohaMoc ? 'border-red-400' : 'border-slate-200'}`} />
                 <p className="mt-1 text-[11.5px] text-slate-400">
-                  Nejméně {MIN_DEPOSIT} Kč{jePevna && (v.price ?? 0) > 0 ? `, nejvýš ${Number(v.price).toLocaleString('cs-CZ')} Kč` : ''}. Započítá se do konečné ceny.
+                  Nejméně {MIN_DEPOSIT} Kč{cenovyStrop != null ? `, nejvýš ${cenovyStrop.toLocaleString('cs-CZ')} Kč` : ''}. Započítá se do konečné ceny.
+                  {zpusob === 'rozmezi' && cenovyStrop != null ? ' U rozmezí platí spodní cena.' : ''}
                 </p>
               </div>
             )}
@@ -501,11 +601,14 @@ export default function ServiceItemEditor({
 
             {v.fee_mode !== 'zadny' && (
               <div className="mt-3">
-                <input type="number" min={0} max={MAX_NO_SHOW_FEE} value={v.no_show_fee ?? ''} onChange={e => set('no_show_fee', numOrNull(e.target.value))}
+                <input type="number" min={0} max={stropPoplatku} value={v.no_show_fee ?? ''} onChange={e => set('no_show_fee', numOrNull(e.target.value))}
                   placeholder="např. 300"
                   className="w-full rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 outline-none focus:border-emerald-500" />
                 <p className="mt-1 text-[11.5px] text-slate-400">
-                  Kolik si necháte ze zálohy. Nejvýš {MAX_NO_SHOW_FEE.toLocaleString('cs-CZ')} Kč. Zákazník to vidí u objednávky.
+                  Kolik si necháte z {platba === 'plna_platba' ? 'uhrazené ceny' : 'zálohy'}.
+                  Nejvýš {stropPoplatku.toLocaleString('cs-CZ')} Kč
+                  {stropPoplatku < MAX_NO_SHOW_FEE ? ' — víc, než zákazník zaplatil, strhnout nejde' : ''}.
+                  {' '}Zákazník to vidí u objednávky.
                 </p>
               </div>
             )}
@@ -527,19 +630,29 @@ export default function ServiceItemEditor({
             <div className="space-y-3 border-t border-slate-100 p-3.5">
               {!jeNaceneni && (
                 <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-slate-600">Je v ceně materiál?</label>
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-600">
+                    Je v ceně materiál? <span className="font-normal text-slate-400">— nepovinné</span>
+                  </label>
+                  {/* Žádná třetí dlaždice: druhým kliknutím se volba zruší zpět na
+                      „neuvedeno". Nevyplněné pole nesmí za poskytovatele tvrdit,
+                      že materiál je v ceně. */}
                   <div className="grid grid-cols-2 gap-2">
-                    <button type="button" onClick={() => set('price_includes_material', true)}
+                    <button type="button"
+                      onClick={() => set('price_includes_material', v.price_includes_material === true ? null : true)}
                       className={btn(v.price_includes_material === true)}>
                       <b className="block text-[12.5px] text-slate-900">Ano, včetně</b>
                       <span className="block text-[11px] text-slate-500">nic se nedoplácí</span>
                     </button>
-                    <button type="button" onClick={() => set('price_includes_material', false)}
+                    <button type="button"
+                      onClick={() => set('price_includes_material', v.price_includes_material === false ? null : false)}
                       className={btn(v.price_includes_material === false)}>
                       <b className="block text-[12.5px] text-slate-900">Účtuji zvlášť</b>
                       <span className="block text-[11px] text-slate-500">jen práce</span>
                     </button>
                   </div>
+                  {v.price_includes_material === null && (
+                    <p className="mt-1 text-[11px] text-slate-400">Neuvedeno — u úkonu se materiál nezmiňuje.</p>
+                  )}
                 </div>
               )}
               <div>
@@ -557,6 +670,9 @@ export default function ServiceItemEditor({
           <strong>{v.name.trim() || 'Úkon'}</strong>
           <span className="text-white/30">·</span>
           <span>{castka}{jednotka}</span>
+          {hodinoveUctovani ? (
+            <><span className="text-white/30">·</span><span className="text-emerald-200">{hodinoveUctovani}</span></>
+          ) : null}
           {potrebaDelku && v.duration_minutes ? (
             <><span className="text-white/30">·</span><span className="text-emerald-200">{v.duration_minutes} min</span></>
           ) : null}

@@ -50,6 +50,17 @@ type OrderRow = {
   slot_id: string | null
   hold_expires_at: string | null
   services: ServiceLite | null
+  service_items?: {
+    name: string | null
+    price: number | null
+    price_unit: string | null
+    deposit_amount: number | null
+    deposit_type: string | null
+    payment_model: string | null
+    duration_minutes: number | null
+    quote_fee: number | null
+    fee_mode: string | null
+  } | null
 }
 
 type ProfileLite = {
@@ -150,17 +161,31 @@ export default function OrderDetailClient({
     ? new Intl.DateTimeFormat('cs-CZ', { month: 'long', year: 'numeric' }).format(new Date(otherProfile.created_at))
     : null
 
-  const isModelB = ((order as any).service_items?.payment_model ?? service?.payment_model) === 'B'
-  // Částka zálohy: přednost má hodnota uložená PŘÍMO NA OBJEDNÁVCE (bere se
-  // z úkonu při vytvoření) — karta je jen fallback pro staré objednávky.
-  // Poskytovatel tak vždy vidí, kolik zákazník skutečně platí, a na místě
-  // se vyrovnají jen o zbytek.
+  const item = order.service_items ?? null
+  const paymentModel = item?.payment_model ?? service?.payment_model
+  const isModelB = paymentModel === 'B'
+  const depositType = item?.deposit_type ?? 'zaloha'
+  const isFullPayment = !isModelB && depositType === 'plna_platba' && Number(item?.price ?? 0) > 0
+
+  // Částka, která se opravdu platí předem. U plné platby je to cena úkonu,
+  // u zálohy deposit_amount a u „bez platby" nula. Hodnota na objednávce má
+  // přednost, ale u starších chybných objednávek s plnou platbou umíme dopočítat cenu z úkonu.
   const depositAmount = Number(
-    order.deposit_amount ?? (isModelB ? service?.quote_fee : service?.deposit_amount) ?? 0
+    (isFullPayment && (order.deposit_amount == null || Number(order.deposit_amount) <= 0)
+      ? item?.price
+      : order.deposit_amount) ??
+    (isModelB
+      ? (item?.quote_fee ?? service?.quote_fee)
+      : depositType === 'bez_platby'
+        ? 0
+        : isFullPayment
+          ? item?.price
+          : (item?.deposit_amount ?? service?.deposit_amount)) ??
+    0
   )
   const isCustomer = !isProvider
-  const payLabel = isModelB ? 'poplatek za výjezd' : 'rezervační zálohu'
-  const paidTitle = isModelB ? 'Poplatek za výjezd uhrazen' : 'Rezervační záloha uhrazena'
+  const payLabel = isModelB ? 'poplatek za výjezd' : isFullPayment ? 'celou cenu' : 'rezervační zálohu'
+  const paidTitle = isModelB ? 'Poplatek za výjezd uhrazen' : isFullPayment ? 'Celá cena uhrazena' : 'Rezervační záloha uhrazena'
   const isPaid = order.deposit_status === 'paid' || order.deposit_status === 'released'
   // Vratka se zákazníkovi dřív ukázala jen v notifikaci, která zapadne.
   // Tady zůstane natrvalo, ať je dohledatelná i za měsíc.
@@ -369,19 +394,33 @@ export default function OrderDetailClient({
             {service?.city && (
               <span className="inline-flex items-center gap-1.5"><MapPin className="h-4 w-4 text-slate-400" /> {service.city}</span>
             )}
-            {(service?.price ?? 0) > 0 && (
-              <span className="inline-flex items-center gap-1.5"><Wallet className="h-4 w-4 text-slate-400" /> {Number(service?.price).toLocaleString('cs-CZ')} Kč{service?.price_unit ? `/${service.price_unit}` : ''}</span>
+            {Number(item?.price ?? service?.price ?? 0) > 0 && (
+              <span className="inline-flex items-center gap-1.5">
+                <Wallet className="h-4 w-4 text-slate-400" />
+                {Number(item?.price ?? service?.price).toLocaleString('cs-CZ')} Kč
+                {(item?.price_unit ?? service?.price_unit) ? `/${item?.price_unit ?? service?.price_unit}` : ''}
+              </span>
             )}
           </div>
 
-          {service?.payment_model === 'A' && (service?.deposit_amount ?? 0) > 0 && (
+          {!isModelB && depositType !== 'bez_platby' && depositAmount > 0 && (
             <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-              <strong>Rezervace se zálohou:</strong> {Number(service?.deposit_amount).toLocaleString('cs-CZ')} Kč (započítává se do ceny)
+              {isFullPayment ? (
+                <>
+                  <strong>Platba předem:</strong> {depositAmount.toLocaleString('cs-CZ')} Kč{' '}
+                  <span>(na místě už nic nedoplácíte)</span>
+                </>
+              ) : (
+                <>
+                  <strong>Rezervace se zálohou:</strong> {depositAmount.toLocaleString('cs-CZ')} Kč{' '}
+                  <span>(započítává se do ceny)</span>
+                </>
+              )}
             </div>
           )}
-          {service?.payment_model === 'B' && (
+          {isModelB && (
             <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-              <strong>Výjezd a nacenění</strong>{(service?.quote_fee ?? 0) > 0 ? `: poplatek za výjezd ${Number(service?.quote_fee).toLocaleString('cs-CZ')} Kč` : ''}
+              <strong>Výjezd a nacenění</strong>{depositAmount > 0 ? `: poplatek za výjezd ${depositAmount.toLocaleString('cs-CZ')} Kč` : ''}
             </div>
           )}
 
@@ -393,7 +432,9 @@ export default function OrderDetailClient({
                 ? `${paidTitle} a uvolněn vám (${Number(order.deposit_amount ?? depositAmount).toLocaleString('cs-CZ')} Kč)`
                 : isPaid
                   ? `${paidTitle} (${Number(order.deposit_amount ?? depositAmount).toLocaleString('cs-CZ')} Kč) – drží se přes Propojo`
-                  : `Čeká se na úhradu (${depositAmount.toLocaleString('cs-CZ')} Kč) od zákazníka`}
+                  : isFullPayment
+                    ? `Čeká se na úhradu celé ceny (${depositAmount.toLocaleString('cs-CZ')} Kč) od zákazníka`
+                    : `Čeká se na úhradu (${depositAmount.toLocaleString('cs-CZ')} Kč) od zákazníka`}
             </div>
           )}
 
@@ -650,7 +691,9 @@ export default function OrderDetailClient({
                 <p className="mb-4 text-sm text-slate-500">
                   Poskytovatel objednávku přijal. Pro potvrzení uhraďte {payLabel} ve výši{' '}
                   <strong className="text-slate-800">{depositAmount.toLocaleString('cs-CZ')} Kč</strong>.
-                  {!isModelB && ' Záloha se započítá do konečné ceny.'}
+                  {!isModelB && (isFullPayment
+                    ? ' Po zaplacení už za tento úkon na místě nic nedoplácíte.'
+                    : ' Záloha se započítá do konečné ceny.')}
                 </p>
 
                 <div className="mb-4 flex items-start gap-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">

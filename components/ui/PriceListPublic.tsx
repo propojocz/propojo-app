@@ -8,7 +8,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { ListChecks, Clock, Wallet, ChevronRight, Tag, Send } from 'lucide-react'
+import { Clock, Wallet, ChevronRight, Tag, Send, Truck } from 'lucide-react'
 import type { ServiceItem } from '@/types/database'
 import { PRICE_UNIT_LABELS } from '@/types/database'
 import OrderItemModal, { type SlotOption } from '@/components/ui/OrderItemModal'
@@ -38,6 +38,23 @@ function priceLabel(it: ServiceItem): string {
   }
   if (it.price != null && it.price > 0) return `${it.price.toLocaleString('cs-CZ')} Kč ${unit}`.trim()
   return 'Cena dohodou'
+}
+
+// Poplatek za výjezd a nacenění. „Nacenění na místě" za 500 Kč je pro
+// zákazníka úplně jiná nabídka než nacenění zdarma — patří to do výpisu,
+// ne až do objednávkového modalu.
+function quoteFeeLabel(it: ServiceItem): string | null {
+  if (it.payment_model !== 'B') return null
+  const fee = (it as any).quote_fee as number | null | undefined
+  if (fee == null) return null
+  return fee > 0 ? `nacenění ${fee.toLocaleString('cs-CZ')} Kč` : 'nacenění zdarma'
+}
+
+function hourlyBillingLabel(it: ServiceItem): string | null {
+  if (it.payment_model === 'B' || it.price_unit !== 'hod') return null
+  return (it as any).hourly_started_billing === true
+    ? 'každá započatá hodina se účtuje celá'
+    : 'účtuje se poměrně podle skutečného času'
 }
 
 export default function PriceListPublic({
@@ -87,6 +104,8 @@ export default function PriceListPublic({
         {visible.map((it) => {
           const isB = it.payment_model === 'B'
           const deposit = (it as any).deposit_type as string | undefined
+          const hourlyBilling = hourlyBillingLabel(it)
+          const quoteFee = quoteFeeLabel(it)
           return (
             <li key={it.id} className="flex items-center gap-3 px-4 py-3.5">
               <div className="min-w-0 flex-1">
@@ -95,10 +114,25 @@ export default function PriceListPublic({
                   <span className="inline-flex items-center gap-1 font-semibold text-emerald-700">
                     <Tag className="h-3.5 w-3.5" /> {priceLabel(it)}
                   </span>
-                  {it.duration_minutes ? (
+                  {quoteFee ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Truck className="h-3.5 w-3.5 text-slate-400" /> {quoteFee}
+                    </span>
+                  ) : null}
+                  {/* Délka se ukazuje jen tam, kde něco znamená: u ceny za úkon je to
+                      délka práce, u nacenění délka prohlídky. U ceny za m²/kus/den
+                      by šlo o zbytek po přepnutí jednotky — matoucí. */}
+                  {isB && it.duration_minutes ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Clock className="h-3.5 w-3.5 text-slate-400" /> prohlídka {it.duration_minutes} min
+                    </span>
+                  ) : !isB && it.price_unit === 'ukon' && it.duration_minutes ? (
                     <span className="inline-flex items-center gap-1">
                       <Clock className="h-3.5 w-3.5 text-slate-400" /> {it.duration_minutes} min
                     </span>
+                  ) : null}
+                  {hourlyBilling ? (
+                    <span className="text-slate-500">{hourlyBilling}</span>
                   ) : null}
                   {!isB && deposit === 'zaloha' && it.deposit_amount ? (
                     <span className="inline-flex items-center gap-1">
@@ -116,6 +150,13 @@ export default function PriceListPublic({
                     </span>
                   ) : null}
                 </div>
+
+                {/* Poznámka k ceně — poskytovatel ji vyplnil právě proto, aby ji
+                    zákazník viděl („u dlouhých vlasů příplatek 100 Kč"). Držíme
+                    ji na jednom řádku, ať z ceníku není stěna textu. */}
+                {it.price_note ? (
+                  <p className="mt-1 truncate text-[11.5px] italic text-slate-400">{it.price_note}</p>
+                ) : null}
               </div>
 
               <button

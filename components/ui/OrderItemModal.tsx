@@ -65,7 +65,7 @@ function distanceKm(aLat: number, aLng: number, bLat: number, bLng: number): num
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x))
 }
 
-const UNITS_WITH_DURATION: PriceUnit[] = ['ukon', 'hod']
+const UNITS_WITH_DURATION: PriceUnit[] = ['ukon']
 
 function formatDuration(min: number | null): string | null {
   if (!min || min <= 0) return null
@@ -125,13 +125,20 @@ export default function OrderItemModal({
   const needsCity = atCustomer
 
   const unit = PRICE_UNIT_LABELS[(item.price_unit as keyof typeof PRICE_UNIT_LABELS)] ?? ''
+  const isHourly = !isModelB && item.price_unit === 'hod'
+  const hourlyStartedBilling = isHourly && (item as any).hourly_started_billing === true
+  const hourlyBillingText = isHourly
+    ? (hourlyStartedBilling
+        ? 'Každá započatá hodina se účtuje celá.'
+        : 'Cena se počítá poměrně podle skutečného času.')
+    : null
   const showDuration = UNITS_WITH_DURATION.includes(item.price_unit as PriceUnit) || isModelB
   const dur = showDuration ? formatDuration(item.duration_minutes) : null
   const depositType = ((item as any).deposit_type as 'zaloha' | 'plna_platba' | undefined) ?? 'zaloha'
   const noShowFee = (item as any).no_show_fee != null ? Number((item as any).no_show_fee) : 0
   const feeMode = ((item as any).fee_mode as 'noshow' | 'storno' | 'zadny' | undefined) ?? 'noshow'
   const hasFixedPrice = !isModelB && item.price_type !== 'on_agreement' && item.price != null && Number(item.price) > 0
-  const isFullPayment = !isModelB && depositType === 'plna_platba' && hasFixedPrice
+  const isFullPayment = !isModelB && !isHourly && depositType === 'plna_platba' && hasFixedPrice
   const deposit = isModelB
     ? 0
     : isFullPayment
@@ -359,6 +366,9 @@ export default function OrderItemModal({
                   <span className="font-semibold text-slate-900">{priceText}</span>
                   {dur && <span className="flex items-center gap-1 text-xs text-slate-500"><Clock className="h-3.5 w-3.5" /> {dur}</span>}
                 </div>
+                {hourlyBillingText && (
+                  <p className="mt-1 text-[11.5px] leading-relaxed text-slate-500">{hourlyBillingText}</p>
+                )}
               </div>
               <Link href={`/prihlasit?next=/sluzby/${serviceId}`} className="btn-primary w-full">
                 Přihlásit se a objednat
@@ -372,6 +382,9 @@ export default function OrderItemModal({
                   <span className="text-base font-bold text-slate-900">{priceText}</span>
                   {dur && <span className="flex items-center gap-1 text-xs text-slate-500"><Clock className="h-3.5 w-3.5 text-slate-400" /> {dur}</span>}
                 </div>
+                {hourlyBillingText && (
+                  <p className="mt-1 text-[11.5px] leading-relaxed text-slate-500">{hourlyBillingText}</p>
+                )}
                 {deposit > 0 && (
                   <div className="mt-2 space-y-1 border-t border-slate-200 pt-2 text-xs">
                     <div className="flex items-center justify-between">

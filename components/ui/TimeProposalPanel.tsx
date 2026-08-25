@@ -1,13 +1,15 @@
 'use client'
 // components/ui/TimeProposalPanel.tsx
-// Návrhy prvního termínu i změny už potvrzeného termínu.
-// Původní termín se při změně nemaže: zůstává platný, dokud zákazník nepřijme nový.
+// Ruční návrh prvního termínu i změny už potvrzeného termínu.
+// Otevírací doba se tu NEMĚNÍ na automatický seznam „volných“ časů.
+// Poskytovatel vědomě zadá datum + čas a může přidat další možnosti.
+// Původní potvrzený termín při změně zůstává platný, dokud zákazník nový nepřijme.
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CalendarDays, Loader2, Plus, Send, Clock, Sparkles, CalendarRange, RefreshCw } from 'lucide-react'
+import { CalendarDays, Loader2, Plus, Send, Clock, CalendarRange, RefreshCw, X } from 'lucide-react'
 import {
-  suggestTimes, proposeTimes, acceptProposal, declineProposals, type Proposal,
+  proposeTimes, acceptProposal, declineProposals, type Proposal,
 } from '@/lib/actions/time-proposals'
 import { createDepositCheckout } from '@/lib/actions/deposit'
 import { releaseUnpaidReservation } from '@/lib/actions/reservation-release'
@@ -42,10 +44,18 @@ const TIME_LABELS: Record<string, string> = {
   rano: 'ráno (8–12)', odpoledne: 'odpoledne (12–17)', vecer: 'večer (17–20)', kdykoli: 'kdykoli',
 }
 
-function toLocalInput(iso: string): string {
-  const d = new Date(iso)
-  const off = d.getTimezoneOffset()
-  return new Date(d.getTime() - off * 60000).toISOString().slice(0, 16)
+function localDateString(date = new Date()): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function combineLocalDateTime(date: string, time: string): string | null {
+  if (!date || !time) return null
+  const d = new Date(`${date}T${time}`)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toISOString()
 }
 
 export default function TimeProposalPanel({
@@ -57,64 +67,99 @@ export default function TimeProposalPanel({
   const alreadyPaid = depositStatus === 'paid' || depositStatus === 'released'
   const paymentPending = depositStatus === 'pending'
 
-  // draft = všechny kandidátní časy, které má poskytovatel k dispozici v panelu.
-  // selected = jen časy, které skutečně pošle tomuto zákazníkovi. Odškrtnutí
-  // kandidáta ho NEMAŽE z kalendáře ani z dostupnosti pro jiné zákazníky.
+  // draft = už přidané ruční možnosti. Žádné automatické generování z otevírací doby.
   const [draft, setDraft] = useState<string[]>([])
-  const [selected, setSelected] = useState<string[]>([])
-  const [newTime, setNewTime] = useState('')
+  const [newDate, setNewDate] = useState('')
+  const [newClock, setNewClock] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [editMode, setEditMode] = useState(false)
-  const [loadingHint, setLoadingHint] = useState(isProvider && proposals.length === 0 && !isReschedule)
-
-  // První domluva: předvyplníme rovnou. Změna potvrzeného termínu: až po kliknutí
-  // „Navrhnout změnu", aby panel na běžné objednávce nebyl zbytečně rozbalený.
-  useEffect(() => {
-    if (!isProvider || proposals.length > 0) return
-    if (isReschedule && !editMode) return
-
-    let cancelled = false
-    setLoadingHint(true)
-    suggestTimes(orderId)
-      .then((times) => {
-        if (cancelled) return
-        const values = times.map((t) => t.start)
-        setDraft(values)
-        setSelected(values.slice(0, 6))
-        setLoadingHint(false)
-      })
-      .catch(() => { if (!cancelled) setLoadingHint(false) })
-    return () => { cancelled = true }
-  }, [orderId, isProvider, proposals.length, isReschedule, editMode])
 
   // ── POSKYTOVATEL ─────────────────────────────────────────
   if (isProvider) {
-    const addTime = () => {
-      if (!newTime) return
-      const iso = new Date(newTime).toISOString()
-      if (draft.includes(iso)) {
-        setSelected((prev) => prev.includes(iso) ? prev : prev.length < 6 ? [...prev, iso].sort() : prev)
-        setNewTime('')
+    const hasPref = !!(prefFrom || prefTo || prefTime)
+
+    const resetEditor = () => {
+      setDraft([])
+      setNewDate('')
+      setNewClock('')
+      setError('')
+      setEditMode(false)
+    }
+
+    const openEmptyEditor = () => {
+      setDraft([])
+      setNewDate('')
+      setNewClock('')
+      setError('')
+      setEditMode(true)
+    }
+
+    const openExistingEditor = () => {
+      setDraft(proposals.map((p) => p.starts_at).sort())
+      setNewDate('')
+      setNewClock('')
+      setError('')
+      setEditMode(true)
+    }
+
+    const currentIso = combineLocalDateTime(newDate, newClock)
+    const currentIsValid = !!currentIso && new Date(currentIso).getTime() > Date.now()
+
+    const allSelected = Array.from(new Set([
+      ...draft,
+      ...(currentIsValid && currentIso ? [currentIso] : []),
+    ])).sort()
+
+    const addCurrentAsAnother = () => {
+      setError('')
+      if (!newDate || !newClock) {
+        setError('Vyberte datum i čas.')
         return
       }
-      if (draft.length >= 24) { setError('V panelu už je dost kandidátů. Odškrtněte ty, které nechcete poslat.'); return }
+      const iso = combineLocalDateTime(newDate, newClock)
+      if (!iso || new Date(iso).getTime() <= Date.now()) {
+        setError('Termín musí být v budoucnu.')
+        return
+      }
+      if (draft.includes(iso)) {
+        setError('Tento termín už máte přidaný.')
+        return
+      }
+      if (draft.length >= 5) {
+        // Šestá možnost může stále být právě rozepsaná v polích a rovnou se odešle.
+        setError('Jednomu zákazníkovi můžete poslat maximálně 6 termínů.')
+        return
+      }
       setDraft((prev) => [...prev, iso].sort())
-      setSelected((prev) => prev.length < 6 ? [...prev, iso].sort() : prev)
-      setNewTime('')
+      setNewDate('')
+      setNewClock('')
+    }
+
+    const removeTime = (iso: string) => {
+      setDraft((prev) => prev.filter((x) => x !== iso))
       setError('')
     }
 
     const send = async () => {
+      if (allSelected.length === 0) {
+        setError('Vyberte datum a čas alespoň jednoho termínu.')
+        return
+      }
+      if (allSelected.length > 6) {
+        setError('Jednomu zákazníkovi můžete poslat maximálně 6 termínů.')
+        return
+      }
       setBusy(true); setError('')
-      const res = await proposeTimes(orderId, selected)
+      const res = await proposeTimes(orderId, allSelected)
       setBusy(false)
       if (!res.success) { setError(res.error); return }
       setEditMode(false)
+      setNewDate('')
+      setNewClock('')
+      setDraft([])
       router.refresh()
     }
-
-    const hasPref = !!(prefFrom && prefTo)
 
     // Potvrzený termín bez aktivního návrhu: jen kompaktní možnost změny.
     if (isReschedule && proposals.length === 0 && !editMode) {
@@ -138,12 +183,59 @@ export default function TimeProposalPanel({
           ) : (
             <button
               type="button"
-              onClick={() => { setDraft([]); setSelected([]); setError(''); setEditMode(true) }}
+              onClick={openEmptyEditor}
               className="mt-3 inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-amber-300 hover:bg-amber-50"
             >
               <RefreshCw className="h-4 w-4" /> Navrhnout změnu termínu
             </button>
           )}
+        </div>
+      )
+    }
+
+    // První domluva bez návrhů: kompaktní oranžová akce místo automatického seznamu.
+    if (!isReschedule && proposals.length === 0 && !editMode) {
+      return (
+        <div className="rounded-2xl border-2 border-amber-300 bg-amber-50/60 p-4">
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+              <CalendarDays className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h2 className="font-black text-slate-900">Termín zatím není domluvený</h2>
+              <p className="mt-0.5 text-sm leading-relaxed text-slate-600">
+                {customerName ? <><strong>{customerName}</strong> čeká na váš návrh. </> : null}
+                Vyberte konkrétní datum a čas, který mu chcete nabídnout.
+              </p>
+
+              {hasPref && (
+                <p className="mt-2 inline-flex items-start gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-xs text-slate-600">
+                  <CalendarRange className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                  <span>
+                    Preference zákazníka:{' '}
+                    {prefFrom && prefTo
+                      ? <strong>{fmtDay(prefFrom)} – {fmtDay(prefTo)}</strong>
+                      : prefFrom
+                        ? <>od <strong>{fmtDay(prefFrom)}</strong></>
+                        : prefTo
+                          ? <>do <strong>{fmtDay(prefTo)}</strong></>
+                          : null}
+                    {prefTime ? <>{(prefFrom || prefTo) ? ', ' : ''}<strong>{TIME_LABELS[prefTime] ?? prefTime}</strong></> : null}
+                  </span>
+                </p>
+              )}
+
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={openEmptyEditor}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-3.5 py-2.5 text-sm font-bold text-white transition hover:bg-amber-600"
+                >
+                  <CalendarDays className="h-4 w-4" /> Navrhnout termín
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )
     }
@@ -155,10 +247,7 @@ export default function TimeProposalPanel({
           <h2 className="font-black text-slate-900">
             {isReschedule
               ? (proposals.length > 0 && !editMode ? 'Navržená změna termínu' : 'Navrhněte nový termín')
-              : (proposals.length > 0 ? 'Navržené termíny' : 'Navrhněte termín')}
-            {!isReschedule && !proposals.length && customerName
-              ? <span className="font-normal text-slate-500"> pro: {customerName}</span>
-              : null}
+              : (proposals.length > 0 && !editMode ? 'Navržené termíny' : 'Navrhněte termín')}
           </h2>
         </div>
 
@@ -168,12 +257,19 @@ export default function TimeProposalPanel({
           </div>
         )}
 
-        {hasPref && !isReschedule && proposals.length === 0 && (
+        {hasPref && !isReschedule && (
           <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm text-slate-700">
             <CalendarRange className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
             <span>
-              Zákazníkovi se hodí <strong>{fmtDay(prefFrom!)} – {fmtDay(prefTo!)}</strong>
-              {prefTime ? <>, <strong>{TIME_LABELS[prefTime] ?? prefTime}</strong></> : null}.
+              Preference zákazníka:{' '}
+              {prefFrom && prefTo
+                ? <strong>{fmtDay(prefFrom)} – {fmtDay(prefTo)}</strong>
+                : prefFrom
+                  ? <>od <strong>{fmtDay(prefFrom)}</strong></>
+                  : prefTo
+                    ? <>do <strong>{fmtDay(prefTo)}</strong></>
+                    : null}
+              {prefTime ? <>{(prefFrom || prefTo) ? ', ' : ''}<strong>{TIME_LABELS[prefTime] ?? prefTime}</strong></> : null}.
             </span>
           </div>
         )}
@@ -194,12 +290,7 @@ export default function TimeProposalPanel({
             </div>
             <button
               type="button"
-              onClick={() => {
-                const values = proposals.map((p) => p.starts_at)
-                setDraft(values)
-                setSelected(values)
-                setEditMode(true)
-              }}
+              onClick={openExistingEditor}
               className="mt-3 text-xs font-semibold text-slate-500 hover:text-slate-700"
             >
               Upravit návrh
@@ -208,109 +299,100 @@ export default function TimeProposalPanel({
         ) : (
           <>
             <p className="mb-3 text-sm leading-relaxed text-slate-600">
-              {itemName ? <><strong>{itemName}</strong> — n</> : 'N'}abídněte zákazníkovi konkrétní časy.
+              {itemName ? <><strong>{itemName}</strong> — </> : null}
+              Zadejte konkrétní datum a čas. Pokud chcete, můžete zákazníkovi nabídnout více možností.
               {isReschedule
-                ? ' Zákazník jeden přijme; do té doby platí původní termín.'
+                ? ' Původní termín zatím zůstává platný.'
                 : alreadyPaid
-                  ? ' Zákazník jeden potvrdí.'
-                  : ' Vybere si jeden a případnou zálohou ho potvrdí.'}
+                  ? ' Zákazník jeden z termínů potvrdí.'
+                  : ' Zákazník si jeden vybere a případnou zálohou ho potvrdí.'}
             </p>
 
-            {loadingHint && (
-              <p className="mb-2 flex items-center gap-1.5 text-xs text-slate-500">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Hledám ve vašem rozvrhu volné časy…
-              </p>
-            )}
-
             {draft.length > 0 && (
-              <>
-                <p className="mb-2 flex items-start gap-1.5 text-xs font-semibold leading-relaxed text-amber-700">
-                  <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span>
-                    Zaškrtněte jen termíny, které chcete poslat tomuto zákazníkovi.
-                    Odškrtnutí nic nemaže z vašeho kalendáře a termín můžete nabídnout jinému zákazníkovi.
-                  </span>
-                </p>
-                <div className="space-y-2">
-                  {draft.map((iso) => {
-                    const checked = selected.includes(iso)
-                    return (
-                      <label
-                        key={iso}
-                        className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
-                          checked
-                            ? 'border-amber-400 bg-white text-slate-900'
-                            : 'border-slate-200 bg-white/70 text-slate-500 hover:border-amber-300'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => {
-                            setError('')
-                            if (checked) {
-                              setSelected((prev) => prev.filter((x) => x !== iso))
-                              return
-                            }
-                            if (selected.length >= 6) {
-                              setError('Jednomu zákazníkovi můžete poslat maximálně 6 termínů.')
-                              return
-                            }
-                            setSelected((prev) => [...prev, iso].sort())
-                          }}
-                          className="h-4 w-4 accent-amber-500"
-                        />
-                        <span>{fmtLong(iso)}</span>
-                      </label>
-                    )
-                  })}
-                </div>
-                <p className="mt-2 text-xs text-slate-500">
-                  Vybráno {selected.length} z {draft.length} · odeslat lze maximálně 6 termínů.
-                </p>
-              </>
+              <div className="mb-3 space-y-2">
+                <p className="text-xs font-semibold text-slate-500">Přidané možnosti</p>
+                {draft.map((iso, index) => (
+                  <div key={iso} className="flex items-center justify-between gap-3 rounded-xl border border-amber-300 bg-white px-3 py-2.5">
+                    <span className="text-sm font-bold text-slate-800">{index + 1}. {fmtLong(iso)}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeTime(iso)}
+                      disabled={busy}
+                      className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-red-600 disabled:opacity-50"
+                      aria-label="Odebrat termín"
+                      title="Odebrat termín"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
             )}
 
-            <div className="mt-3 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
-              <input
-                type="datetime-local"
-                value={newTime}
-                onChange={(e) => setNewTime(e.target.value)}
-                min={toLocalInput(new Date().toISOString())}
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 sm:w-auto"
-              />
+            <div className="rounded-xl border border-amber-200 bg-white p-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Datum</label>
+                  <input
+                    type="date"
+                    value={newDate}
+                    min={localDateString()}
+                    onChange={(e) => { setNewDate(e.target.value); setError('') }}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-amber-400"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Čas</label>
+                  <input
+                    type="time"
+                    value={newClock}
+                    step={300}
+                    onChange={(e) => { setNewClock(e.target.value); setError('') }}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-amber-400"
+                  />
+                </div>
+              </div>
+
+              {newDate && newClock && currentIso && (
+                <p className={`mt-2 text-xs ${currentIsValid ? 'text-slate-500' : 'text-red-600'}`}>
+                  {currentIsValid ? <>Aktuálně zadáno: <strong>{fmtLong(currentIso)}</strong></> : 'Tento čas už je v minulosti.'}
+                </p>
+              )}
+
               <button
                 type="button"
-                onClick={addTime}
-                disabled={!newTime}
-                className="inline-flex items-center justify-center gap-1 rounded-xl border border-dashed border-amber-400 px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                onClick={addCurrentAsAnother}
+                disabled={!newDate || !newClock || !currentIsValid || allSelected.length >= 6}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-xl border border-dashed border-amber-400 px-3 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-50 disabled:opacity-50"
               >
-                <Plus className="h-4 w-4" /> Přidat čas
+                <Plus className="h-4 w-4" /> Přidat další možnost
               </button>
             </div>
+
+            <p className="mt-2 text-xs leading-relaxed text-slate-500">
+              Otevírací doba slouží jen jako informace o vašem běžném provozu. Pro tohoto zákazníka posíláte jen termíny, které sami zadáte tady.
+            </p>
 
             {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
             <div className="mt-3 flex gap-2">
-              {isReschedule && (
-                <button
-                  type="button"
-                  onClick={() => { setEditMode(false); setDraft([]); setSelected([]); setError('') }}
-                  disabled={busy}
-                  className="rounded-xl border border-slate-200 px-3 py-3 text-sm font-semibold text-slate-600 hover:bg-white disabled:opacity-60"
-                >
-                  Zpět
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={resetEditor}
+                disabled={busy}
+                className="rounded-xl border border-slate-200 px-3 py-3 text-sm font-semibold text-slate-600 hover:bg-white disabled:opacity-60"
+              >
+                Zpět
+              </button>
               <button
                 type="button"
                 onClick={send}
-                disabled={busy || selected.length === 0}
+                disabled={busy || allSelected.length === 0 || allSelected.length > 6}
                 className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-3 font-bold text-white transition hover:bg-amber-600 disabled:opacity-60"
               >
                 {busy
                   ? <><Loader2 className="h-4 w-4 animate-spin" /> Odesílám…</>
-                  : <><Send className="h-4 w-4" /> {isReschedule ? 'Odeslat návrh změny' : 'Odeslat návrh'} ({selected.length === 1 ? '1 termín' : selected.length < 5 ? `${selected.length} termíny` : `${selected.length} termínů`})</>}
+                  : <><Send className="h-4 w-4" /> {isReschedule ? 'Odeslat návrh změny' : 'Odeslat'} ({allSelected.length === 1 ? '1 termín' : allSelected.length < 5 ? `${allSelected.length} termíny` : `${allSelected.length} termínů`})</>}
               </button>
             </div>
           </>

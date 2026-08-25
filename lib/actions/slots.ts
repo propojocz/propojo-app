@@ -391,9 +391,9 @@ export async function reserveSlotForItem(values: {
 
   const { data: item } = await admin
     .from('service_items')
-    .select('id, service_id, name, duration_minutes, deposit_amount, payment_model, is_active')
+    .select('id, service_id, name, duration_minutes, deposit_amount, deposit_type, price, payment_model, is_active')
     .eq('id', values.service_item_id)
-    .single() as { data: { id: string; service_id: string; name: string; duration_minutes: number | null; deposit_amount: number | null; payment_model: string; is_active: boolean } | null }
+    .single() as { data: { id: string; service_id: string; name: string; duration_minutes: number | null; deposit_amount: number | null; deposit_type: string | null; price: number | null; payment_model: string; is_active: boolean } | null }
 
   if (!item || item.service_id !== values.service_id) {
     return { success: false, error: 'Vybraný úkon nepatří k této kartě.' }
@@ -552,7 +552,15 @@ export async function reserveSlotForItem(values: {
     return { success: false, error: 'Tento čas mezitím obsadila jiná objednávka. Vyberte prosím jiný termín.' }
   }
 
-  const depositForOrder = item.payment_model === 'B' ? null : (item.deposit_amount ?? null)
+  const depositType = item.deposit_type ?? 'zaloha'
+  const isFullPayment = item.payment_model !== 'B' && depositType === 'plna_platba'
+  const depositForOrder = item.payment_model === 'B'
+    ? null
+    : depositType === 'bez_platby'
+      ? null
+      : isFullPayment
+        ? (item.price != null && Number(item.price) > 0 ? Number(item.price) : null)
+        : (item.deposit_amount != null && Number(item.deposit_amount) > 0 ? Number(item.deposit_amount) : null)
   const platiSeHned = !!depositForOrder && depositForOrder > 0
 
   // ── ZABRÁNÍ TERMÍNU ──────────────────────────────────────────
@@ -643,6 +651,7 @@ export async function reserveSlotForItem(values: {
       location_city: values.location_city?.trim() || null,
       service_location: values.service_location ?? null,
       scheduled_at: zacatekUkonu,
+      scheduled_end: serviceEnd,
       slot_id: bookedSlotId,
     })
     .select('id')

@@ -5,12 +5,16 @@
 // Navíc: podkategorie navržené poskytovateli („Nevidím svou službu") čekají
 // na schválení. Dokud je neschválíte, fungují jim na kartě, ale zákazníkům
 // se ve vyhledávání neukážou. Nahoře je proto pruh „Čeká na schválení".
+//
+// Ikony kategorií se NEBEROU z DB (`categories.icon` = emoji), ale z kódu
+// podle slugu — viz lib/categoryIcons.tsx.
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ChevronDown, ChevronRight, Plus, Trash2, Loader2, FolderTree, X, Check, Clock, Sparkles, Pencil, FolderInput, Combine,
 } from 'lucide-react'
+import { CategoryIcon } from '@/lib/categoryIcons'
 import {
   createCategory, deleteCategory,
   createSubcategory, deleteSubcategory,
@@ -207,10 +211,15 @@ export default function KategorieManager({
                       <Sparkles className="h-3.5 w-3.5 shrink-0 text-amber-500" />
                       {sub.name}
                     </p>
-                    <p className="mt-0.5 text-xs text-slate-500">
-                      {cat ? <>{cat.icon} {cat.name}</> : 'bez kategorie'}
-                      {author && <> · navrhl {author}</>}
-                      {' · '}{subcatUsage[sub.id] ?? 0} {(subcatUsage[sub.id] ?? 0) === 1 ? 'karta' : 'karet'}
+                    <p className="mt-0.5 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs text-slate-500">
+                      {cat ? (
+                        <span className="inline-flex items-center gap-1">
+                          <CategoryIcon slug={cat.slug} className="h-3.5 w-3.5 text-emerald-600" />
+                          {cat.name}
+                        </span>
+                      ) : 'bez kategorie'}
+                      {author && <span>· navrhl {author}</span>}
+                      <span>· {subcatUsage[sub.id] ?? 0} {(subcatUsage[sub.id] ?? 0) === 1 ? 'karta' : 'karet'}</span>
                     </p>
                     {sub.suggested_note && (
                       <p className="mt-1 text-xs italic text-slate-400">„{sub.suggested_note}"</p>
@@ -277,7 +286,7 @@ export default function KategorieManager({
                 <button onClick={() => toggleCat(cat.id)} className="text-slate-400 hover:text-slate-600">
                   {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                 </button>
-                <span className="text-xl">{cat.icon}</span>
+                <CategoryIcon slug={cat.slug} boxed className="h-4 w-4" boxClassName="h-9 w-9 rounded-xl" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <p className="font-bold text-slate-900">{cat.name}</p>
@@ -466,7 +475,7 @@ function AddCategoryForm({ onDone, onError }: { onDone: () => void; onError: (e:
         <input
           value={icon} onChange={(e) => setIcon(e.target.value)}
           placeholder="🔧"
-          title="Emoji ikonka (Windows: Win + tečka)"
+          title="Emoji se ukládá do DB kvůli zpětné kompatibilitě, ale v rozhraní se nezobrazuje"
           className="rounded-xl border border-slate-200 px-3 py-2 text-center text-lg outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
         />
         <input
@@ -480,7 +489,11 @@ function AddCategoryForm({ onDone, onError }: { onDone: () => void; onError: (e:
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Přidat
         </button>
       </div>
-      <p className="mt-2 text-xs text-slate-400">Emoji vložíte klávesou Win + tečka (Windows) nebo Cmd + Ctrl + Mezerník (Mac).</p>
+      <p className="mt-2 text-xs leading-relaxed text-slate-400">
+        Emoji se zapíše do databáze, ale v rozhraní se nepoužívá — ikona kategorie se určuje
+        podle slugu v <code className="rounded bg-slate-100 px-1">lib/categoryIcons.tsx</code>.
+        Po založení nové kategorie tam doplňte řádek, jinak se ukáže náhradní ikona.
+      </p>
     </div>
   )
 }
