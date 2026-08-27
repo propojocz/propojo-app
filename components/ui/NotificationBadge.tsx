@@ -14,6 +14,7 @@ type NotifItem = {
   order_id: string | null
   title: string
   preview: string | null
+  url: string | null
   read_at: string | null
   created_at: string
 }
@@ -78,6 +79,8 @@ export default function NotificationBadge() {
       return '/dashboard/znacka'
     }
     if (n.type === 'account_suspended') return '/dashboard'
+    // Uložené url (poptávky, jednání, cokoli dalšího) má přednost před odvozením.
+    if (n.url) return n.url
     if (n.order_id) return `/dashboard/objednavky/${n.order_id}`
     return null
   }

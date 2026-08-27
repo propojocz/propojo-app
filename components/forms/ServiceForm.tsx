@@ -504,7 +504,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2">
                 {categories.map(cat => {
                   const isSelected = selectedCategory === cat.slug
                   return (
@@ -517,15 +517,15 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
                         setValue('subcategory_ids', [])
                         setValue('service_type', '')
                       }}
-                      className={`flex items-center gap-2.5 rounded-xl border-2 px-3 py-2.5 text-left text-sm transition-all ${
+                      className={`flex min-h-[88px] min-w-0 items-center gap-2.5 rounded-xl border-2 px-3 py-3 text-left text-sm transition-all ${
                         isSelected
                           ? 'border-emerald-500 bg-emerald-50 font-semibold text-emerald-700'
                           : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
                       }`}
                       style={isSelected ? { borderColor: cat.color, backgroundColor: `${cat.color}10`, color: cat.color } : {}}
                     >
-                      <CategoryIcon slug={cat.slug} boxed className="h-4 w-4" boxClassName="h-9 w-9 rounded-xl" />
-                      <span className="leading-tight">{cat.name}</span>
+                      <CategoryIcon slug={cat.slug} boxed className="h-4 w-4" boxClassName="h-9 w-9 shrink-0 rounded-xl" />
+                      <span className="min-w-0 break-words leading-snug">{cat.name}</span>
                     </button>
                   )
                 })}

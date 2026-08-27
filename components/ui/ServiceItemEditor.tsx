@@ -18,7 +18,7 @@
 
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Loader2, X, Truck, Tag, ChevronDown, AlertTriangle } from 'lucide-react'
+import { Loader2, X, Truck, Tag, ChevronDown, AlertTriangle, Package, Store, PackageCheck } from 'lucide-react'
 import { PRICE_UNIT_LABELS } from '@/types/database'
 import InfoTip from '@/components/ui/InfoTip'
 import type { PaymentModel, PriceType, PriceUnit } from '@/types/database'
@@ -60,6 +60,16 @@ export interface ServiceItemValues {
   price_per_km: number | null
   free_km: number | null
   quote_days: number | null
+  // ── VÝROBEK ──
+  item_type: 'service' | 'product'
+  pickup_mode: 'pickup' | 'delivery' | 'both' | null
+  min_quantity_per_order: number | null
+  stock_mode: 'stock' | 'made_to_order' | 'unlimited' | null
+  stock_quantity: number | null
+  max_quantity_per_order: number | null
+  production_capacity: number | null
+  lead_time_days: number | null
+  available_days: number[] | null
 }
 
 interface Props {
@@ -72,7 +82,10 @@ interface Props {
   onCancel: () => void
 }
 
-const PRICE_UNITS: PriceUnit[] = ['ukon', 'hod', 'kus', 'm2', 'bm', 'den', 'projekt']
+// Jednotky se liší podle typu položky. Výrobek nesmí nabízet čas/úkon/projekt;
+// rozměrové jednotky (m²/bm/m³) jsou legitimní u obojího.
+const UNITS_SERVICE: PriceUnit[] = ['ukon', 'hod', 'projekt', 'm2', 'bm', 'den']
+const UNITS_PRODUCT: PriceUnit[] = ['kus', 'baleni', 'sada', 'porce', 'kg', 'sto_g', 'litr', 'metr', 'm2', 'bm', 'm3']
 
 const EMPTY: ServiceItemValues = {
   service_type_id: null,
@@ -96,7 +109,21 @@ const EMPTY: ServiceItemValues = {
   price_per_km: null,
   free_km: null,
   quote_days: null,
+  item_type: 'service',
+  pickup_mode: null,
+  min_quantity_per_order: null,
+  stock_mode: null,
+  stock_quantity: null,
+  max_quantity_per_order: null,
+  production_capacity: null,
+  lead_time_days: null,
+  available_days: null,
 }
+
+const DNY = [
+  { n: 1, z: 'Po' }, { n: 2, z: 'Út' }, { n: 3, z: 'St' }, { n: 4, z: 'Čt' },
+  { n: 5, z: 'Pá' }, { n: 6, z: 'So' }, { n: 7, z: 'Ne' },
+]
 
 const numOrNull = (v: string): number | null => (v === '' || v == null ? null : Number(v))
 
@@ -140,7 +167,8 @@ export default function ServiceItemEditor({
   const zpusob = zpusobZHodnot(v)
   const jeNaceneni = zpusob === 'naceneni'
   const jePevna = zpusob === 'pevna'
-  const jeHodinova = !jeNaceneni && v.price_unit === 'hod'
+  const jeVyrobek = v.item_type === 'product'
+  const jeHodinova = !jeVyrobek && !jeNaceneni && v.price_unit === 'hod'
 
   // „Celou cenu předem" jen tam, kde známe konečnou cenu už při rezervaci.
   // U hodinové sazby nevíme předem, jak dlouho bude práce skutečně trvat.
@@ -173,7 +201,7 @@ export default function ServiceItemEditor({
   // Délku poskytovatel vyplňuje jen u ceny „za úkon".
   // U hodinové sazby používáme interně hodinový rezervační blok, takže ho tímto
   // dalším polem nezatěžujeme.
-  const potrebaDelku = !jeNaceneni && v.price_unit === 'ukon'
+  const potrebaDelku = !jeVyrobek && !jeNaceneni && v.price_unit === 'ukon'
 
   const prepniZpusob = (z: ZpusobCeny) => {
     setV(prev => {
@@ -228,6 +256,76 @@ export default function ServiceItemEditor({
 
     // Očištění hodnot — ať do databáze nejdou nesmysly.
     const out: ServiceItemValues = { ...v, name: v.name.trim() }
+
+    if (jeVyrobek) {
+      // Výrobek: žádný kalendář, žádný výjezd, žádné nedostavení.
+      out.payment_model = 'A'
+      out.duration_minutes = null
+      out.hourly_started_billing = false
+      out.no_show_fee = null
+      out.fee_mode = 'zadny'
+      out.quote_fee = null
+      out.price_per_km = null
+      out.free_km = null
+      out.quote_days = null
+      if (zpusob === 'dohodou') { out.price = null; out.price_max = null }
+      if (zpusob !== 'rozmezi') out.price_max = null
+
+      if (out.stock_mode == null) out.stock_mode = 'stock'
+      if (out.stock_mode === 'stock') {
+        out.production_capacity = null
+        out.lead_time_days = null
+        out.available_days = null
+        if (out.stock_quantity == null || out.stock_quantity < 0) out.stock_quantity = 0
+        if (out.max_quantity_per_order != null && out.max_quantity_per_order > out.stock_quantity) {
+          out.max_quantity_per_order = out.stock_quantity > 0 ? out.stock_quantity : null
+        }
+      } else if (out.stock_mode === 'made_to_order') {
+        out.stock_quantity = null
+        if (out.production_capacity == null || out.production_capacity < 1) out.production_capacity = 1
+        if (out.lead_time_days == null || out.lead_time_days < 0) out.lead_time_days = 0
+        const dny = (out.available_days ?? []).filter((d) => d >= 1 && d <= 7)
+        out.available_days = dny.length ? Array.from(new Set(dny)).sort() : null
+        if (out.max_quantity_per_order != null && out.max_quantity_per_order > out.production_capacity) {
+          out.max_quantity_per_order = out.production_capacity
+        }
+      } else {
+        out.stock_quantity = null
+        out.production_capacity = null
+        out.lead_time_days = null
+        out.available_days = null
+      }
+
+      // Způsob převzetí — výchozí osobní odběr.
+      if (out.pickup_mode == null) out.pickup_mode = 'pickup'
+
+      // Minimum množství, default 1, nesmí být nad maximem.
+      if (out.min_quantity_per_order == null || out.min_quantity_per_order < 1) out.min_quantity_per_order = 1
+      if (out.max_quantity_per_order != null && out.min_quantity_per_order > out.max_quantity_per_order) {
+        out.min_quantity_per_order = out.max_quantity_per_order
+      }
+
+      if (out.deposit_type === 'bez_platby' || out.deposit_type === 'plna_platba') {
+        out.deposit_amount = null
+      } else {
+        if (out.deposit_amount == null || out.deposit_amount < MIN_DEPOSIT) out.deposit_amount = MIN_DEPOSIT
+        if (cenovyStrop != null && out.deposit_amount > cenovyStrop) out.deposit_amount = cenovyStrop
+      }
+
+      out.price_note = out.price_note?.trim() || null
+      onSave(out)
+      return
+    }
+
+    // U služby výrobková pole nemají co dělat.
+    out.stock_mode = null
+    out.stock_quantity = null
+    out.max_quantity_per_order = null
+    out.min_quantity_per_order = null
+    out.pickup_mode = null
+    out.production_capacity = null
+    out.lead_time_days = null
+    out.available_days = null
 
     if (jeNaceneni) {
       out.payment_model = 'B'
@@ -334,12 +432,59 @@ export default function ServiceItemEditor({
       <div className="space-y-5 p-4 sm:p-5">
 
         <div className="flex items-center justify-between">
-          <h4 className="text-sm font-extrabold text-emerald-800">
-            {v.id ? 'Upravit úkon' : 'Nový úkon'}
-          </h4>
+          <div className="flex items-center gap-2">
+            <h4 className="text-sm font-extrabold text-emerald-800">
+              {v.id
+                ? (jeVyrobek ? 'Upravit výrobek' : 'Upravit úkon')
+                : (jeVyrobek ? 'Nový výrobek' : 'Nová položka')}
+            </h4>
+            {jeVyrobek && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+                <Package className="h-3 w-3" /> Výrobek
+              </span>
+            )}
+          </div>
           <button type="button" onClick={onCancel} className="rounded-lg p-1 text-slate-400 hover:bg-white hover:text-slate-600" aria-label="Zrušit">
             <X className="h-4 w-4" />
           </button>
+        </div>
+
+        {/* ── CO NABÍZÍTE ──
+            Služba = práce v čase (kalendář, délka). Výrobek = hmotná věc na kusy. */}
+        <div>
+          <label className="mb-1.5 block text-[13px] font-bold text-slate-800">Co nabízíte?</label>
+          <div className="grid grid-cols-2 gap-2">
+            {([['service', 'Službu', Tag], ['product', 'Výrobek', Package]] as const).map(([id, popis, Ikona]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setV(prev => ({
+                  ...prev,
+                  item_type: id,
+                  // Výchozí nastavení podle typu, ať formulář hned dává smysl.
+                  stock_mode: id === 'product' ? (prev.stock_mode ?? 'stock') : null,
+                  pickup_mode: id === 'product' ? (prev.pickup_mode ?? 'pickup') : null,
+                  // Časové/úkonové jednotky u výrobku nedávají smysl → přepnout na kus.
+                  price_unit: id === 'product' && ['ukon', 'hod', 'projekt'].includes(prev.price_unit) ? 'kus' : prev.price_unit,
+                  deposit_type: id === 'product' ? 'plna_platba' : prev.deposit_type,
+                  payment_model: id === 'product' ? 'A' : prev.payment_model,
+                  price_type: id === 'product' && prev.payment_model === 'B' ? 'fixed' : prev.price_type,
+                }))}
+                className={`inline-flex items-center justify-center gap-2 rounded-xl border-2 px-3 py-3 text-center text-sm font-bold transition ${
+                  (v.item_type === id)
+                    ? 'border-emerald-500 bg-emerald-500 text-white shadow-sm'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300'
+                }`}
+              >
+                <Ikona className="h-4 w-4" /> {popis}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-400">
+            {jeVyrobek
+              ? 'Hmotná věc, kterou zákazník kupuje na kusy — obložená mísa, dort, kytice.'
+              : 'Práce, která zabere čas a plánuje se na termín.'}
+          </p>
         </div>
 
         {subcategoryName && (
@@ -354,7 +499,7 @@ export default function ServiceItemEditor({
             Jednotné názvy pomáhají vyhledávání — zákazník hledá „barvení", ne
             „barvení vlasů dámské dlouhé". Vlastní název jde napsat pořád. */}
         <div>
-          <label className="mb-1.5 block text-[13px] font-bold text-slate-800">Název služby</label>
+          <label className="mb-1.5 block text-[13px] font-bold text-slate-800">{jeVyrobek ? 'Název výrobku' : 'Název služby'}</label>
           <div className="relative">
             <input
               type="text"
@@ -363,7 +508,7 @@ export default function ServiceItemEditor({
               onFocus={() => setNaseptavacOtevreny(true)}
               onBlur={() => setTimeout(() => setNaseptavacOtevreny(false), 150)}
               maxLength={80}
-              placeholder="např. Barvení vlasů, Stěrka, Výměna baterie…"
+              placeholder={jeVyrobek ? 'např. Svatební dort, Obložená mísa, Kytice…' : 'např. Barvení vlasů, Stěrka, Výměna baterie…'}
               className="w-full rounded-xl border-[1.5px] border-slate-200 bg-white px-3.5 py-2.5 text-[15px] outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
             />
 
@@ -390,9 +535,11 @@ export default function ServiceItemEditor({
           </div>
 
           <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-400">
-            {serviceTypes.length > 0
-              ? 'Vyberte z návrhů, nebo napište vlastní — zákazníci hledají podle názvu služby.'
-              : 'Napište službu tak, jak ji zná zákazník.'}
+            {jeVyrobek
+              ? 'Napište přesný název tak, jak ho uvidí zákazník.'
+              : serviceTypes.length > 0
+                ? 'Vyberte z návrhů, nebo napište vlastní — zákazníci hledají podle názvu služby.'
+                : 'Napište službu tak, jak ji zná zákazník.'}
           </p>
         </div>
 
@@ -400,7 +547,7 @@ export default function ServiceItemEditor({
         <div>
           <label className="mb-1.5 block text-[13px] font-bold text-slate-800">Kolik to stojí?</label>
           <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-            {ZPUSOBY.map(z => (
+            {ZPUSOBY.filter(z => !(jeVyrobek && z.id === 'naceneni')).map(z => (
               <button
                 key={z.id}
                 type="button"
@@ -425,10 +572,10 @@ export default function ServiceItemEditor({
                   className="w-full rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 outline-none focus:border-emerald-500" />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Za co</label>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Cena je za</label>
                 <select value={v.price_unit} onChange={e => prepniJednotku(e.target.value as PriceUnit)}
                   className="w-full rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 outline-none focus:border-emerald-500">
-                  {PRICE_UNITS.map(u => <option key={u} value={u}>{PRICE_UNIT_LABELS[u] ?? u}</option>)}
+                  {(jeVyrobek ? UNITS_PRODUCT : UNITS_SERVICE).map(u => <option key={u} value={u}>{PRICE_UNIT_LABELS[u] ?? u}</option>)}
                 </select>
               </div>
             </div>
@@ -526,6 +673,174 @@ export default function ServiceItemEditor({
           )}
         </div>
 
+        {/* ── DOSTUPNOST VÝROBKU ── */}
+        {jeVyrobek && (
+          <div>
+            <label className="mb-1.5 block text-[13px] font-bold text-slate-800">Dostupnost</label>
+            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
+              {([
+                ['stock', 'Skladem'],
+                ['made_to_order', 'Na objednávku'],
+                ['unlimited', 'Bez omezení'],
+              ] as const).map(([id, popis]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => set('stock_mode', id)}
+                  className={`rounded-xl border-[1.5px] px-2 py-2 text-center text-[12.5px] font-bold transition ${
+                    (v.stock_mode ?? 'stock') === id
+                      ? 'border-emerald-500 bg-emerald-50 text-emerald-800'
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300'
+                  }`}
+                >
+                  {popis}
+                </button>
+              ))}
+            </div>
+
+            {/* A) SKLADEM */}
+            {(v.stock_mode ?? 'stock') === 'stock' && (
+              <div className="mt-3 grid grid-cols-2 gap-3 rounded-xl bg-white/70 p-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Skladem (ks)</label>
+                  <input
+                    type="number" min={0}
+                    value={v.stock_quantity ?? ''}
+                    onChange={e => set('stock_quantity', numOrNull(e.target.value))}
+                    placeholder="např. 12"
+                    className="w-full rounded-lg border-[1.5px] border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <p className="col-span-2 text-[11.5px] leading-relaxed text-slate-400">
+                  Počet kusů si můžete kdykoli upravit — prodáváte i mimo Propojo. Po vyprodání
+                  se výrobek přestane nabízet.
+                </p>
+              </div>
+            )}
+
+            {/* B) NA OBJEDNÁVKU */}
+            {v.stock_mode === 'made_to_order' && (
+              <div className="mt-3 space-y-3 rounded-xl bg-white/70 p-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-600">Kapacita (ks/den)</label>
+                    <input
+                      type="number" min={1}
+                      value={v.production_capacity ?? ''}
+                      onChange={e => set('production_capacity', numOrNull(e.target.value))}
+                      placeholder="např. 4"
+                      className="w-full rounded-lg border-[1.5px] border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-600">Předstih (dny)</label>
+                    <input
+                      type="number" min={0}
+                      value={v.lead_time_days ?? ''}
+                      onChange={e => set('lead_time_days', numOrNull(e.target.value))}
+                      placeholder="např. 2"
+                      className="w-full rounded-lg border-[1.5px] border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Kdy lze vyzvednout / doručit</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {DNY.map(d => {
+                      const vybrano = (v.available_days ?? []).includes(d.n)
+                      return (
+                        <button
+                          key={d.n}
+                          type="button"
+                          onClick={() => {
+                            const cur = v.available_days ?? []
+                            set('available_days', vybrano ? cur.filter(x => x !== d.n) : [...cur, d.n].sort())
+                          }}
+                          className={`h-9 w-11 rounded-lg border-[1.5px] text-xs font-bold transition ${
+                            vybrano
+                              ? 'border-emerald-500 bg-emerald-50 text-emerald-800'
+                              : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-300'
+                          }`}
+                        >
+                          {d.z}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-400">
+                    Nevyberete-li nic, platí všechny dny. Zákazník si vybere den dodání a systém
+                    hlídá, aby se na něj nesešlo víc kusů, než zvládnete.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {v.stock_mode === 'unlimited' && (
+              <p className="mt-3 rounded-xl bg-white/70 px-3 py-2.5 text-[11.5px] leading-relaxed text-slate-500">
+                Množství nehlídáme — výrobek půjde objednat kdykoli a v jakémkoli počtu.
+              </p>
+            )}
+
+            {/* Omezení množství v objednávce — nenápadné, pro většinu výrobků 1 / bez limitu */}
+            {v.stock_mode !== 'unlimited' && (
+              <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl bg-white/70 px-3 py-2.5">
+                <span className="text-xs font-semibold text-slate-600">Omezit množství v objednávce</span>
+                <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
+                  Min
+                  <input
+                    type="number" min={1}
+                    value={v.min_quantity_per_order ?? ''}
+                    onChange={e => set('min_quantity_per_order', numOrNull(e.target.value))}
+                    placeholder="1"
+                    className="w-16 rounded-lg border-[1.5px] border-slate-200 bg-white px-2 py-1.5 text-sm outline-none focus:border-emerald-500"
+                  />
+                </span>
+                <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
+                  Max
+                  <input
+                    type="number" min={1}
+                    value={v.max_quantity_per_order ?? ''}
+                    onChange={e => set('max_quantity_per_order', numOrNull(e.target.value))}
+                    placeholder="∞"
+                    className="w-16 rounded-lg border-[1.5px] border-slate-200 bg-white px-2 py-1.5 text-sm outline-none focus:border-emerald-500"
+                  />
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── ZPŮSOB PŘEVZETÍ (jen výrobek) ── */}
+        {jeVyrobek && (
+          <div>
+            <label className="mb-1.5 block text-[13px] font-bold text-slate-800">Jak si zákazník výrobek převezme?</label>
+            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
+              {([
+                ['pickup', 'Osobní odběr', Store],
+                ['delivery', 'Doručení', Truck],
+                ['both', 'Obojí', PackageCheck],
+              ] as const).map(([id, popis, Ikona]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => set('pickup_mode', id)}
+                  className={`inline-flex items-center justify-center gap-1.5 rounded-xl border-[1.5px] px-2 py-2.5 text-[12.5px] font-bold transition ${
+                    (v.pickup_mode ?? 'pickup') === id
+                      ? 'border-emerald-500 bg-emerald-50 text-emerald-800'
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300'
+                  }`}
+                >
+                  <Ikona className="h-4 w-4" /> {popis}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-400">
+              Podrobnosti doručení (cena, oblast) domluvíte se zákazníkem v chatu u objednávky.
+            </p>
+          </div>
+        )}
+
         {/* ── 3. PLATBA PŘEDEM ── */}
         {!jeNaceneni && (
           <div>
@@ -581,7 +896,7 @@ export default function ServiceItemEditor({
         )}
 
         {/* ── 4. KDYŽ ZÁKAZNÍK NEPŘIJDE ── */}
-        {!jeNaceneni && platba !== 'bez_platby' && (
+        {!jeVyrobek && !jeNaceneni && platba !== 'bez_platby' && (
           <div>
             <label className="mb-1.5 block text-[13px] font-bold text-slate-800">Když zákazník nepřijde</label>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -622,13 +937,13 @@ export default function ServiceItemEditor({
             onClick={() => setDetailyOtevrene(o => !o)}
             className="flex w-full items-center justify-between gap-2 px-3.5 py-2.5 text-left"
           >
-            <span className="text-[12.5px] font-semibold text-slate-700">Materiál a poznámka</span>
+            <span className="text-[12.5px] font-semibold text-slate-700">{jeVyrobek ? 'Poznámka' : 'Materiál a poznámka'}</span>
             <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${detailyOtevrene ? 'rotate-180' : ''}`} />
           </button>
 
           {detailyOtevrene && (
             <div className="space-y-3 border-t border-slate-100 p-3.5">
-              {!jeNaceneni && (
+              {!jeNaceneni && !jeVyrobek && (
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold text-slate-600">
                     Je v ceně materiál? <span className="font-normal text-slate-400">— nepovinné</span>

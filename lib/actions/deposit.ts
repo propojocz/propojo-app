@@ -27,9 +27,10 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
     .from('orders')
     .select(`
       id, customer_id, provider_id, status, deposit_status, deposit_amount, service_item_id,
+      quantity, unit_price, needed_at,
       scheduled_at, hold_expires_at, stripe_checkout_session_id,
       services(title, payment_model, deposit_amount, quote_fee),
-      service_items(name, payment_model, deposit_amount, quote_fee, deposit_type, price),
+      service_items(name, payment_model, deposit_amount, quote_fee, deposit_type, price, item_type),
       profiles!orders_provider_id_fkey(stripe_account_id, stripe_payouts_enabled)
     `)
     .eq('id', orderId)
@@ -59,16 +60,24 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
   const item = order.service_items ?? null
   const isModelB = (item?.payment_model ?? svc?.payment_model) === 'B'
 
-  if (!isModelB && !order.scheduled_at) {
+  // Musí být před podmínkou termínu — výrobek termín nemá a nesmí být blokovaný.
+  const jeVyrobek = item?.item_type === 'product'
+  const pocetKusu = Math.max(1, Number(order.quantity ?? 1))
+
+  // Výrobek se neplánuje v kalendáři — termín u něj neexistuje a nemá se čekat.
+  if (!isModelB && !jeVyrobek && !order.scheduled_at) {
     return { success: false, error: 'Nejdřív musí být potvrzený termín.' }
   }
 
   const isFullPayment = !isModelB && item?.deposit_type === 'plna_platba'
+  // U výrobku je částka za CELOU objednávku (n kusů). orderProduct ji ukládá
+  // rovnou správně do deposit_amount; fallbacky níž ale nesou cenu ZA KUS,
+  // takže se musí vynásobit — jinak by zákazník za 2 ks zaplatil cenu jednoho.
   const amount = isModelB
     ? Number(item?.quote_fee ?? svc?.quote_fee ?? 0)
     : isFullPayment
-      ? Number(order.deposit_amount ?? item?.price ?? 0)
-      : Number(order.deposit_amount ?? item?.deposit_amount ?? svc?.deposit_amount ?? 0)
+      ? Number(order.deposit_amount ?? (Number(item?.price ?? 0) * pocetKusu))
+      : Number(order.deposit_amount ?? (Number(item?.deposit_amount ?? svc?.deposit_amount ?? 0) * (jeVyrobek ? pocetKusu : 1)))
 
   if (!amount || amount <= 0) {
     return { success: false, error: 'Pro tuto objednávku není nastavena žádná platba předem.' }
@@ -99,11 +108,12 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
   }
 
   const nazev = item?.name || svc?.title || 'služba'
+  const nazevSPoctem = jeVyrobek && pocetKusu > 1 ? `${pocetKusu}× ${nazev}` : nazev
   const popis = isModelB
     ? `Poplatek za nacenění – ${nazev}`
     : isFullPayment
-      ? `Platba předem – ${nazev}`
-      : `Rezervační záloha – ${nazev}`
+      ? `Platba předem – ${nazevSPoctem}`
+      : `Záloha – ${nazevSPoctem}`
 
   try {
     const session = await stripe.checkout.sessions.create({

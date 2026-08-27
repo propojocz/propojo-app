@@ -293,7 +293,7 @@ async function handleDepositExpired(
 
   const { data: order } = await db
     .from('orders')
-    .select('id, status, deposit_status, slot_id, scheduled_at, customer_id, provider_id, stripe_checkout_session_id, service_items(name), services(title)')
+    .select('id, status, deposit_status, slot_id, scheduled_at, customer_id, provider_id, stripe_checkout_session_id, quantity, service_items(name, item_type), services(title)')
     .eq('id', orderId)
     .single() as { data: any }
 
@@ -303,6 +303,32 @@ async function handleDepositExpired(
   if (order.stripe_checkout_session_id && order.stripe_checkout_session_id !== session.id) return
 
   const nazev = order.service_items?.name || order.services?.title || 'Rezervace'
+
+  // ── VÝROBEK ──
+  // Objednávka výrobku nemá termín ani slot, takže by spadla do větve „vrátit do
+  // domluvy" (status 'cekajici', deposit_status 'none'). Jenže taková objednávka
+  // se pak v počítání dostupnosti tváří jako ŽIVÁ a držela by kusy napořád.
+  // Nezaplacený výrobek proto rovnou rušíme — tím se sklad i denní kapacita uvolní.
+  if (order.service_items?.item_type === 'product') {
+    await (db.from('orders') as any)
+      .update({ status: 'zruseno', hold_expires_at: null, stripe_checkout_session_id: null })
+      .eq('id', orderId)
+      .eq('deposit_status', 'pending')
+
+    try {
+      await createNotification({
+        userId: order.customer_id,
+        type: 'status_change',
+        orderId,
+        actorId: order.customer_id,
+        title: 'Objednávka vypršela — nebyla zaplacena',
+        preview: `${nazev} · zboží jsme uvolnili. Objednat můžete znovu.`,
+      })
+    } catch (err) {
+      console.error('[webhook] notifikace o vypršení výrobku:', err)
+    }
+    return
+  }
 
   if (order.slot_id) {
     // Přímá rezervace: objednávka bez platby končí a fyzický slot se vrací.

@@ -12,7 +12,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from('notifications')
-    .select('id, type, order_id, title, preview, read_at, created_at')
+    .select('id, type, order_id, url, title, preview, read_at, created_at')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
     .limit(15) as { data: any[] | null; error: any }

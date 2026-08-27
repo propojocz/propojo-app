@@ -82,30 +82,39 @@ export type Database = {
       messages: {
         Row: {
           content: string
+          conversation_id: string | null
           created_at: string
           id: string
           image_url: string | null
-          order_id: string
+          order_id: string | null
+          payload: Json | null
           read_at: string | null
           sender_id: string
+          type: string
         }
         Insert: {
           content: string
+          conversation_id?: string | null
           created_at?: string
           id?: string
           image_url?: string | null
-          order_id: string
+          order_id?: string | null
+          payload?: Json | null
           read_at?: string | null
           sender_id: string
+          type?: string
         }
         Update: {
           content?: string
+          conversation_id?: string | null
           created_at?: string
           id?: string
           image_url?: string | null
-          order_id?: string
+          order_id?: string | null
+          payload?: Json | null
           read_at?: string | null
           sender_id?: string
+          type?: string
         }
         Relationships: []
       }
@@ -113,37 +122,85 @@ export type Database = {
         Row: {
           created_at: string
           customer_id: string
+          deposit_amount: number | null
+          deposit_status: string | null
           description: string | null
+          hold_expires_at: string | null
           id: string
+          is_inquiry: boolean | null
+          location_address: string | null
+          location_city: string | null
+          location_lat: number | null
+          location_lng: number | null
+          needed_at: string | null
           provider_id: string
+          quantity: number
+          scheduled_at: string | null
+          scheduled_end: string | null
           service_id: string | null
           service_item_id: string | null
+          service_location: string | null
+          slot_id: string | null
           status: string
+          stripe_checkout_session_id: string | null
           total_price: number | null
+          unit_price: number | null
           updated_at: string
         }
         Insert: {
           created_at?: string
           customer_id: string
+          deposit_amount?: number | null
+          deposit_status?: string | null
           description?: string | null
+          hold_expires_at?: string | null
           id?: string
+          is_inquiry?: boolean | null
+          location_address?: string | null
+          location_city?: string | null
+          location_lat?: number | null
+          location_lng?: number | null
+          needed_at?: string | null
           provider_id: string
+          quantity?: number
+          scheduled_at?: string | null
+          scheduled_end?: string | null
           service_id?: string | null
           service_item_id?: string | null
+          service_location?: string | null
+          slot_id?: string | null
           status?: string
+          stripe_checkout_session_id?: string | null
           total_price?: number | null
+          unit_price?: number | null
           updated_at?: string
         }
         Update: {
           created_at?: string
           customer_id?: string
+          deposit_amount?: number | null
+          deposit_status?: string | null
           description?: string | null
+          hold_expires_at?: string | null
           id?: string
+          is_inquiry?: boolean | null
+          location_address?: string | null
+          location_city?: string | null
+          location_lat?: number | null
+          location_lng?: number | null
+          needed_at?: string | null
           provider_id?: string
+          quantity?: number
+          scheduled_at?: string | null
+          scheduled_end?: string | null
           service_id?: string | null
           service_item_id?: string | null
+          service_location?: string | null
+          slot_id?: string | null
           status?: string
+          stripe_checkout_session_id?: string | null
           total_price?: number | null
+          unit_price?: number | null
           updated_at?: string
         }
         Relationships: []
@@ -345,14 +402,20 @@ export type Database = {
       }
       service_items: {
         Row: {
+          available_days: number[] | null
           created_at: string
           deposit_amount: number | null
           duration_minutes: number | null
           free_km: number | null
           id: string
           is_active: boolean
+          item_type: string
+          lead_time_days: number | null
+          max_quantity_per_order: number | null
+          min_quantity_per_order: number | null
           name: string
           payment_model: string
+          pickup_mode: string | null
           price: number | null
           price_includes_material: boolean
           price_max: number | null
@@ -360,22 +423,31 @@ export type Database = {
           price_per_km: number | null
           price_type: string
           price_unit: string
+          production_capacity: number | null
           quote_days: number | null
           quote_fee: number | null
           service_id: string
           service_type_id: string | null
           sort_order: number
+          stock_mode: string | null
+          stock_quantity: number | null
           updated_at: string
         }
         Insert: {
+          available_days?: number[] | null
           created_at?: string
           deposit_amount?: number | null
           duration_minutes?: number | null
           free_km?: number | null
           id?: string
           is_active?: boolean
+          item_type?: string
+          lead_time_days?: number | null
+          max_quantity_per_order?: number | null
+          min_quantity_per_order?: number | null
           name: string
           payment_model?: string
+          pickup_mode?: string | null
           price?: number | null
           price_includes_material?: boolean
           price_max?: number | null
@@ -383,22 +455,31 @@ export type Database = {
           price_per_km?: number | null
           price_type?: string
           price_unit?: string
+          production_capacity?: number | null
           quote_days?: number | null
           quote_fee?: number | null
           service_id: string
           service_type_id?: string | null
           sort_order?: number
+          stock_mode?: string | null
+          stock_quantity?: number | null
           updated_at?: string
         }
         Update: {
+          available_days?: number[] | null
           created_at?: string
           deposit_amount?: number | null
           duration_minutes?: number | null
           free_km?: number | null
           id?: string
           is_active?: boolean
+          item_type?: string
+          lead_time_days?: number | null
+          max_quantity_per_order?: number | null
+          min_quantity_per_order?: number | null
           name?: string
           payment_model?: string
+          pickup_mode?: string | null
           price?: number | null
           price_includes_material?: boolean
           price_max?: number | null
@@ -406,11 +487,14 @@ export type Database = {
           price_per_km?: number | null
           price_type?: string
           price_unit?: string
+          production_capacity?: number | null
           quote_days?: number | null
           quote_fee?: number | null
           service_id?: string
           service_type_id?: string | null
           sort_order?: number
+          stock_mode?: string | null
+          stock_quantity?: number | null
           updated_at?: string
         }
         Relationships: []
@@ -699,7 +783,7 @@ export type ServiceCategory = string
 // Číselníky používané ve formulářích
 export type PaymentModel = 'A' | 'B'
 export type PriceType = 'fixed' | 'range' | 'on_agreement'
-export type PriceUnit = 'ukon' | 'hod' | 'kus' | 'den' | 'projekt' | 'm2' | 'bm'
+export type PriceUnit = 'ukon' | 'hod' | 'kus' | 'den' | 'projekt' | 'm2' | 'bm' | 'm3' | 'baleni' | 'sada' | 'porce' | 'kg' | 'sto_g' | 'litr' | 'metr'
 export type LocationType = 'u_poskytovatele' | 'u_zakaznika' | 'oboji'
 
 // Popisky jednotek ceny — jediné místo, odkud je brát v UI.
@@ -711,6 +795,14 @@ export const PRICE_UNIT_LABELS: Record<PriceUnit, string> = {
   projekt: 'za projekt',
   m2: 'za m²',
   bm: 'za běžný metr',
+  m3: 'za m³',
+  baleni: 'za balení',
+  sada: 'za sadu',
+  porce: 'za porci',
+  kg: 'za kg',
+  sto_g: 'za 100 g',
+  litr: 'za litr',
+  metr: 'za metr',
 }
 
 // Profil poskytovatele tak, jak ho potřebují karty a detail nabídky.

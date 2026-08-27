@@ -19,11 +19,12 @@
 
 import { useState, useEffect, type MouseEvent } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle2, Loader2, MapPin, Store, X, Clock, Wallet, CalendarDays, Truck, AlertTriangle, MessageCircle } from 'lucide-react'
+import { CheckCircle2, Loader2, MapPin, Store, X, Clock, Wallet, CalendarDays, Truck, AlertTriangle, MessageCircle, Package, Minus, Plus } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createOrder } from '@/lib/actions/orders'
 import { reserveSlotForItem } from '@/lib/actions/slots'
+import { orderProduct } from '@/lib/actions/product-order'
 import { createClient } from '@/lib/supabase/client'
 import type { ServiceItem, PriceUnit } from '@/types/database'
 import { PRICE_UNIT_LABELS } from '@/types/database'
@@ -51,6 +52,8 @@ interface Props {
   slots?: SlotOption[]
   providerGeo?: { lat: number | null; lng: number | null; radiusKm: number | null }
   providerName?: string | null
+  /** Kolik kusů je reálně volných (u výrobku skladem). null = neomezeno. */
+  productAvailable?: number | null
   onClose: () => void
 }
 
@@ -104,9 +107,12 @@ function buildTimes(slot: SlotOption, durMin: number | null): TimeOption[] {
 const dayKey = (iso: string) => new Date(iso).toISOString().slice(0, 10)
 
 export default function OrderItemModal({
-  item, serviceId, providerId, isLoggedIn, locationType = 'u_zakaznika', slots = [], providerGeo, providerName, onClose,
+  item, serviceId, providerId, isLoggedIn, locationType = 'u_zakaznika', slots = [], providerGeo, providerName,
+  productAvailable = null, onClose,
 }: Props) {
   const router = useRouter()
+  const itemAny = item as any
+  const initialMinQuantity = Math.max(1, Number(itemAny.min_quantity_per_order ?? 1))
   const [state, setState] = useState<'form' | 'loading' | 'success' | 'error'>('form')
   const [message, setMessage] = useState('')
   const [city, setCity] = useState('')
@@ -119,6 +125,9 @@ export default function OrderItemModal({
   // Modal může zůstat otevřený delší dobu. Každých 30 s ho přepočítáme, aby
   // časy, které mezitím přešly do minulosti, samy zmizely bez obnovy stránky.
   const [timeTick, setTimeTick] = useState(0)
+  // ── Výrobek: počet kusů a den dodání ──
+  const [pocet, setPocet] = useState(initialMinQuantity)
+  const [denDodani, setDenDodani] = useState('')
 
   const isModelB = item.payment_model === 'B'
   const atCustomer = locationType !== 'u_poskytovatele'
@@ -226,7 +235,82 @@ export default function OrderItemModal({
   const fmtTime = (iso: string) =>
     new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
 
+  // ── VÝROBEK ────────────────────────────────────────────────
+  const it = itemAny
+  const minKusu = Math.max(1, Number(it.min_quantity_per_order ?? 1))
+  const jeVyrobek = it.item_type === 'product'
+  const rezim: string = it.stock_mode ?? 'stock'
+  const naObjednavku = jeVyrobek && rezim === 'made_to_order'
+  const cenaZaKus = Number(it.price ?? 0)
+  const maxKusu = (() => {
+    if (!jeVyrobek) return 1
+    const limity: number[] = []
+    if (it.max_quantity_per_order != null) limity.push(Number(it.max_quantity_per_order))
+    if (rezim === 'stock' && productAvailable != null) limity.push(productAvailable)
+    if (rezim === 'made_to_order' && it.production_capacity != null) limity.push(Number(it.production_capacity))
+    return limity.length ? Math.max(1, Math.min(...limity)) : 99
+  })()
+  const vyprodano = jeVyrobek && rezim === 'stock' && productAvailable != null && productAvailable <= 0
+  const minimumNeniDostupne = jeVyrobek && maxKusu < minKusu
+
+  // Nejbližší možný den dodání = dnes + předstih.
+  const minDen = (() => {
+    const d = new Date()
+    d.setHours(0, 0, 0, 0)
+    d.setDate(d.getDate() + Number(it.lead_time_days ?? 0))
+    return d.toISOString().slice(0, 10)
+  })()
+
+  // Vybraný den musí sedět do povolených dnů v týdnu.
+  const denNepovoleny = (() => {
+    if (!naObjednavku || !denDodani) return false
+    const dny: number[] | null = it.available_days ?? null
+    if (!dny || !dny.length) return false
+    const d = new Date(`${denDodani}T00:00:00`)
+    const dow = d.getDay() === 0 ? 7 : d.getDay()
+    return !dny.includes(dow)
+  })()
+
+  const celkovaCena = cenaZaKus > 0 ? cenaZaKus * pocet : null
+
   const handleSubmit = async () => {
+    // ── Výrobek má vlastní cestu (množství, sklad, den dodání) ──
+    if (jeVyrobek) {
+      if (pocet < minKusu) {
+        setState('error'); setErrorMsg(`Minimální množství je ${minKusu} ks.`); return
+      }
+      if (pocet > maxKusu) {
+        setState('error'); setErrorMsg(`Maximálně lze objednat ${maxKusu} ks.`); return
+      }
+      if (minimumNeniDostupne) {
+        setState('error'); setErrorMsg(`Aktuálně není dostupné minimální množství ${minKusu} ks.`); return
+      }
+      if (naObjednavku && !denDodani) {
+        setState('error'); setErrorMsg('Vyberte den, kdy výrobek potřebujete.'); return
+      }
+      if (denNepovoleny) {
+        setState('error'); setErrorMsg('V tento den poskytovatel nevydává. Vyberte prosím jiný.'); return
+      }
+      setState('loading'); setErrorMsg('')
+      const res = await orderProduct({
+        service_id: serviceId,
+        service_item_id: item.id,
+        quantity: pocet,
+        needed_at: naObjednavku ? denDodani : null,
+        message: message || undefined,
+        location_city: needsCity ? city.trim() : undefined,
+        service_location: atCustomer ? 'u_zakaznika' : 'u_poskytovatele',
+      })
+      if (res.success) {
+        setState('success')
+        setTimeout(() => router.push(`/dashboard/objednavky/${res.id}`), 1000)
+      } else {
+        setState('error'); setErrorMsg(res.error)
+        router.refresh()
+      }
+      return
+    }
+
     if (needsCity && !city.trim()) {
       setState('error')
       setErrorMsg('Zadejte prosím město nebo obec, kde se má služba provést.')
@@ -281,7 +365,9 @@ export default function OrderItemModal({
     else { setState('error'); setErrorMsg(result.error) }
   }
 
-  const submitDisabled = state === 'loading' || (hasSlots && !selected && !skipSlot) || blockedByRange
+  const submitDisabled = state === 'loading'
+    || (jeVyrobek && (vyprodano || minimumNeniDostupne || pocet < minKusu || pocet > maxKusu || (naObjednavku && (!denDodani || denNepovoleny))))
+    || (!jeVyrobek && ((hasSlots && !selected && !skipSlot) || blockedByRange))
 
   return (
     <AnimatePresence>
@@ -475,8 +561,95 @@ export default function OrderItemModal({
                 )}
               </div>
 
+              {/* ── VÝROBEK: počet kusů a den dodání ── */}
+              {jeVyrobek && (
+                <div className="space-y-4">
+                  {vyprodano ? (
+                    <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>Tento výrobek je právě vyprodaný. Zkuste to prosím později.</span>
+                    </div>
+                  ) : minimumNeniDostupne ? (
+                    <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>Aktuálně není dostupné minimální množství {minKusu} ks.</span>
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="mb-2 block text-xs font-semibold text-slate-600">Počet kusů</label>
+                        <div className="flex items-center gap-3">
+                          <div className="inline-flex items-center rounded-xl border-[1.5px] border-slate-200 bg-white">
+                            <button
+                              type="button"
+                              onClick={() => setPocet(p => Math.max(minKusu, p - 1))}
+                              disabled={pocet <= minKusu}
+                              className="flex h-10 w-10 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:opacity-30"
+                              aria-label="Ubrat"
+                            >
+                              <Minus className="h-4 w-4" />
+                            </button>
+                            <span className="w-12 text-center text-[15px] font-bold text-slate-900">{pocet}</span>
+                            <button
+                              type="button"
+                              onClick={() => setPocet(p => Math.min(maxKusu, p + 1))}
+                              disabled={pocet >= maxKusu}
+                              className="flex h-10 w-10 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:opacity-30"
+                              aria-label="Přidat"
+                            >
+                              <Plus className="h-4 w-4" />
+                            </button>
+                          </div>
+                          {celkovaCena != null && (
+                            <p className="text-sm text-slate-600">
+                              Celkem <strong className="text-slate-900">{celkovaCena.toLocaleString('cs-CZ')} Kč</strong>
+                            </p>
+                          )}
+                        </div>
+                        <p className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-slate-400">
+                          <Package className="h-3.5 w-3.5" />
+                          {minKusu > 1 ? `Min. ${minKusu} ks · ` : ''}
+                          {rezim === 'stock' && productAvailable != null
+                            ? `Skladem ${productAvailable} ks`
+                            : rezim === 'made_to_order'
+                              ? `Vyrábí se na objednávku${it.production_capacity ? ` · ${it.production_capacity} ks denně` : ''}`
+                              : 'K dispozici'}
+                          {maxKusu < 99 ? ` · max. ${maxKusu} ks na objednávku` : ''}
+                        </p>
+                      </div>
+
+                      {naObjednavku && (
+                        <div>
+                          <label className="mb-2 block text-xs font-semibold text-slate-600">
+                            Kdy výrobek potřebujete?
+                          </label>
+                          <input
+                            type="date"
+                            value={denDodani}
+                            min={minDen}
+                            onChange={e => setDenDodani(e.target.value)}
+                            className="w-full rounded-xl border-[1.5px] border-slate-200 bg-white px-3.5 py-2.5 text-[15px] outline-none transition focus:border-emerald-500"
+                          />
+                          {denNepovoleny ? (
+                            <p className="mt-1.5 text-[11.5px] font-semibold text-amber-700">
+                              V tento den poskytovatel nevydává — vyberte prosím jiný.
+                            </p>
+                          ) : (
+                            <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-400">
+                              {Number(it.lead_time_days ?? 0) > 0
+                                ? `Poskytovatel potřebuje aspoň ${it.lead_time_days} ${Number(it.lead_time_days) === 1 ? 'den' : Number(it.lead_time_days) < 5 ? 'dny' : 'dní'} na přípravu.`
+                                : 'Vyberte den vyzvednutí nebo doručení.'}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
               {/* Jak chce zákazník termín vyřešit */}
-              {hasSlots && (
+              {!jeVyrobek && hasSlots && (
                 <div>
                   <label className="mb-2 block text-xs font-semibold text-slate-600">
                     Jak chcete domluvit termín?

@@ -20,6 +20,7 @@ export type NotificationRow = {
   actor_id: string | null
   title: string
   preview: string | null
+  url: string | null
   read_at: string | null
   created_at: string
 }
@@ -33,7 +34,8 @@ export async function createNotification(params: {
   actorId?: string | null
   title: string
   preview?: string | null
-  /** Kam oznámení vede. Když se nevyplní, míří na objednávku (výchozí chování). */
+  /** Kam oznámení vede. Ukládá se do DB (kvůli zvonečku) i použije pro push.
+   *  Když se nevyplní, míří na objednávku (výchozí chování). */
   url?: string | null
 }): Promise<void> {
   try {
@@ -45,6 +47,7 @@ export async function createNotification(params: {
       actor_id: params.actorId ?? null,
       title: params.title,
       preview: params.preview ?? null,
+      url: params.url ?? null,
     })
     if (error) console.error('[createNotification]', error)
   } catch (err) {

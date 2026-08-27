@@ -68,6 +68,7 @@ export default function MobileNav({
     ...(isProvider ? [{ href: '/dashboard/qr', label: 'QR kód', icon: QrCode }] : []),
     ...(isProvider ? [{ href: '/dashboard/terminy', label: 'Termíny', icon: CalendarDays }] : []),
     { href: '/dashboard/objednavky', label: 'Objednávky', icon: Inbox, badge: todoCount },
+    { href: '/dashboard/poptavky', label: 'Moje poptávky', icon: Megaphone },
     ...(isProvider ? [{ href: '/dashboard/recenze', label: 'Moje recenze', icon: Star, badge: unansweredReviews }] : []),
     ...(isProvider ? [{ href: '/dashboard/predplatne', label: 'Předplatné', icon: CreditCard }] : []),
     ...(isProvider ? [{ href: '/dashboard/vyplaty', label: 'Výplaty', icon: Landmark }] : []),

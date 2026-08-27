@@ -20,7 +20,7 @@ const itemSchema = z.object({
   payment_model: z.enum(['A', 'B'] as const),
   price_type: z.enum(['fixed', 'range', 'on_agreement'] as const),
   price: z.number().min(0).max(999999).nullable().optional(),
-  price_unit: z.enum(['ukon', 'hod', 'kus', 'den', 'projekt', 'm2', 'bm'] as const),
+  price_unit: z.enum(['ukon', 'hod', 'kus', 'den', 'projekt', 'm2', 'bm', 'm3', 'baleni', 'sada', 'porce', 'kg', 'sto_g', 'litr', 'metr'] as const),
   price_max: z.number().min(0).max(999999).nullable().optional(),
   duration_minutes: z.number().int().min(0).max(100000).nullable().optional(),
   hourly_started_billing: z.boolean().optional(),
@@ -37,6 +37,18 @@ const itemSchema = z.object({
   price_per_km: z.number().min(0).max(99999).nullable().optional(),
   free_km: z.number().int().min(0).max(100000).nullable().optional(),
   quote_days: z.number().int().min(0).max(365).nullable().optional(),
+
+  // ── VÝROBEK ──
+  // item_type rozhoduje, čím položka je. 'service' = dosavadní chování.
+  item_type: z.enum(['service', 'product'] as const).optional(),
+  stock_mode: z.enum(['stock', 'made_to_order', 'unlimited'] as const).nullable().optional(),
+  stock_quantity: z.number().int().min(0).max(1000000).nullable().optional(),
+  max_quantity_per_order: z.number().int().min(1).max(10000).nullable().optional(),
+  min_quantity_per_order: z.number().int().min(1).max(10000).nullable().optional(),
+  pickup_mode: z.enum(['pickup', 'delivery', 'both'] as const).nullable().optional(),
+  production_capacity: z.number().int().min(1).max(10000).nullable().optional(),
+  lead_time_days: z.number().int().min(0).max(365).nullable().optional(),
+  available_days: z.array(z.number().int().min(1).max(7)).nullable().optional(),
 })
 
 type ItemParsed = z.infer<typeof itemSchema>
@@ -82,6 +94,100 @@ function normalizeItem(d: ItemParsed): ItemParsed {
   // „materiál je v ceně", aniž to kdokoli řekl.
   if (out.price_includes_material === undefined) out.price_includes_material = null
   if (out.is_active == null) out.is_active = true
+  if (out.item_type == null) out.item_type = 'service'
+
+  // ── VÝROBEK ──────────────────────────────────────────────
+  // Výrobek se neplánuje v kalendáři a nejezdí se k němu na nacenění, takže
+  // pole vázaná na čas a výjezd nulujeme. Platební režim (deposit_type) zůstává
+  // stejný jako u služeb — jen se u výrobku nabízí jiný výchozí.
+  if (out.item_type === 'product') {
+    out.payment_model = 'A'
+    out.duration_minutes = null
+    out.hourly_started_billing = false
+    // U výrobku se údaj „materiál v ceně“ nepoužívá.
+    out.price_includes_material = null
+    // Nedostavení se u výrobku neřeší — buď si ho vyzvedne, nebo ne.
+    out.no_show_fee = null
+    out.fee_mode = 'zadny'
+    // Výjezd a nacenění patří k modelu B u služeb.
+    out.quote_fee = null
+    out.price_per_km = null
+    out.free_km = null
+    out.quote_days = null
+
+    if (out.price_type === 'on_agreement') {
+      out.price = null
+      out.price_max = null
+    }
+    if (out.price_type !== 'range') out.price_max = null
+
+    // Režim dostupnosti. Výchozí je sklad — provider typicky ví, kolik má kusů.
+    if (out.stock_mode == null) out.stock_mode = 'stock'
+
+    if (out.stock_mode === 'stock') {
+      // Vyrábí se na objednávku? Ne → kapacita a předstih nedávají smysl.
+      out.production_capacity = null
+      out.lead_time_days = null
+      out.available_days = null
+      if (out.stock_quantity == null || out.stock_quantity < 0) out.stock_quantity = 0
+      if (out.max_quantity_per_order != null && out.max_quantity_per_order < 1) out.max_quantity_per_order = null
+      // Nemá smysl pouštět do objednávky víc, než kolik je skladem.
+      if (out.max_quantity_per_order != null && out.max_quantity_per_order > out.stock_quantity) {
+        out.max_quantity_per_order = out.stock_quantity > 0 ? out.stock_quantity : null
+      }
+    } else if (out.stock_mode === 'made_to_order') {
+      out.stock_quantity = null
+      if (out.production_capacity == null || out.production_capacity < 1) out.production_capacity = 1
+      if (out.lead_time_days == null || out.lead_time_days < 0) out.lead_time_days = 0
+      // Prázdný výběr dnů = bez omezení (všechny dny).
+      const dny = (out.available_days ?? []).filter((d) => d >= 1 && d <= 7)
+      out.available_days = dny.length ? Array.from(new Set(dny)).sort() : null
+      if (out.max_quantity_per_order != null && out.max_quantity_per_order > out.production_capacity) {
+        out.max_quantity_per_order = out.production_capacity
+      }
+    } else {
+      // unlimited — množství nehlídáme.
+      out.stock_quantity = null
+      out.production_capacity = null
+      out.lead_time_days = null
+      out.available_days = null
+    }
+
+    // Platba: stejné režimy jako u služby, jen jiný výchozí (celá cena předem).
+    if (out.deposit_type == null) out.deposit_type = 'plna_platba'
+    if (out.deposit_type === 'bez_platby') {
+      out.deposit_amount = null
+    } else if (out.deposit_type === 'plna_platba') {
+      out.deposit_amount = null   // platí se celá cena, záloha se neřeší
+    } else {
+      if (out.deposit_amount == null || out.deposit_amount < MIN_DEPOSIT) out.deposit_amount = MIN_DEPOSIT
+      const strop = stropZalohy(out)
+      if (strop != null && out.deposit_amount > strop) out.deposit_amount = strop
+    }
+
+    // Způsob převzetí. Výchozí osobní odběr.
+    if (out.pickup_mode == null) out.pickup_mode = 'pickup'
+
+    // Minimální množství. Default 1 (= bez omezení). Musí sedět pod maximum.
+    if (out.min_quantity_per_order == null || out.min_quantity_per_order < 1) out.min_quantity_per_order = 1
+    if (out.max_quantity_per_order != null && out.min_quantity_per_order > out.max_quantity_per_order) {
+      out.min_quantity_per_order = out.max_quantity_per_order
+    }
+
+    out.price_note = out.price_note?.trim() || null
+    return out
+  }
+
+  // ── SLUŽBA ───────────────────────────────────────────────
+  // Výrobková pole u služby nemají co dělat.
+  out.stock_mode = null
+  out.stock_quantity = null
+  out.max_quantity_per_order = null
+  out.min_quantity_per_order = null
+  out.pickup_mode = null
+  out.production_capacity = null
+  out.lead_time_days = null
+  out.available_days = null
 
   if (out.payment_model === 'B') {
     out.price = null
@@ -228,7 +334,11 @@ export async function createServiceItem(values: ServiceItemFormValues): Promise<
     .single()
   if (error) {
     console.error('INSERT service_items error:', error)
-    return { success: false, error: 'Nepodařilo se uložit úkon.' }
+    const what = norm.item_type === 'product' ? 'výrobek' : 'službu'
+    const detail = process.env.NODE_ENV !== 'production' && error.message
+      ? ` (${error.message})`
+      : ''
+    return { success: false, error: `Nepodařilo se uložit ${what}.${detail}` }
   }
 
   refresh(norm.service_id)
@@ -256,7 +366,11 @@ export async function updateServiceItem(id: string, values: ServiceItemFormValue
     .eq('id', id)
   if (error) {
     console.error('UPDATE service_items error:', error)
-    return { success: false, error: 'Nepodařilo se uložit změny úkonu.' }
+    const what = norm.item_type === 'product' ? 'výrobku' : 'služby'
+    const detail = process.env.NODE_ENV !== 'production' && error.message
+      ? ` (${error.message})`
+      : ''
+    return { success: false, error: `Nepodařilo se uložit změny ${what}.${detail}` }
   }
 
   refresh(realServiceId)

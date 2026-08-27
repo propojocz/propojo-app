@@ -24,10 +24,6 @@ import ServiceItemEditor, {
   type ServiceItemValues, type ServiceTypeOption,
 } from '@/components/ui/ServiceItemEditor'
 
-// Minimální záloha — musí sedět s MIN_DEPOSIT v ServiceItemEditor.tsx
-// a v lib/actions/service-items.ts.
-const MIN_DEPOSIT = 200
-
 /** Podkategorie vybraná na kartě — základ jedné skupiny v ceníku. */
 export interface PriceListSubcategory {
   id: string
@@ -64,13 +60,24 @@ function itemToValues(it: ServiceItem): ServiceItemValues {
     deposit_type: ((it as any).deposit_type as 'zaloha' | 'plna_platba' | 'bez_platby') ?? 'zaloha',
     no_show_fee: (it as any).no_show_fee ?? null,
     fee_mode: ((it as any).fee_mode as 'noshow' | 'storno' | 'zadny') ?? 'noshow',
-    price_includes_material: it.price_includes_material ?? true,
+    price_includes_material: it.price_includes_material ?? null,
     price_note: it.price_note,
     is_active: it.is_active,
     quote_fee: (it as any).quote_fee ?? null,
     price_per_km: (it as any).price_per_km ?? null,
     free_km: (it as any).free_km ?? null,
     quote_days: (it as any).quote_days ?? null,
+
+    // Výrobková pole — u starších řádků bezpečně spadnou na službu / null.
+    item_type: ((it as any).item_type as 'service' | 'product') ?? 'service',
+    pickup_mode: ((it as any).pickup_mode as 'pickup' | 'delivery' | 'both' | null) ?? null,
+    min_quantity_per_order: (it as any).min_quantity_per_order ?? null,
+    stock_mode: ((it as any).stock_mode as 'stock' | 'made_to_order' | 'unlimited' | null) ?? null,
+    stock_quantity: (it as any).stock_quantity ?? null,
+    max_quantity_per_order: (it as any).max_quantity_per_order ?? null,
+    production_capacity: (it as any).production_capacity ?? null,
+    lead_time_days: (it as any).lead_time_days ?? null,
+    available_days: (it as any).available_days ?? null,
   }
 }
 
@@ -91,11 +98,7 @@ function itemSummary(it: ServiceItem): string {
     parts.push('Cena dohodou')
   }
 
-  if (it.price_unit === 'hod') {
-    parts.push((it as any).hourly_started_billing === true ? 'každá započatá hodina' : 'poměrně podle času')
-  } else if (it.duration_minutes) {
-    parts.push(`${it.duration_minutes} min`)
-  }
+  if (it.duration_minutes) parts.push(`${it.duration_minutes} min`)
   const dep = (it as any).deposit_type as string | undefined
   if (it.payment_model !== 'B' && dep === 'zaloha' && it.deposit_amount) {
     parts.push(`záloha ${it.deposit_amount.toLocaleString('cs-CZ')} Kč`)
@@ -134,20 +137,13 @@ export default function PriceList({
       .filter((i) => (i as any).deposit_type !== 'bez_platby')
       .map((i) => Number(i.deposit_amount ?? 0))
       .filter((c) => c > 0)
-    if (castky.length === 0) return MIN_DEPOSIT
+    if (castky.length === 0) return 200
     const cetnost = new Map<number, number>()
     for (const c of castky) cetnost.set(c, (cetnost.get(c) ?? 0) + 1)
-    return Math.max(MIN_DEPOSIT, [...cetnost.entries()].sort((a, b) => b[1] - a[1])[0][0])
+    return [...cetnost.entries()].sort((a, b) => b[1] - a[1])[0][0]
   }
   const [vychoziZaloha, setVychoziZaloha] = useState<number>(odvozenaZaloha)
   const [upravaZalohy, setUpravaZalohy] = useState(false)
-
-  // Psát se dá cokoli, ale při potvrzení se hodnota srovná na minimum —
-  // jinak pruh hlásil „50 Kč", zatímco editor při uložení stejně dal 200.
-  const ukoncitUpravuZalohy = () => {
-    setVychoziZaloha((z) => Math.max(MIN_DEPOSIT, Math.round(z) || MIN_DEPOSIT))
-    setUpravaZalohy(false)
-  }
 
   const sorted = [...items].sort((a, b) => a.sort_order - b.sort_order)
   const itemsOf = (subId: string) => sorted.filter((i) => (i as any).subcategory_id === subId)
@@ -196,29 +192,16 @@ export default function PriceList({
     else setError(res.error)
   }
 
-  // Přesun POUZE V RÁMCI VLASTNÍ SKUPINY.
-  // sort_order je pořád globální přes celý ceník, ale UI je seskupené podle
-  // podkategorií. Prohazování v globálním pořadí proto vypadalo rozbitě: úkon
-  // se prohodil s úkonem z jiné skupiny, sort_order se změnil a na obrazovce
-  // se nestalo nic. Teď prohodíme dvojici uvnitř skupiny a promítneme ji zpět
-  // do pozic, které ta skupina v ceníku zabírá — zbytek zůstane, kde byl.
+  // Přesun v rámci CELÉHO ceníku (sort_order je globální).
   const move = async (it: ServiceItem, dir: -1 | 1) => {
     if (!serviceId) return
-    const subId = (it as any).subcategory_id ?? null
-    const patriDoSkupiny = (x: ServiceItem) => ((x as any).subcategory_id ?? null) === subId
-
-    const skupina = sorted.filter(patriDoSkupiny).map((x) => x.id)
-    const index = skupina.indexOf(it.id)
+    const index = sorted.findIndex((x) => x.id === it.id)
     const target = index + dir
-    if (index < 0 || target < 0 || target >= skupina.length) return
-    ;[skupina[index], skupina[target]] = [skupina[target], skupina[index]]
-
-    // Projdeme celý ceník a na místa téhle skupiny doplníme nové pořadí.
-    let k = 0
-    const orderedIds = sorted.map((x) => (patriDoSkupiny(x) ? skupina[k++] : x.id))
-
+    if (target < 0 || target >= sorted.length) return
+    const reordered = [...sorted]
+    ;[reordered[index], reordered[target]] = [reordered[target], reordered[index]]
     setBusy({ id: it.id, action: 'move' }); setError(null)
-    const res = await reorderServiceItems(serviceId, orderedIds)
+    const res = await reorderServiceItems(serviceId, reordered.map((r) => r.id))
     setBusy(null)
     if (res.success) onChanged?.()
     else setError(res.error)
@@ -249,35 +232,9 @@ export default function PriceList({
     )
   }
 
-  // Jeden řádek úkonu. Druhý a třetí parametr sedí na signaturu Array.map,
-  // takže se dá volat jako groupItems.map(renderItem) — díky nim víme, jestli
-  // je úkon první/poslední ve SVÉ skupině, a podle toho zašedíme šipky.
-  const renderItem = (it: ServiceItem, idx = 0, skupina: ServiceItem[] = []) => {
+  // Jeden řádek úkonu.
+  const renderItem = (it: ServiceItem) => {
     const isBusy = busy?.id === it.id
-    const prvni = idx === 0
-    const posledni = skupina.length > 0 && idx === skupina.length - 1
-
-    // Editor se otevírá PŘÍMO NA MÍSTĚ upravovaného úkonu. Dřív se vykresloval
-    // až pod celým ceníkem — na delším seznamu to bylo o dvě obrazovky níž,
-    // takže to vypadalo, že tlačítko Upravit nefunguje.
-    if (editor.kind === 'edit' && editor.item.id === it.id) {
-      return (
-        <li key={it.id} className="px-2 py-2 sm:px-3">
-          <ServiceItemEditor
-            key={it.id}
-            initial={itemToValues(it)}
-            subcategoryName={
-              subcategories.find((sub) => sub.id === (it as any).subcategory_id)?.name ?? null
-            }
-            serviceTypes={serviceTypes}
-            saving={saving}
-            onSave={handleSave}
-            onCancel={() => { setEditor({ kind: 'closed' }); setError(null) }}
-          />
-        </li>
-      )
-    }
-
     const modelBadge = it.payment_model === 'B'
       ? { text: 'nacenění', cls: 'bg-blue-50 text-blue-700' }
       : { text: 'pevná cena', cls: 'bg-emerald-50 text-emerald-700' }
@@ -285,14 +242,14 @@ export default function PriceList({
       <li key={it.id} className={`flex items-center gap-3 px-3 py-3 sm:px-4 ${!it.is_active ? 'opacity-55' : ''}`}>
         <div className="flex flex-none flex-col">
           <button
-            type="button" onClick={() => move(it, -1)} disabled={isBusy || prvni}
+            type="button" onClick={() => move(it, -1)} disabled={isBusy}
             className="rounded p-0.5 text-slate-300 hover:text-slate-600 disabled:opacity-30"
             aria-label="Posunout nahoru"
           >
             <ArrowUp className="h-3.5 w-3.5" />
           </button>
           <button
-            type="button" onClick={() => move(it, 1)} disabled={isBusy || posledni}
+            type="button" onClick={() => move(it, 1)} disabled={isBusy}
             className="rounded p-0.5 text-slate-300 hover:text-slate-600 disabled:opacity-30"
             aria-label="Posunout dolů"
           >
@@ -360,7 +317,6 @@ export default function PriceList({
           <p className="text-[13px] font-bold text-slate-800">Rezervační záloha od zákazníka</p>
           <p className="text-[11.5px] leading-relaxed text-slate-500">
             Předvyplní se u každého nového úkonu. U konkrétní služby ji pak můžete změnit nebo vypnout.
-            Nejméně {MIN_DEPOSIT} Kč.
           </p>
         </div>
 
@@ -373,14 +329,12 @@ export default function PriceList({
               autoFocus
               value={vychoziZaloha}
               onChange={(e) => setVychoziZaloha(Math.max(0, Number(e.target.value) || 0))}
-              onKeyDown={(e) => { if (e.key === 'Enter') ukoncitUpravuZalohy() }}
-              onBlur={ukoncitUpravuZalohy}
+              onKeyDown={(e) => { if (e.key === 'Enter') setUpravaZalohy(false) }}
               className="w-28 rounded-xl border-[1.5px] border-slate-200 px-3 py-1.5 text-sm outline-none focus:border-emerald-500"
             />
             <button
               type="button"
-              onMouseDown={(e: MouseEvent) => e.preventDefault()}
-              onClick={ukoncitUpravuZalohy}
+              onClick={() => setUpravaZalohy(false)}
               className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-600"
             >
               Hotovo
@@ -448,7 +402,7 @@ export default function PriceList({
                 <span className="min-w-0">
                   <span className="block text-sm font-semibold text-slate-700">Doplňte cenu</span>
                   <span className="block text-xs text-slate-400">
-                    Zákazník si tuhle službu objedná, až bude mít nastavenou cenu a způsob účtování.
+                    Zákazník si tuhle službu objedná, až bude mít cenu a délku.
                   </span>
                 </span>
               </button>
@@ -498,40 +452,6 @@ export default function PriceList({
           <ul className="divide-y divide-slate-100">
             {orphans.map(renderItem)}
           </ul>
-
-          {/* Karta bez vybraných podkategorií nemá žádnou skupinu, a tím pádem
-              ani jediné tlačítko Přidat — ceník se pak nedá rozšířit vůbec.
-              Ukazujeme jen v tomhle případě; jinam nové úkony bez zařazení
-              nepatří, ty mají vznikat ve skupině. */}
-          {subcategories.length === 0 && (
-            <>
-              <AnimatePresence>
-                {editorOpenFor(null) && editor.kind === 'new' && (
-                  <div className="border-t border-slate-100 p-3">
-                    <ServiceItemEditor
-                      key="new-nezarazene"
-                      initial={{ subcategory_id: null, name: '', deposit_amount: vychoziZaloha }}
-                      subcategoryName={null}
-                      serviceTypes={serviceTypes}
-                      saving={saving}
-                      onSave={handleSave}
-                      onCancel={() => { setEditor({ kind: 'closed' }); setError(null) }}
-                    />
-                  </div>
-                )}
-              </AnimatePresence>
-
-              {!editorOpenFor(null) && (
-                <button
-                  type="button"
-                  onClick={() => setEditor({ kind: 'new', subcategoryId: null, subcategoryName: null, prefillName: '' })}
-                  className="flex w-full items-center justify-center gap-1.5 border-t border-dashed border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-500 transition hover:bg-emerald-50/50 hover:text-emerald-700"
-                >
-                  <Plus className="h-3.5 w-3.5" /> Přidat úkon
-                </button>
-              )}
-            </>
-          )}
         </div>
       )}
 
@@ -552,6 +472,23 @@ export default function PriceList({
           </p>
         </div>
       )}
+
+      {/* Editor úpravy — mimo skupiny, ať se neplete s přidáváním */}
+      <AnimatePresence>
+        {editor.kind === 'edit' && (
+          <ServiceItemEditor
+            key={editor.item.id}
+            initial={itemToValues(editor.item)}
+            subcategoryName={
+              subcategories.find((s) => s.id === (editor.item as any).subcategory_id)?.name ?? null
+            }
+            serviceTypes={serviceTypes}
+            saving={saving}
+            onSave={handleSave}
+            onCancel={() => { setEditor({ kind: 'closed' }); setError(null) }}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Potvrzení mazání */}
       <AnimatePresence>

@@ -23,44 +23,35 @@ async function requireAdmin(): Promise<string | null> {
   return data?.is_admin === true ? user.id : null
 }
 
-export type LeadRow = {
+// Admin přehled poptávek (nový model: tabulka requests). Nahrazuje starý getLeads
+// nad tabulkou leads, která se ruší.
+export type RequestRow = {
   id: string
-  email: string
   category: string | null
   description: string
   city: string
+  email: string | null
   phone: string | null
-  preferred_date: string | null
   status: string
   created_at: string
-  photos: string[] | null
+  customer_id: string | null
 }
 
-// Načte poptávky (volitelně filtr podle stavu).
-export async function getLeads(status?: string): Promise<LeadRow[]> {
+export async function getRequests(status?: string): Promise<RequestRow[]> {
   const adminId = await requireAdmin()
   if (!adminId) return []
 
   const admin = getAdminClient()
-  let query = admin.from('leads').select('*').order('created_at', { ascending: false })
+  let query = admin
+    .from('requests')
+    .select('id, category, description, city, email, phone, status, created_at, customer_id')
+    .order('created_at', { ascending: false })
+    .limit(200)
   if (status && status !== 'vse') query = query.eq('status', status)
 
-  const { data, error } = await query as { data: LeadRow[] | null; error: any }
-  if (error) { console.error('[getLeads]', error); return [] }
+  const { data, error } = await query as { data: RequestRow[] | null; error: any }
+  if (error) { console.error('[getRequests]', error); return [] }
   return data ?? []
-}
-
-// Změní stav poptávky (nova / vyrizena).
-export async function setLeadStatus(leadId: string, status: string): Promise<{ success: boolean }> {
-  const adminId = await requireAdmin()
-  if (!adminId) return { success: false }
-
-  const admin = getAdminClient()
-  const { error } = await (admin.from('leads') as any).update({ status }).eq('id', leadId)
-  if (error) { console.error('[setLeadStatus]', error); return { success: false } }
-
-  revalidatePath('/admin/poptavky')
-  return { success: true }
 }
 
 export type AdminUserRow = {

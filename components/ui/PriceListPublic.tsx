@@ -8,10 +8,11 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Clock, Wallet, ChevronRight, Tag, Send, Truck } from 'lucide-react'
+import { Clock, Wallet, ChevronRight, Tag, Send, Truck, Package, CalendarDays } from 'lucide-react'
 import type { ServiceItem } from '@/types/database'
 import { PRICE_UNIT_LABELS } from '@/types/database'
 import OrderItemModal, { type SlotOption } from '@/components/ui/OrderItemModal'
+import { getProductAvailability } from '@/lib/actions/product-order'
 
 interface Props {
   items: ServiceItem[]
@@ -64,6 +65,20 @@ export default function PriceListPublic({
 }: Props) {
   // Který úkon má otevřený objednávkový modal.
   const [openItem, setOpenItem] = useState<ServiceItem | null>(null)
+  // Reálná dostupnost výrobku — dopočítá se ze serveru až při otevření modalu,
+  // aby čísla nebyla zastaralá (mezitím mohl někdo objednat).
+  const [available, setAvailable] = useState<number | null>(null)
+
+  const otevri = async (it: ServiceItem) => {
+    setOpenItem(it)
+    setAvailable(null)
+    if ((it as any).item_type === 'product' && ((it as any).stock_mode ?? 'stock') !== 'unlimited') {
+      try {
+        const res = await getProductAvailability(it.id)
+        setAvailable(res.available)
+      } catch { /* dostupnost je jen informativní, objednávku hlídá server */ }
+    }
+  }
 
   // Zákazníkovi ukazujeme jen zveřejněné úkony.
   const visible = items
@@ -103,6 +118,10 @@ export default function PriceListPublic({
       <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white">
         {visible.map((it) => {
           const isB = it.payment_model === 'B'
+          const jeVyrobek = (it as any).item_type === 'product'
+          const rezim = (it as any).stock_mode ?? 'stock'
+          const skladem = Number((it as any).stock_quantity ?? 0)
+          const vyprodano = jeVyrobek && rezim === 'stock' && skladem <= 0
           const deposit = (it as any).deposit_type as string | undefined
           const hourlyBilling = hourlyBillingLabel(it)
           const quoteFee = quoteFeeLabel(it)
@@ -119,14 +138,28 @@ export default function PriceListPublic({
                       <Truck className="h-3.5 w-3.5 text-slate-400" /> {quoteFee}
                     </span>
                   ) : null}
+                  {/* Výrobek: dostupnost je pro zákazníka to hlavní. */}
+                  {jeVyrobek && rezim === 'stock' ? (
+                    <span className={`inline-flex items-center gap-1 font-semibold ${vyprodano ? 'text-slate-400' : 'text-slate-600'}`}>
+                      <Package className="h-3.5 w-3.5" /> {vyprodano ? 'vyprodáno' : `skladem ${skladem} ks`}
+                    </span>
+                  ) : jeVyrobek && rezim === 'made_to_order' ? (
+                    <span className="inline-flex items-center gap-1">
+                      <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
+                      na objednávku
+                      {Number((it as any).lead_time_days ?? 0) > 0
+                        ? ` · připraví do ${(it as any).lead_time_days} ${Number((it as any).lead_time_days) === 1 ? 'dne' : 'dnů'}`
+                        : ''}
+                    </span>
+                  ) : null}
                   {/* Délka se ukazuje jen tam, kde něco znamená: u ceny za úkon je to
                       délka práce, u nacenění délka prohlídky. U ceny za m²/kus/den
                       by šlo o zbytek po přepnutí jednotky — matoucí. */}
-                  {isB && it.duration_minutes ? (
+                  {!jeVyrobek && isB && it.duration_minutes ? (
                     <span className="inline-flex items-center gap-1">
                       <Clock className="h-3.5 w-3.5 text-slate-400" /> prohlídka {it.duration_minutes} min
                     </span>
-                  ) : !isB && it.price_unit === 'ukon' && it.duration_minutes ? (
+                  ) : !jeVyrobek && !isB && it.price_unit === 'ukon' && it.duration_minutes ? (
                     <span className="inline-flex items-center gap-1">
                       <Clock className="h-3.5 w-3.5 text-slate-400" /> {it.duration_minutes} min
                     </span>
@@ -159,14 +192,20 @@ export default function PriceListPublic({
                 ) : null}
               </div>
 
-              <button
-                type="button"
-                onClick={() => setOpenItem(it)}
-                className="inline-flex flex-none items-center gap-1 rounded-xl bg-emerald-500 px-3.5 py-2 text-sm font-bold text-white transition hover:bg-emerald-600"
-              >
-                {isB ? 'Poptat' : 'Objednat'}
-                <ChevronRight className="h-4 w-4" />
-              </button>
+              {vyprodano ? (
+                <span className="inline-flex flex-none items-center rounded-xl bg-slate-100 px-3.5 py-2 text-sm font-semibold text-slate-400">
+                  Vyprodáno
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => otevri(it)}
+                  className="inline-flex flex-none items-center gap-1 rounded-xl bg-emerald-500 px-3.5 py-2 text-sm font-bold text-white transition hover:bg-emerald-600"
+                >
+                  {isB ? 'Poptat' : 'Objednat'}
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              )}
             </li>
           )
         })}
@@ -182,6 +221,7 @@ export default function PriceListPublic({
           slots={slots}
           providerGeo={providerGeo}
           providerName={providerName}
+          productAvailable={available}
           onClose={() => setOpenItem(null)}
         />
       )}

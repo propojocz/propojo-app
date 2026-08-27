@@ -1,208 +1,187 @@
 // app/poptavky/page.tsx
-// Veřejná nástěnka poptávek od zákazníků.
+// Nástěnka poptávek pro POSKYTOVATELE. Nahrazuje starý model „prodej leadů"
+// (kontakt za předplatné) modelem „Mám zájem": poskytovatel projeví zájem, vznikne
+// konverzace, kontakt zákazníka zůstává skrytý až do výběru.
 //
-// BEZPEČNOST: data načítáme na SERVERU přes admin klienta (service role).
-// Kontaktní údaje (e-mail, telefon) se do HTML vůbec nedostanou, pokud uživatel
-// nemá aktivní předplatné — nejde je tedy získat ani přes vývojářské nástroje
-// nebo přímým dotazem na API. RLS na tabulce `leads` zůstává zamčená.
+// MVP záměrně bez tvrdého matchingu: viditelné jsou VŠECHNY otevřené a nevypršelé
+// poptávky. Obor (subcategory_id/category) a město slouží jen k doporučenému
+// řazení a volitelným filtrům, ne k blokování. Dávkování a radius přijdou později.
+//
+// Data se čtou přes service-role klienta (RLS na requests/request_responses je
+// zamčená), samotné akce (Mám zájem) běží v komponentě přes expressInterest.
 
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Link from 'next/link'
-import { MapPin, Clock, Lock, Phone, Mail, Send, Megaphone, CalendarClock } from 'lucide-react'
+import { Megaphone, Lock } from 'lucide-react'
+import PoptavkyBoard, { type BoardRequest, type ProviderCard } from '@/components/ui/PoptavkyBoard'
 
-import IncomingHandoffsPanel from '@/components/ui/IncomingHandoffsPanel'
-
-export const metadata = { title: 'Poptávky zákazníků | Propojo' }
+export const metadata = { title: 'Poptávky | Propojo' }
 export const dynamic = 'force-dynamic'
-
-type Lead = {
-  id: string
-  email: string
-  phone: string | null
-  category: string | null
-  description: string
-  city: string
-  preferred_date: string | null
-  photos: string[] | null
-  created_at: string
-}
 
 function getAdminClient() {
   return createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
   )
 }
 
-function timeAgo(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime()
-  const h = Math.floor(diff / 3_600_000)
-  if (h < 1) return 'právě teď'
-  if (h < 24) return `před ${h} h`
-  const d = Math.floor(h / 24)
-  return `před ${d} ${d === 1 ? 'dnem' : 'dny'}`
-}
+const ACTIVE = new Set(['interested', 'negotiating'])
 
 export default async function PoptavkyPage() {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
+  const admin = getAdminClient()
 
-  // Má uživatel aktivní předplatné? (jen pak uvidí kontakt)
-  let canSeeContact = false
+  // Nástěnka visících poptávek je jen pro poskytovatele (= platící). Zákazník
+  // poptávky nepotřebuje procházet — zadává je a spravuje v /dashboard/poptavky.
+  let isProvider = false
   if (user) {
-    const { data: sub } = await supabase
-      .from('subscriptions')
-      .select('status')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle() as { data: { status: string } | null }
-    canSeeContact = sub?.status === 'active' || sub?.status === 'trialing'
+    const { data: profile } = await admin
+      .from('profiles').select('is_provider').eq('id', user.id).maybeSingle() as { data: { is_provider: boolean } | null }
+    isProvider = profile?.is_provider === true
+  }
+  if (!isProvider) {
+    return <PoptavkyGate isLoggedIn={!!user} />
   }
 
-  // Načtení poptávek na serveru (admin klient obchází RLS)
-  const admin = getAdminClient()
-  const { data: leads } = await admin
-    .from('leads')
-    .select('id, email, phone, category, description, city, preferred_date, photos, created_at')
-    .eq('status', 'nova')
+  // Otevřené, nevypršelé poptávky.
+  const { data: reqs } = await admin
+    .from('requests')
+    .select('id, category, subcategory_id, city, description, preferred_date, photos, created_at')
+    .eq('status', 'open')
+    .gt('expires_at', new Date().toISOString())
     .order('created_at', { ascending: false })
-    .limit(100) as { data: Lead[] | null }
+    .limit(100) as { data: Array<{
+      id: string; category: string | null; subcategory_id: string | null
+      city: string; description: string; preferred_date: string | null
+      photos: string[] | null; created_at: string
+    }> | null }
+  const requests = reqs ?? []
+  const reqIds = requests.map((r) => r.id)
 
-  const list = leads ?? []
+  // Reakce na tyhle poptávky (na počet zájemců + můj stav).
+  let responses: Array<{ id: string; request_id: string; provider_id: string; status: string }> = []
+  if (reqIds.length) {
+    const { data } = await admin
+      .from('request_responses')
+      .select('id, request_id, provider_id, status')
+      .in('request_id', reqIds) as { data: typeof responses | null }
+    responses = data ?? []
+  }
+
+  // Moje aktivní karty (pro picker u „Mám zájem" a pro řazení podle oboru/města).
+  let myCards: ProviderCard[] = []
+  const mySubcatSet = new Set<string>()
+  const myCatSet = new Set<string>()
+  const myCitySet = new Set<string>()
+  if (user) {
+    const { data: cards } = await admin
+      .from('services')
+      .select('id, title, category, subcategory_id, city')
+      .eq('provider_id', user.id)
+      .eq('is_active', true) as { data: Array<{
+        id: string; title: string | null; category: string | null
+        subcategory_id: string | null; city: string | null
+      }> | null }
+    myCards = (cards ?? []).map((c) => ({
+      id: c.id, title: c.title ?? 'Nabídka', category: c.category, subcategoryId: c.subcategory_id,
+    }))
+    for (const c of cards ?? []) {
+      if (c.subcategory_id) mySubcatSet.add(c.subcategory_id)
+      if (c.category) myCatSet.add(c.category.toLowerCase())
+      if (c.city) myCitySet.add(c.city.toLowerCase())
+    }
+    // Další podkategorie karet z propojovací tabulky.
+    if (myCards.length) {
+      const { data: ssc } = await admin
+        .from('service_subcategories')
+        .select('subcategory_id')
+        .in('service_id', myCards.map((c) => c.id)) as { data: Array<{ subcategory_id: string | null }> | null }
+      for (const r of ssc ?? []) if (r.subcategory_id) mySubcatSet.add(r.subcategory_id)
+    }
+  }
+
+  // Moje reakce → konverzace (pro „Otevřít chat").
+  const myResponseIds = user ? responses.filter((r) => r.provider_id === user.id).map((r) => r.id) : []
+  const convByResponse = new Map<string, string>()
+  if (myResponseIds.length) {
+    const { data: convs } = await admin
+      .from('conversations')
+      .select('id, request_response_id')
+      .in('request_response_id', myResponseIds) as { data: Array<{ id: string; request_response_id: string | null }> | null }
+    for (const c of convs ?? []) if (c.request_response_id) convByResponse.set(c.request_response_id, c.id)
+  }
+
+  // Sestavení karet pro nástěnku + doporučené řazení.
+  const cards: BoardRequest[] = requests.map((r) => {
+    const rs = responses.filter((x) => x.request_id === r.id)
+    const activeCount = rs.filter((x) => ACTIVE.has(x.status)).length
+    const mine = user ? rs.find((x) => x.provider_id === user.id) : undefined
+    const sameSub = r.subcategory_id ? mySubcatSet.has(r.subcategory_id) : false
+    const sameCat = r.category ? myCatSet.has(r.category.toLowerCase()) : false
+    const sameCity = r.city ? myCitySet.has(r.city.toLowerCase()) : false
+    // Řazení: 0 shoda oboru i města, 1 obor, 2 kategorie, 3 ostatní.
+    const rank = sameSub && sameCity ? 0 : sameSub ? 1 : sameCat ? 2 : 3
+    return {
+      id: r.id,
+      category: r.category,
+      subcategoryId: r.subcategory_id,
+      city: r.city,
+      description: r.description,
+      preferredDate: r.preferred_date,
+      photos: r.photos ?? [],
+      createdAt: r.created_at,
+      activeCount,
+      isFull: activeCount >= 5,
+      myStatus: mine?.status ?? null,
+      myConversationId: mine ? (convByResponse.get(mine.id) ?? null) : null,
+      rank,
+      sameCity,
+    }
+  })
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
-      {/* Hlavička */}
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-black text-slate-900">Poptávky zákazníků</h1>
-          <p className="mt-0.5 text-sm text-slate-500">
-            Lidé, kteří shánějí řemeslníka.{' '}
-            {canSeeContact ? 'Ozvěte se jim přímo.' : 'Kontakt vidí předplatitelé.'}
-          </p>
+    <PoptavkyBoard
+      cards={cards}
+      myCards={myCards}
+      isLoggedIn={!!user}
+    />
+  )
+}
+
+
+// Výzva pro neposkytovatele — nástěnka je výhoda poskytovatelského účtu.
+function PoptavkyGate({ isLoggedIn }: { isLoggedIn: boolean }) {
+  return (
+    <div className="mx-auto max-w-lg px-4 py-16 text-center sm:px-6">
+      <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50">
+          <Megaphone className="h-6 w-6 text-emerald-600" />
         </div>
-        <Link
-          href="/poptavky/nova"
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-emerald-600"
-        >
-          <Send className="h-4 w-4" /> Zanechat poptávku
-        </Link>
-      </div>
-
-      <IncomingHandoffsPanel />
-
-      {/* Výzva pro řemeslníky bez předplatného */}
-      {user && !canSeeContact && list.length > 0 && (
-        <div className="mb-5 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-          <Lock className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-          <div className="text-sm text-emerald-800">
-            <strong>Chcete se zákazníkům ozvat?</strong> Kontaktní údaje se odemknou s aktivním předplatným.{' '}
-            <Link href="/dashboard/predplatne" className="font-bold underline">
-              Aktivovat předplatné
+        <h1 className="text-xl font-black text-slate-900">Nástěnka poptávek je pro poskytovatele</h1>
+        <p className="mx-auto mt-2 max-w-sm text-sm text-slate-600">
+          Poptávky zákazníků vidí poskytovatelé s aktivním účtem. Staňte se poskytovatelem
+          a získejte přístup k nové práci ve svém okolí.
+        </p>
+        <div className="mt-6 flex flex-col gap-2">
+          {isLoggedIn ? (
+            <Link href="/dashboard/profil" className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-600">
+              Stát se poskytovatelem
             </Link>
-          </div>
-        </div>
-      )}
-
-      {list.length === 0 ? (
-        <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-white p-12 text-center">
-          <Megaphone className="mx-auto mb-3 h-10 w-10 text-slate-300" />
-          <h3 className="mb-1 text-lg font-bold text-slate-800">Zatím žádné poptávky</h3>
-          <p className="mx-auto mb-5 max-w-sm text-sm text-slate-500">
-            Sháníte řemeslníka a nikoho jste nenašli? Zanechte poptávku a nechte je ozvat se vám.
-          </p>
-          <Link href="/poptavky/nova" className="btn-primary inline-flex">
-            <Send className="h-4 w-4" /> Zanechat poptávku
+          ) : (
+            <Link href="/prihlasit?next=/poptavky" className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-600">
+              Přihlásit se
+            </Link>
+          )}
+          <Link href="/poptavky/nova" className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50">
+            Hledáte řemeslníka? Zadejte poptávku
           </Link>
         </div>
-      ) : (
-        <div className="space-y-3">
-          {list.map((lead) => (
-            <article key={lead.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-                {lead.category && (
-                  <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 font-semibold text-emerald-700">
-                    {lead.category}
-                  </span>
-                )}
-                <span className="inline-flex items-center gap-1">
-                  <MapPin className="h-3.5 w-3.5" /> {lead.city}
-                </span>
-                {lead.preferred_date && (
-                  <span className="inline-flex items-center gap-1">
-                    <CalendarClock className="h-3.5 w-3.5" /> {lead.preferred_date}
-                  </span>
-                )}
-                <span className="inline-flex items-center gap-1">
-                  <Clock className="h-3.5 w-3.5" /> {timeAgo(lead.created_at)}
-                </span>
-              </div>
-
-              <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
-                {lead.description}
-              </p>
-
-              {/* Fotky */}
-              {lead.photos && lead.photos.length > 0 && (
-                <div className="mt-3 flex gap-2 overflow-x-auto">
-                  {lead.photos.map((url, i) => (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      key={i}
-                      src={url}
-                      alt=""
-                      className="h-24 w-24 shrink-0 rounded-xl border border-slate-200 object-cover"
-                    />
-                  ))}
-                </div>
-              )}
-
-              {/* Kontakt — vykreslí se JEN předplatiteli */}
-              <div className="mt-4 border-t border-slate-100 pt-3">
-                {canSeeContact ? (
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                    <a
-                      href={`mailto:${lead.email}`}
-                      className="inline-flex items-center gap-1.5 font-medium text-emerald-700 hover:underline"
-                    >
-                      <Mail className="h-3.5 w-3.5" /> {lead.email}
-                    </a>
-                    {lead.phone && (
-                      <a
-                        href={`tel:${lead.phone}`}
-                        className="inline-flex items-center gap-1.5 font-medium text-emerald-700 hover:underline"
-                      >
-                        <Phone className="h-3.5 w-3.5" /> {lead.phone}
-                      </a>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 text-sm text-slate-400">
-                    <Lock className="h-4 w-4 shrink-0" />
-                    {user ? (
-                      <span>
-                        <Link href="/dashboard/predplatne" className="font-semibold text-emerald-700 hover:underline">
-                          Aktivujte předplatné
-                        </Link>{' '}
-                        pro zobrazení kontaktu
-                      </span>
-                    ) : (
-                      <span>
-                        <Link href="/prihlasit?next=/poptavky" className="font-semibold text-emerald-700 hover:underline">
-                          Přihlaste se
-                        </Link>{' '}
-                        jako řemeslník pro zobrazení kontaktu
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
+        <p className="mt-4 flex items-center justify-center gap-1.5 text-xs text-slate-400">
+          <Lock className="h-3.5 w-3.5" /> Kontakty zákazníků zůstávají skryté do výběru.
+        </p>
+      </div>
     </div>
   )
 }
