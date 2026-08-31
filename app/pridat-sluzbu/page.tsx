@@ -8,14 +8,18 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import ServiceForm from '@/components/forms/ServiceForm'
 import Link from 'next/link'
-import { ArrowLeft, BadgeCheck, ArrowRight, EyeOff } from 'lucide-react'
+import { ArrowLeft, BadgeCheck, ArrowRight, EyeOff, LayoutGrid, Sparkles, ChevronRight } from 'lucide-react'
 
 export const metadata = {
   title: 'Přidat novou službu | Propojo',
   description: 'Nabídněte své řemeslné či profesionální služby tisícům zákazníků.',
 }
 
-export default async function PridatSluzbuPage() {
+interface Props {
+  searchParams: { novy?: string }
+}
+
+export default async function PridatSluzbuPage({ searchParams }: Props) {
   const supabase = createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
@@ -33,6 +37,21 @@ export default async function PridatSluzbuPage() {
     .single() as { data: { is_provider: boolean } | null }
 
   const isProvider = profile?.is_provider === true
+
+  // Existující karty poskytovatele — podle nich rozhodneme, jestli se ho
+  // nejdřív zeptat "k existující, nebo nová?". Nemá-li žádnou, ptát se nemá
+  // smysl, rovnou dostane formulář jako dřív. ?novy=1 volbu přeskočí (odkaz
+  // "Vytvořit novou kartu" z volicí obrazovky).
+  let existingCards: { id: string; title: string; category: string | null; city: string | null }[] = []
+  if (isProvider) {
+    const { data: cards } = await supabase
+      .from('services')
+      .select('id, title, category, city')
+      .eq('provider_id', user.id)
+      .order('created_at', { ascending: false }) as { data: typeof existingCards | null }
+    existingCards = cards ?? []
+  }
+  const showChooser = isProvider && existingCards.length > 0 && searchParams.novy !== '1'
 
   // Má aktivní předplatné? Bez něj se nabídka po uložení nezveřejní — a poskytovatel
   // to musí vědět DŘÍV, než ji vyplní, ne až když ji nikde nenajde.
@@ -77,6 +96,77 @@ export default async function PridatSluzbuPage() {
               Předplatné 299 Kč/měsíc, první měsíc zdarma. Žádná provize z práce.
             </p>
           </div>
+        </div>
+      </main>
+    )
+  }
+
+  // ── VOLBA: k existující kartě, nebo nová? ──
+  // Jen když poskytovatel už nějakou kartu má — jinak by se ptalo zbytečně.
+  if (showChooser) {
+    return (
+      <main className="min-h-screen bg-slate-50">
+        <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
+          <Link
+            href="/dashboard"
+            className="mb-8 inline-flex items-center gap-1.5 text-sm text-slate-500 transition-colors hover:text-slate-800"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Zpět na dashboard
+          </Link>
+
+          <div className="mb-8">
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-widest text-emerald-600">
+              Přidat nabídku
+            </p>
+            <h1 className="text-3xl font-black tracking-tight text-slate-900">Kam ji přidat?</h1>
+            <p className="mt-2 max-w-xl leading-relaxed text-slate-500">
+              Novou službu nebo výrobek můžete přidat do ceníku některé z vašich karet, nebo pro ně
+              založit úplně novou kartu.
+            </p>
+          </div>
+
+          <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+            <p className="px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-400">
+              Přidat k existující kartě
+            </p>
+            <div className="space-y-1">
+              {existingCards.map((card) => (
+                <Link
+                  key={card.id}
+                  href={`/dashboard/nabidky/${card.id}/upravit`}
+                  className="flex items-center gap-3 rounded-xl px-3 py-3 transition hover:bg-emerald-50"
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+                    <LayoutGrid className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-bold text-slate-900">{card.title}</span>
+                    <span className="block truncate text-xs text-slate-400">
+                      {[card.category, card.city].filter(Boolean).join(' · ')}
+                    </span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          <Link
+            href="/pridat-sluzbu?novy=1"
+            className="flex items-center gap-3 rounded-2xl border-2 border-dashed border-emerald-200 bg-emerald-50/40 p-4 transition hover:border-emerald-300 hover:bg-emerald-50"
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+              <Sparkles className="h-4 w-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-bold text-emerald-800">Vytvořit novou kartu</span>
+              <span className="block text-xs text-emerald-700/70">
+                Pro jiný obor nebo úplně samostatnou nabídku.
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-emerald-400" />
+          </Link>
         </div>
       </main>
     )

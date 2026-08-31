@@ -15,7 +15,7 @@ import {
   Plus, Pencil, Trash2, Eye, EyeOff, ArrowUp, ArrowDown, Loader2, AlertTriangle, Tag, Sparkles,
 } from 'lucide-react'
 import type { ServiceItem } from '@/types/database'
-import { PRICE_UNIT_LABELS } from '@/types/database'
+import { formatItemPrice, packageLabel } from '@/lib/price-format'
 import {
   createServiceItem, updateServiceItem, deleteServiceItem,
   toggleServiceItemActive, reorderServiceItems, countItemOrders,
@@ -68,6 +68,13 @@ function itemToValues(it: ServiceItem): ServiceItemValues {
     free_km: (it as any).free_km ?? null,
     quote_days: (it as any).quote_days ?? null,
 
+    // Fotka položky — sdílené pole (služba i výrobek), bez tohohle by se při
+    // editaci existující položky ztratila.
+    image_url: (it as any).image_url ?? null,
+    price_unit_quantity: Number((it as any).price_unit_quantity ?? 1),
+    package_quantity: (it as any).package_quantity ?? null,
+    package_unit: (it as any).package_unit ?? null,
+
     // Výrobková pole — u starších řádků bezpečně spadnou na službu / null.
     item_type: ((it as any).item_type as 'service' | 'product') ?? 'service',
     pickup_mode: ((it as any).pickup_mode as 'pickup' | 'delivery' | 'both' | null) ?? null,
@@ -84,19 +91,10 @@ function itemToValues(it: ServiceItem): ServiceItemValues {
 // Souhrnný řádek ceny pod názvem úkonu.
 function itemSummary(it: ServiceItem): string {
   const parts: string[] = []
-  const unit = PRICE_UNIT_LABELS[(it.price_unit as keyof typeof PRICE_UNIT_LABELS)] ?? ''
 
-  if (it.payment_model === 'B') {
-    parts.push('Nacenění na místě')
-  } else if (it.price_type === 'on_agreement') {
-    parts.push('Cena dohodou')
-  } else if (it.price_type === 'range' && it.price != null && it.price_max != null) {
-    parts.push(`${it.price.toLocaleString('cs-CZ')} – ${it.price_max.toLocaleString('cs-CZ')} Kč`)
-  } else if (it.price != null && it.price > 0) {
-    parts.push(`${it.price.toLocaleString('cs-CZ')} Kč ${unit}`.trim())
-  } else {
-    parts.push('Cena dohodou')
-  }
+  parts.push(formatItemPrice(it as any))
+  const balení = packageLabel((it as any).package_quantity, (it as any).package_unit)
+  if (balení) parts.push(`balení ${balení}`)
 
   if (it.duration_minutes) parts.push(`${it.duration_minutes} min`)
   const dep = (it as any).deposit_type as string | undefined
@@ -256,6 +254,15 @@ export default function PriceList({
             <ArrowDown className="h-3.5 w-3.5" />
           </button>
         </div>
+
+        {(it as any).image_url && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={(it as any).image_url}
+            alt=""
+            className="h-10 w-10 shrink-0 rounded-lg border border-slate-200 object-cover"
+          />
+        )}
 
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-slate-900">{it.name}</p>

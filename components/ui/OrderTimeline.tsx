@@ -29,6 +29,10 @@ export default function OrderTimeline({
   isInquiry = false,
   hasTimeProposals = false,
   paymentInterrupted = false,
+  isProduct = false,
+  neededAt = null,
+  isDelivery = false,
+  quantity = 1,
 }: {
   status: string
   depositStatus: string | null
@@ -42,10 +46,16 @@ export default function OrderTimeline({
   hasTimeProposals?: boolean
   /** Zákazník se vrátil z checkoutu bez dokončení platby. */
   paymentInterrupted?: boolean
+  /** Výrobek — jiná osa než služba: neplánuje se termín, jen se vyzvedne/doručí. */
+  isProduct?: boolean
+  /** Den vyzvednutí/doručení (jen u výroby na objednávku). */
+  neededAt?: string | null
+  isDelivery?: boolean
+  quantity?: number
 }) {
   // DOTAZ: zákazník napsal z karty, nic si neobjednal. Ukazovat klasickou osu by
   // bylo zavádějící — zatím probíhá jen konverzace.
-  if (isInquiry && !scheduledAt && status === 'cekajici') {
+  if (isInquiry && !isProduct && !scheduledAt && status === 'cekajici') {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="mb-1 text-sm font-bold text-slate-900">Zatím jen dotaz</h3>
@@ -73,6 +83,78 @@ export default function OrderTimeline({
   const prijato = status === 'prijato' || status === 'v_procesu'
   const maTermin = !!scheduledAt
   const realizacePripravena = maTermin && prijato && (!hasDeposit || zaplaceno)
+
+  // ── VÝROBEK ─────────────────────────────────────────────────────
+  // Vlastní osa: výrobek se neplánuje na termín, takže kroky „Domluva termínu"
+  // a „Realizace služby" tu nedávají smysl. Platba je navíc dostupná hned,
+  // ne až „po výběru termínu".
+  if (isProduct) {
+    const prevzetiSlovo = isDelivery ? 'doručení' : 'vyzvednutí'
+    const denText = neededAt
+      ? new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long' })
+          .format(new Date(`${neededAt}T00:00:00`))
+      : null
+
+    if (zruseno) {
+      const kroky: Krok[] = [
+        { nadpis: 'Objednávka vytvořena', cas: fmt(createdAt), stav: 'hotovo' },
+        ...(zaplaceno || vraceno ? [{ nadpis: 'Platba přijata', stav: 'hotovo' as Stav }] : []),
+        { nadpis: 'Objednávka zrušena', stav: 'hotovo' },
+        ...(vraceno
+          ? [{
+              nadpis: isCustomer ? 'Peníze vráceny' : 'Platba vrácena zákazníkovi',
+              popis: isCustomer ? 'Na kartě se objeví zpravidla do několika pracovních dnů.' : null,
+              stav: 'hotovo' as Stav,
+            }]
+          : []),
+      ]
+      return <Osa kroky={kroky} tema="zruseno" />
+    }
+
+    const kroky: Krok[] = []
+    kroky.push({
+      nadpis: 'Objednávka vytvořena',
+      cas: fmt(createdAt),
+      popis: quantity > 1 ? `${quantity} ks` : null,
+      stav: 'hotovo',
+    })
+
+    if (hasDeposit) {
+      kroky.push({
+        nadpis: zaplaceno ? 'Zaplaceno' : paymentInterrupted && isCustomer ? 'Platba nebyla dokončena' : 'Čeká se na platbu',
+        popis: zaplaceno
+          ? null
+          : paymentInterrupted && isCustomer
+            ? 'Zboží pro vás zatím držíme. Platbu můžete zkusit znovu.'
+            : (isCustomer ? 'Dokončete platbu, aby se objednávka potvrdila.' : 'Čeká se, až zákazník dokončí platbu.'),
+        stav: zaplaceno ? 'hotovo' : (prijato ? 'ted' : 'ceka'),
+      })
+    }
+
+    const pripraveno = prijato && (!hasDeposit || zaplaceno)
+    kroky.push({
+      nadpis: isDelivery ? 'Příprava a doručení' : 'Příprava k vyzvednutí',
+      popis: pripraveno
+        ? (isCustomer
+            ? (denText ? `Domluvené ${prevzetiSlovo}: ${denText}.` : `Poskytovatel vás informuje, až bude zboží připravené k ${prevzetiSlovo}.`)
+            : (denText ? `Připravte na ${denText}.` : 'Připravte zboží a dejte zákazníkovi vědět.'))
+        : null,
+      stav: (cekaPotvrzeni || dokonceno) ? 'hotovo' : (pripraveno ? 'ted' : 'ceka'),
+    })
+
+    kroky.push({
+      nadpis: dokonceno ? 'Dokončeno' : 'Potvrzení a hodnocení',
+      cas: dokonceno ? fmt(completedAt) : null,
+      popis: cekaPotvrzeni
+        ? (isCustomer
+            ? 'Potvrďte, že vše proběhlo v pořádku. Když nic nenamítnete, platba se poskytovateli odešle automaticky do 2 dnů.'
+            : 'Čeká se na potvrzení zákazníka. Bez námitky se platba odešle automaticky do 2 dnů.')
+        : null,
+      stav: dokonceno ? 'hotovo' : (cekaPotvrzeni ? 'ted' : 'ceka'),
+    })
+
+    return <Osa kroky={kroky} tema={spor ? 'spor' : 'normal'} />
+  }
 
   // ── ZRUŠENO ──────────────────────────────────────────────────────
   if (zruseno) {

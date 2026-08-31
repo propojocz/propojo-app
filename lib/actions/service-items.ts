@@ -20,7 +20,7 @@ const itemSchema = z.object({
   payment_model: z.enum(['A', 'B'] as const),
   price_type: z.enum(['fixed', 'range', 'on_agreement'] as const),
   price: z.number().min(0).max(999999).nullable().optional(),
-  price_unit: z.enum(['ukon', 'hod', 'kus', 'den', 'projekt', 'm2', 'bm', 'm3', 'baleni', 'sada', 'porce', 'kg', 'sto_g', 'litr', 'metr'] as const),
+  price_unit: z.enum(['ukon', 'hod', 'kus', 'den', 'projekt', 'osoba', 'm2', 'bm', 'm3', 'baleni', 'sada', 'porce', 'g', 'kg', 'sto_g', 'ml', 'litr', 'metr'] as const),
   price_max: z.number().min(0).max(999999).nullable().optional(),
   duration_minutes: z.number().int().min(0).max(100000).nullable().optional(),
   hourly_started_billing: z.boolean().optional(),
@@ -46,6 +46,10 @@ const itemSchema = z.object({
   max_quantity_per_order: z.number().int().min(1).max(10000).nullable().optional(),
   min_quantity_per_order: z.number().int().min(1).max(10000).nullable().optional(),
   pickup_mode: z.enum(['pickup', 'delivery', 'both'] as const).nullable().optional(),
+  price_unit_quantity: z.number().int().min(1).max(100000).optional(),
+  package_quantity: z.number().min(0).max(1000000).nullable().optional(),
+  package_unit: z.enum(['kus', 'g', 'kg', 'ml', 'litr'] as const).nullable().optional(),
+  image_url: z.string().url().nullable().optional(),
   production_capacity: z.number().int().min(1).max(10000).nullable().optional(),
   lead_time_days: z.number().int().min(0).max(365).nullable().optional(),
   available_days: z.array(z.number().int().min(1).max(7)).nullable().optional(),
@@ -95,6 +99,9 @@ function normalizeItem(d: ItemParsed): ItemParsed {
   if (out.price_includes_material === undefined) out.price_includes_material = null
   if (out.is_active == null) out.is_active = true
   if (out.item_type == null) out.item_type = 'service'
+  // Množství u jednotky: "45 Kč / 100 g" = price 45, unit 'g', quantity 100.
+  if (out.price_unit_quantity == null || out.price_unit_quantity < 1) out.price_unit_quantity = 1
+  if (!out.image_url) out.image_url = null
 
   // ── VÝROBEK ──────────────────────────────────────────────
   // Výrobek se neplánuje v kalendáři a nejezdí se k němu na nacenění, takže
@@ -104,8 +111,6 @@ function normalizeItem(d: ItemParsed): ItemParsed {
     out.payment_model = 'A'
     out.duration_minutes = null
     out.hourly_started_billing = false
-    // U výrobku se údaj „materiál v ceně“ nepoužívá.
-    out.price_includes_material = null
     // Nedostavení se u výrobku neřeší — buď si ho vyzvedne, nebo ne.
     out.no_show_fee = null
     out.fee_mode = 'zadny'
@@ -165,6 +170,17 @@ function normalizeItem(d: ItemParsed): ItemParsed {
       if (strop != null && out.deposit_amount > strop) out.deposit_amount = strop
     }
 
+    // Obsah balení dává smysl jen u jednotky "za balení".
+    if (out.price_unit !== 'baleni') {
+      out.package_quantity = null
+      out.package_unit = null
+    } else if (out.package_quantity == null || out.package_quantity <= 0) {
+      out.package_quantity = null
+      out.package_unit = null
+    } else if (!out.package_unit) {
+      out.package_unit = 'kus'
+    }
+
     // Způsob převzetí. Výchozí osobní odběr.
     if (out.pickup_mode == null) out.pickup_mode = 'pickup'
 
@@ -185,6 +201,8 @@ function normalizeItem(d: ItemParsed): ItemParsed {
   out.max_quantity_per_order = null
   out.min_quantity_per_order = null
   out.pickup_mode = null
+  out.package_quantity = null
+  out.package_unit = null
   out.production_capacity = null
   out.lead_time_days = null
   out.available_days = null
@@ -334,11 +352,7 @@ export async function createServiceItem(values: ServiceItemFormValues): Promise<
     .single()
   if (error) {
     console.error('INSERT service_items error:', error)
-    const what = norm.item_type === 'product' ? 'výrobek' : 'službu'
-    const detail = process.env.NODE_ENV !== 'production' && error.message
-      ? ` (${error.message})`
-      : ''
-    return { success: false, error: `Nepodařilo se uložit ${what}.${detail}` }
+    return { success: false, error: 'Nepodařilo se uložit úkon.' }
   }
 
   refresh(norm.service_id)
@@ -366,11 +380,7 @@ export async function updateServiceItem(id: string, values: ServiceItemFormValue
     .eq('id', id)
   if (error) {
     console.error('UPDATE service_items error:', error)
-    const what = norm.item_type === 'product' ? 'výrobku' : 'služby'
-    const detail = process.env.NODE_ENV !== 'production' && error.message
-      ? ` (${error.message})`
-      : ''
-    return { success: false, error: `Nepodařilo se uložit změny ${what}.${detail}` }
+    return { success: false, error: 'Nepodařilo se uložit změny úkonu.' }
   }
 
   refresh(realServiceId)

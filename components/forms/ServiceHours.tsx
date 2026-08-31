@@ -1,6 +1,6 @@
 'use client'
 // components/forms/ServiceHours.tsx
-// Otevírací doba karty — týdenní mřížka. Z ní se generují volné termíny.
+// Běžná dostupnost karty — týdenní mřížka. Z ní se generují volné termíny.
 //
 // Víc rozsahů v jednom dni = polední pauza (9:00–12:00 a 13:00–17:00).
 // Vypnutý den = zavřeno. Prázdná celá tabulka = karta nemá otevírací dobu
@@ -218,12 +218,15 @@ export default function ServiceHours({
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-1 flex items-center gap-2">
         <Clock className="h-5 w-5 text-emerald-600" />
-        <h3 className="font-bold text-slate-900">Otevírací doba</h3>
+        <h3 className="font-bold text-slate-900">Běžná dostupnost</h3>
       </div>
       <p className="mb-4 text-sm leading-relaxed text-slate-500">
-        Z otevírací doby nabídneme zákazníkům konkrétní volné termíny podle délky úkonu.
-        Necháte-li vše zavřené, budou vám chodit poptávky bez termínu jako dosud.
-        Polední pauzu zapíšete jako dva úseky s dírou mezi nimi — tlačítko <strong>pauza</strong> rovnou nabídne dopoledne a odpoledne.
+        Nastavte dny a časy, kdy obvykle přijímáte zakázky. Podle nich nabídneme zákazníkům
+        konkrétní volné termíny — a zabraný čas se hned zablokuje, takže se vám dvě zakázky
+        nesejdou na stejnou hodinu.
+        <span className="mt-1.5 block">
+          Bez nastavené dostupnosti vás zákazníci mohou oslovit kdykoli a termín si domluvíte ručně v chatu.
+        </span>
       </p>
 
       <div className="divide-y divide-slate-100">
@@ -283,6 +286,7 @@ export default function ServiceHours({
                     <button
                       type="button"
                       onClick={() => addRange(n)}
+                      title="Polední pauza = dva úseky s dírou mezi nimi (např. 9:00–12:00 a 13:00–17:00)"
                       className="inline-flex min-h-[40px] items-center gap-1 rounded-xl border border-dashed border-slate-300 px-3 py-2 text-xs font-semibold text-emerald-600 hover:border-emerald-300 hover:bg-emerald-50"
                     >
                       <Plus className="h-3.5 w-3.5" /> pauza
@@ -381,10 +385,14 @@ export default function ServiceHours({
         >
           {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Ukládám…</>
             : saved ? <><Check className="h-4 w-4" /> Uloženo</>
-            : 'Uložit otevírací dobu'}
+            : 'Uložit dostupnost'}
         </button>
         <span className="text-xs text-slate-400">
-          {totalRanges === 0 ? 'Zavřeno celý týden — chodí poptávky bez termínu.' : `Otevřeno v ${DAYS.filter((d) => week[d.n].length > 0).length} dnech v týdnu.`}
+          {totalRanges === 0
+            ? 'Dostupnost není nastavena — termín domluvíte se zákazníkem ručně.'
+            : `Dostupnost nastavena pro ${DAYS.filter((d) => week[d.n].length > 0).length} ${
+                DAYS.filter((d) => week[d.n].length > 0).length === 1 ? 'den' : DAYS.filter((d) => week[d.n].length > 0).length < 5 ? 'dny' : 'dnů'
+              } v týdnu.`}
         </span>
       </div>
     </div>

@@ -27,8 +27,9 @@ import { reserveSlotForItem } from '@/lib/actions/slots'
 import { orderProduct } from '@/lib/actions/product-order'
 import { createClient } from '@/lib/supabase/client'
 import type { ServiceItem, PriceUnit } from '@/types/database'
-import { PRICE_UNIT_LABELS } from '@/types/database'
+import { formatItemPrice, packageLabel } from '@/lib/price-format'
 import SearchAutocomplete from '@/components/ui/SearchAutocomplete'
+import { getItemPaymentDisplay } from '@/lib/item-payment-display'
 
 export type SlotOption = {
   id: string
@@ -111,8 +112,6 @@ export default function OrderItemModal({
   productAvailable = null, onClose,
 }: Props) {
   const router = useRouter()
-  const itemAny = item as any
-  const initialMinQuantity = Math.max(1, Number(itemAny.min_quantity_per_order ?? 1))
   const [state, setState] = useState<'form' | 'loading' | 'success' | 'error'>('form')
   const [message, setMessage] = useState('')
   const [city, setCity] = useState('')
@@ -126,14 +125,20 @@ export default function OrderItemModal({
   // časy, které mezitím přešly do minulosti, samy zmizely bez obnovy stránky.
   const [timeTick, setTimeTick] = useState(0)
   // ── Výrobek: počet kusů a den dodání ──
-  const [pocet, setPocet] = useState(initialMinQuantity)
+  const [pocet, setPocet] = useState(() => Math.max(1, Number((item as any).min_quantity_per_order ?? 1)))
   const [denDodani, setDenDodani] = useState('')
 
   const isModelB = item.payment_model === 'B'
-  const atCustomer = locationType !== 'u_poskytovatele'
+  const itemAny = item as any
+  const isProductItem = itemAny.item_type === 'product'
+  const pickupMode = (itemAny.pickup_mode as 'pickup' | 'delivery' | 'both' | null) ?? 'pickup'
+  const [productHandover, setProductHandover] = useState<'pickup' | 'delivery'>(() =>
+    pickupMode === 'delivery' ? 'delivery' : 'pickup'
+  )
+  const productDelivery = isProductItem && (pickupMode === 'delivery' || (pickupMode === 'both' && productHandover === 'delivery'))
+  const atCustomer = isProductItem ? productDelivery : locationType !== 'u_poskytovatele'
   const needsCity = atCustomer
 
-  const unit = PRICE_UNIT_LABELS[(item.price_unit as keyof typeof PRICE_UNIT_LABELS)] ?? ''
   const isHourly = !isModelB && item.price_unit === 'hod'
   const hourlyStartedBilling = isHourly && (item as any).hourly_started_billing === true
   const hourlyBillingText = isHourly
@@ -143,7 +148,7 @@ export default function OrderItemModal({
     : null
   const showDuration = UNITS_WITH_DURATION.includes(item.price_unit as PriceUnit) || isModelB
   const dur = showDuration ? formatDuration(item.duration_minutes) : null
-  const depositType = ((item as any).deposit_type as 'zaloha' | 'plna_platba' | undefined) ?? 'zaloha'
+  const depositType = ((item as any).deposit_type as 'zaloha' | 'plna_platba' | 'bez_platby' | undefined) ?? 'zaloha'
   const noShowFee = (item as any).no_show_fee != null ? Number((item as any).no_show_fee) : 0
   const feeMode = ((item as any).fee_mode as 'noshow' | 'storno' | 'zadny' | undefined) ?? 'noshow'
   const hasFixedPrice = !isModelB && item.price_type !== 'on_agreement' && item.price != null && Number(item.price) > 0
@@ -223,35 +228,29 @@ export default function OrderItemModal({
     return () => { cancelled = true }
   }, [])
 
-  let priceText: string
-  if (isModelB) priceText = 'Nacenění na místě'
-  else if (item.price_type === 'on_agreement') priceText = 'Cena dohodou'
-  else if (item.price_type === 'range' && item.price != null && item.price_max != null)
-    priceText = `${item.price.toLocaleString('cs-CZ')} – ${item.price_max.toLocaleString('cs-CZ')} Kč`
-  else if (item.price != null && item.price > 0)
-    priceText = `${item.price.toLocaleString('cs-CZ')} Kč ${unit}`.trim()
-  else priceText = 'Cena dohodou'
+  // Cenu skládá sdílená funkce, ať modal ukazuje totéž co ceník.
+  const priceText = formatItemPrice(item as any)
 
   const fmtTime = (iso: string) =>
     new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
 
   // ── VÝROBEK ────────────────────────────────────────────────
   const it = itemAny
-  const minKusu = Math.max(1, Number(it.min_quantity_per_order ?? 1))
-  const jeVyrobek = it.item_type === 'product'
+  const jeVyrobek = isProductItem
   const rezim: string = it.stock_mode ?? 'stock'
   const naObjednavku = jeVyrobek && rezim === 'made_to_order'
   const cenaZaKus = Number(it.price ?? 0)
+  const minKusu = jeVyrobek ? Math.max(1, Number(it.min_quantity_per_order ?? 1)) : 1
   const maxKusu = (() => {
     if (!jeVyrobek) return 1
     const limity: number[] = []
     if (it.max_quantity_per_order != null) limity.push(Number(it.max_quantity_per_order))
     if (rezim === 'stock' && productAvailable != null) limity.push(productAvailable)
     if (rezim === 'made_to_order' && it.production_capacity != null) limity.push(Number(it.production_capacity))
-    return limity.length ? Math.max(1, Math.min(...limity)) : 99
+    return limity.length ? Math.max(0, Math.min(...limity)) : 99
   })()
-  const vyprodano = jeVyrobek && rezim === 'stock' && productAvailable != null && productAvailable <= 0
   const minimumNeniDostupne = jeVyrobek && maxKusu < minKusu
+  const vyprodano = jeVyrobek && rezim === 'stock' && productAvailable != null && productAvailable <= 0
 
   // Nejbližší možný den dodání = dnes + předstih.
   const minDen = (() => {
@@ -272,18 +271,30 @@ export default function OrderItemModal({
   })()
 
   const celkovaCena = cenaZaKus > 0 ? cenaZaKus * pocet : null
+  const paymentDisplay = getItemPaymentDisplay(item as any, jeVyrobek ? pocet : 1)
+
+  // Kolik se platí TEĎ a kolik při převzetí — záloha se počítá za kus, takže
+  // roste s množstvím stejně jako to dělá orderProduct na serveru.
+  const productDueNow = jeVyrobek && celkovaCena != null
+    ? depositType === 'plna_platba'
+      ? celkovaCena
+      : depositType === 'zaloha'
+        ? Math.min(celkovaCena, Number((item as any).deposit_amount ?? 0) * pocet)
+        : 0
+    : 0
+  const productDueAtPickup = jeVyrobek && celkovaCena != null ? Math.max(0, celkovaCena - productDueNow) : 0
 
   const handleSubmit = async () => {
     // ── Výrobek má vlastní cestu (množství, sklad, den dodání) ──
     if (jeVyrobek) {
+      if (needsCity && !city.trim()) {
+        setState('error'); setErrorMsg('Zadejte prosím město nebo obec pro doručení.'); return
+      }
       if (pocet < minKusu) {
         setState('error'); setErrorMsg(`Minimální množství je ${minKusu} ks.`); return
       }
       if (pocet > maxKusu) {
-        setState('error'); setErrorMsg(`Maximálně lze objednat ${maxKusu} ks.`); return
-      }
-      if (minimumNeniDostupne) {
-        setState('error'); setErrorMsg(`Aktuálně není dostupné minimální množství ${minKusu} ks.`); return
+        setState('error'); setErrorMsg('Zvolené množství už není dostupné.'); return
       }
       if (naObjednavku && !denDodani) {
         setState('error'); setErrorMsg('Vyberte den, kdy výrobek potřebujete.'); return
@@ -385,7 +396,7 @@ export default function OrderItemModal({
           <div className="mb-4 flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-wider text-emerald-600">
-                {isModelB ? 'Poptávka nacenění' : skipSlot ? 'Domluva termínu' : hasSlots ? 'Rezervace termínu' : 'Objednávka úkonu'}
+                {jeVyrobek ? 'Objednávka výrobku' : isModelB ? 'Poptávka nacenění' : skipSlot ? 'Domluva termínu' : hasSlots ? 'Rezervace termínu' : 'Objednávka služby'}
               </p>
               <h3 className="mt-0.5 truncate text-lg font-black text-slate-900">{item.name}</h3>
             </div>
@@ -408,7 +419,7 @@ export default function OrderItemModal({
                   <p className="text-lg font-black text-emerald-800">
                     {bookedIso
                       ? (goingToPay ? 'Termín pro vás držíme' : 'Termín je váš! 🎉')
-                      : skipSlot ? 'Objednávka odeslána' : 'Objednávka odeslána'}
+                      : jeVyrobek ? 'Objednávka vytvořena' : 'Objednávka odeslána'}
                   </p>
                   {bookedIso ? (
                     <>
@@ -430,11 +441,13 @@ export default function OrderItemModal({
                     </>
                   ) : (
                     <p className="text-xs leading-relaxed text-emerald-700">
-                      {skipSlot
-                        ? 'Teď se můžete s poskytovatelem domluvit v chatu. Až navrhne konkrétní časy, vyberete si jeden.'
-                        : isModelB
-                          ? 'Živnostník se vám ozve a domluvíte se na termínu prohlídky.'
-                          : 'Živnostník ji potvrdí a ozve se vám.'}
+                      {jeVyrobek
+                        ? 'Přesměrovávám na detail objednávky, kde dokončíte případnou platbu.'
+                        : skipSlot
+                          ? 'Teď se můžete s poskytovatelem domluvit v chatu. Až navrhne konkrétní časy, vyberete si jeden.'
+                          : isModelB
+                            ? 'Poskytovatel se vám ozve a domluvíte se na termínu prohlídky.'
+                            : 'Poskytovatel ji potvrdí a ozve se vám.'}
                     </p>
                   )}
                   {!bookedIso && (
@@ -471,7 +484,7 @@ export default function OrderItemModal({
                 {hourlyBillingText && (
                   <p className="mt-1 text-[11.5px] leading-relaxed text-slate-500">{hourlyBillingText}</p>
                 )}
-                {deposit > 0 && (
+                {!jeVyrobek && deposit > 0 && (
                   <div className="mt-2 space-y-1 border-t border-slate-200 pt-2 text-xs">
                     <div className="flex items-center justify-between">
                       <span className="flex items-center gap-1.5 font-semibold text-slate-700">
@@ -508,6 +521,40 @@ export default function OrderItemModal({
                           : hasFixedPrice
                             ? 'Záloha se započítá do konečné ceny — na místě doplatíte jen rozdíl.'
                             : 'Záloha se započítá do konečné ceny. Zbytek doplatíte na místě podle skutečného rozsahu.'}
+                    </p>
+                  </div>
+                )}
+
+                {/* ── VÝROBEK: klasický přehled — počet, celkem, teď/při převzetí ── */}
+                {jeVyrobek && celkovaCena != null && !vyprodano && !minimumNeniDostupne && (
+                  <div className="mt-2 space-y-1 border-t border-slate-200 pt-2 text-xs">
+                    <div className="flex items-center justify-between text-slate-600">
+                      <span className="truncate pr-2">{pocet} × {item.name}</span>
+                      <span className="shrink-0 font-semibold text-slate-900">{celkovaCena.toLocaleString('cs-CZ')} Kč</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-1.5 font-semibold text-slate-700">
+                        <Wallet className="h-3.5 w-3.5 text-emerald-600" />
+                        {depositType === 'bez_platby'
+                          ? 'Platba při převzetí'
+                          : depositType === 'plna_platba'
+                            ? 'Zaplatíte teď (celá cena)'
+                            : 'Zaplatíte teď (záloha)'}
+                      </span>
+                      <strong className="text-emerald-700">{productDueNow.toLocaleString('cs-CZ')} Kč</strong>
+                    </div>
+                    {productDueAtPickup > 0 && (
+                      <div className="flex items-center justify-between text-slate-500">
+                        <span>{productDelivery ? 'Doplatíte při doručení' : 'Doplatíte při převzetí'}</span>
+                        <span>{productDueAtPickup.toLocaleString('cs-CZ')} Kč</span>
+                      </div>
+                    )}
+                    <p className="pt-0.5 text-[11px] leading-relaxed text-slate-400">
+                      {depositType === 'bez_platby'
+                        ? `Neplatíte nic předem — celou částku uhradíte při ${productDelivery ? 'doručení' : 'převzetí'}.`
+                        : depositType === 'plna_platba'
+                          ? `Platíte celou cenu předem — při ${productDelivery ? 'doručení' : 'převzetí'} už nic nedoplácíte.`
+                          : `Záloha se započítá do konečné ceny — zbytek doplatíte při ${productDelivery ? 'doručení' : 'převzetí'}.`}
                     </p>
                   </div>
                 )}
@@ -564,15 +611,10 @@ export default function OrderItemModal({
               {/* ── VÝROBEK: počet kusů a den dodání ── */}
               {jeVyrobek && (
                 <div className="space-y-4">
-                  {vyprodano ? (
+                  {vyprodano || minimumNeniDostupne ? (
                     <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                      <span>Tento výrobek je právě vyprodaný. Zkuste to prosím později.</span>
-                    </div>
-                  ) : minimumNeniDostupne ? (
-                    <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                      <span>Aktuálně není dostupné minimální množství {minKusu} ks.</span>
+                      <span>{minimumNeniDostupne ? `Aktuálně není dostupné minimální objednatelné množství ${minKusu} ks.` : 'Tento výrobek je právě vyprodaný. Zkuste to prosím později.'}</span>
                     </div>
                   ) : (
                     <>
@@ -608,14 +650,20 @@ export default function OrderItemModal({
                         </div>
                         <p className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-slate-400">
                           <Package className="h-3.5 w-3.5" />
-                          {minKusu > 1 ? `Min. ${minKusu} ks · ` : ''}
                           {rezim === 'stock' && productAvailable != null
                             ? `Skladem ${productAvailable} ks`
                             : rezim === 'made_to_order'
                               ? `Vyrábí se na objednávku${it.production_capacity ? ` · ${it.production_capacity} ks denně` : ''}`
                               : 'K dispozici'}
+                          {minKusu > 1 ? ` · min. ${minKusu} ks` : ''}
                           {maxKusu < 99 ? ` · max. ${maxKusu} ks na objednávku` : ''}
                         </p>
+                        {paymentDisplay.detail ? (
+                          <div className="mt-2 flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
+                            <Wallet className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                            {paymentDisplay.detail}
+                          </div>
+                        ) : null}
                       </div>
 
                       {naObjednavku && (
@@ -641,8 +689,43 @@ export default function OrderItemModal({
                                 : 'Vyberte den vyzvednutí nebo doručení.'}
                             </p>
                           )}
+                          {/* Storno pravidlo — zákazník ho musí znát PŘED objednáním,
+                              ne až ve chvíli, kdy chce zrušit. */}
+                          {Number(it.lead_time_days ?? 0) > 0 && depositType !== 'bez_platby' && (
+                            <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500">
+                              Zrušíte-li aspoň {it.lead_time_days} {Number(it.lead_time_days) === 1 ? 'den' : Number(it.lead_time_days) < 5 ? 'dny' : 'dní'} předem, vrátíme vše.
+                              Blíž k termínu se vrací méně — od poloviny předstihu polovina, těsně před termínem nic.
+                            </p>
+                          )}
                         </div>
                       )}
+
+                      <div>
+                        <label className="mb-2 block text-xs font-semibold text-slate-600">Převzetí</label>
+                        {pickupMode === 'both' ? (
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => { setProductHandover('pickup'); setErrorMsg('') }}
+                              className={`rounded-xl border p-3 text-left transition ${productHandover === 'pickup' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-emerald-300'}`}
+                            >
+                              <span className="flex items-center gap-1.5 text-sm font-bold text-slate-900"><Store className="h-4 w-4 text-emerald-600" /> Osobní odběr</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setProductHandover('delivery'); setErrorMsg('') }}
+                              className={`rounded-xl border p-3 text-left transition ${productHandover === 'delivery' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-emerald-300'}`}
+                            >
+                              <span className="flex items-center gap-1.5 text-sm font-bold text-slate-900"><Truck className="h-4 w-4 text-emerald-600" /> Doručení</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-xs font-semibold text-slate-600">
+                            {pickupMode === 'delivery' ? <Truck className="h-4 w-4 text-emerald-600" /> : <Store className="h-4 w-4 text-emerald-600" />}
+                            {pickupMode === 'delivery' ? 'Doručení' : 'Osobní odběr'}
+                          </div>
+                        )}
+                      </div>
                     </>
                   )}
                 </div>
@@ -796,12 +879,14 @@ export default function OrderItemModal({
                 <div className="flex items-start gap-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
                   <Store className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
                   <span>
-                    Přijdete za živnostníkem — adresu najdete na jeho kartě{hasSlots ? ' a v potvrzení termínu' : ' a v potvrzení objednávky'}.
+                    {jeVyrobek
+                      ? 'Výrobek si vyzvednete u poskytovatele — adresu najdete na jeho kartě a v potvrzení objednávky.'
+                      : <>Přijdete za poskytovatelem — adresu najdete na jeho kartě{hasSlots ? ' a v potvrzení termínu' : ' a v potvrzení objednávky'}.</>}
                   </span>
                 </div>
               )}
 
-              {!isModelB && !hasSlots && (
+              {!jeVyrobek && !isModelB && !hasSlots && (
                 <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
                   <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
                   <p className="text-xs leading-relaxed text-emerald-800">
@@ -815,7 +900,7 @@ export default function OrderItemModal({
               <textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                placeholder={isModelB ? 'Popište práci, kterou potřebujete nacenit…' : (skipSlot || !hasSlots) ? 'Napište, kdy se vám to hodí — např. „ideálně odpoledne příští týden"…' : 'Zpráva pro živnostníka (volitelné)…'}
+                placeholder={jeVyrobek ? 'Poznámka k objednávce (volitelné)…' : isModelB ? 'Popište práci, kterou potřebujete nacenit…' : (skipSlot || !hasSlots) ? 'Napište, kdy se vám to hodí — např. „ideálně odpoledne příští týden"…' : 'Zpráva pro živnostníka (volitelné)…'}
                 rows={3}
                 className="form-input resize-none text-sm"
                 maxLength={500}
@@ -829,12 +914,17 @@ export default function OrderItemModal({
                 className="btn-primary w-full py-3 text-base disabled:opacity-60"
               >
                 {state === 'loading'
-                  ? <><Loader2 className="h-4 w-4 animate-spin" /> {hasSlots && selected && !skipSlot ? 'Rezervuji…' : 'Odesílám…'}</>
-                  : hasSlots && !skipSlot
-                    ? (deposit > 0
-                        ? <><Wallet className="h-4 w-4" /> {selected ? `Rezervovat ${fmtTime(selected.startIso)} a zaplatit` : 'Rezervovat a zaplatit'}</>
-                        : <><CalendarDays className="h-4 w-4" /> {selected ? `Rezervovat ${fmtTime(selected.startIso)}` : 'Rezervovat termín'}</>)
-                    : isModelB ? 'Odeslat poptávku' : skipSlot ? 'Odeslat objednávku bez termínu' : 'Odeslat objednávku'}
+                  ? <><Loader2 className="h-4 w-4 animate-spin" /> {jeVyrobek ? 'Vytvářím objednávku…' : hasSlots && selected && !skipSlot ? 'Rezervuji…' : 'Odesílám…'}</>
+                  : jeVyrobek
+                    ? <span className="flex flex-col items-center leading-tight">
+                        <span className="inline-flex items-center gap-1.5"><Package className="h-4 w-4" /> Objednat {pocet} ks</span>
+                        {paymentDisplay.detail ? <span className="mt-0.5 text-[11px] font-medium opacity-90">{paymentDisplay.detail}</span> : null}
+                      </span>
+                    : hasSlots && !skipSlot
+                      ? (deposit > 0
+                          ? <><Wallet className="h-4 w-4" /> {selected ? `Rezervovat ${fmtTime(selected.startIso)} a zaplatit` : 'Rezervovat a zaplatit'}</>
+                          : <><CalendarDays className="h-4 w-4" /> {selected ? `Rezervovat ${fmtTime(selected.startIso)}` : 'Rezervovat termín'}</>)
+                      : isModelB ? 'Odeslat poptávku' : skipSlot ? 'Odeslat objednávku bez termínu' : 'Odeslat objednávku'}
               </button>
 
               <p className="text-center text-[11px] leading-relaxed text-slate-400">

@@ -19,7 +19,9 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Loader2, X, Truck, Tag, ChevronDown, AlertTriangle, Package, Store, PackageCheck } from 'lucide-react'
+import ItemImageUpload from '@/components/ui/ItemImageUpload'
 import { PRICE_UNIT_LABELS } from '@/types/database'
+import { unitShort, formatItemPrice } from '@/lib/price-format'
 import InfoTip from '@/components/ui/InfoTip'
 import type { PaymentModel, PriceType, PriceUnit } from '@/types/database'
 
@@ -64,6 +66,10 @@ export interface ServiceItemValues {
   item_type: 'service' | 'product'
   pickup_mode: 'pickup' | 'delivery' | 'both' | null
   min_quantity_per_order: number | null
+  price_unit_quantity: number
+  package_quantity: number | null
+  package_unit: string | null
+  image_url: string | null
   stock_mode: 'stock' | 'made_to_order' | 'unlimited' | null
   stock_quantity: number | null
   max_quantity_per_order: number | null
@@ -82,10 +88,36 @@ interface Props {
   onCancel: () => void
 }
 
-// Jednotky se liší podle typu položky. Výrobek nesmí nabízet čas/úkon/projekt;
-// rozměrové jednotky (m²/bm/m³) jsou legitimní u obojího.
-const UNITS_SERVICE: PriceUnit[] = ['ukon', 'hod', 'projekt', 'm2', 'bm', 'den']
-const UNITS_PRODUCT: PriceUnit[] = ['kus', 'baleni', 'sada', 'porce', 'kg', 'sto_g', 'litr', 'metr', 'm2', 'bm', 'm3']
+// Jednotky se liší podle typu položky. U VÝROBKU se ptáme dvoukrokově:
+// nejdřív "jak se prodává", teprve pak konkrétní jednotka — cukrář tak nikdy
+// neuvidí m³ vedle kg, ale truhlář si rozměrový prodej vybere a najde ho.
+const UNITS_SERVICE: PriceUnit[] = ['ukon', 'hod', 'den', 'projekt', 'osoba', 'kus', 'm2', 'bm', 'm3']
+
+type ProdejMode = 'kus' | 'baleni' | 'sada' | 'porce' | 'hmotnost' | 'objem' | 'rozmer'
+
+const PRODEJ: { id: ProdejMode; popis: string; units: PriceUnit[] }[] = [
+  { id: 'kus',       popis: 'za kus',       units: ['kus'] },
+  { id: 'baleni',    popis: 'za balení',    units: ['baleni'] },
+  { id: 'sada',      popis: 'za sadu',      units: ['sada'] },
+  { id: 'porce',     popis: 'za porci',     units: ['porce'] },
+  { id: 'hmotnost',  popis: 'podle váhy',   units: ['g', 'kg'] },
+  { id: 'objem',     popis: 'podle objemu', units: ['ml', 'litr'] },
+  { id: 'rozmer',    popis: 'podle rozměru', units: ['metr', 'm2', 'bm', 'm3'] },
+]
+
+// Z uložené jednotky zpětně odvodí, který způsob prodeje byl vybraný.
+function prodejZJednotky(unit: string): ProdejMode {
+  const found = PRODEJ.find(p => (p.units as string[]).includes(unit))
+  return found?.id ?? 'kus'
+}
+
+const PACKAGE_UNITS: { id: string; popis: string }[] = [
+  { id: 'kus', popis: 'ks' },
+  { id: 'g', popis: 'g' },
+  { id: 'kg', popis: 'kg' },
+  { id: 'ml', popis: 'ml' },
+  { id: 'litr', popis: 'l' },
+]
 
 const EMPTY: ServiceItemValues = {
   service_type_id: null,
@@ -112,6 +144,10 @@ const EMPTY: ServiceItemValues = {
   item_type: 'service',
   pickup_mode: null,
   min_quantity_per_order: null,
+  price_unit_quantity: 1,
+  package_quantity: null,
+  package_unit: null,
+  image_url: null,
   stock_mode: null,
   stock_quantity: null,
   max_quantity_per_order: null,
@@ -168,6 +204,20 @@ export default function ServiceItemEditor({
   const jeNaceneni = zpusob === 'naceneni'
   const jePevna = zpusob === 'pevna'
   const jeVyrobek = v.item_type === 'product'
+  // Dvoukrokový výběr u výrobku: způsob prodeje → jednotky, které k němu patří.
+  const prodejMode = prodejZJednotky(v.price_unit)
+  const aktualniJednotky: PriceUnit[] = jeVyrobek
+    ? (PRODEJ.find(p => p.id === prodejMode)?.units ?? ['kus'])
+    : UNITS_SERVICE
+  // Živý náhled, ať poskytovatel hned vidí, co uvidí zákazník.
+  const nahledCeny = formatItemPrice({
+    price: v.price,
+    price_max: v.price_max,
+    price_type: v.price_type,
+    price_unit: v.price_unit,
+    price_unit_quantity: v.price_unit_quantity,
+    payment_model: v.payment_model,
+  })
   const jeHodinova = !jeVyrobek && !jeNaceneni && v.price_unit === 'hod'
 
   // „Celou cenu předem" jen tam, kde známe konečnou cenu už při rezervaci.
@@ -230,6 +280,9 @@ export default function ServiceItemEditor({
       // U hodinové sazby není předem známá konečná cena, takže celou platbu předem nepovolíme.
       deposit_type: unit === 'hod' && prev.deposit_type === 'plna_platba' ? 'zaloha' : prev.deposit_type,
       hourly_started_billing: unit === 'hod' ? prev.hourly_started_billing : false,
+      // Obsah balení patří jen k jednotce „za balení".
+      package_quantity: unit === 'baleni' ? prev.package_quantity : null,
+      package_unit: unit === 'baleni' ? (prev.package_unit ?? 'kus') : null,
     }))
   }
 
@@ -296,6 +349,15 @@ export default function ServiceItemEditor({
         out.available_days = null
       }
 
+      // Obsah balení dává smysl jen u jednotky „za balení".
+      if (out.price_unit !== 'baleni' || out.package_quantity == null || out.package_quantity <= 0) {
+        out.package_quantity = null
+        out.package_unit = null
+      } else if (!out.package_unit) {
+        out.package_unit = 'kus'
+      }
+      if (out.price_unit_quantity == null || out.price_unit_quantity < 1) out.price_unit_quantity = 1
+
       // Způsob převzetí — výchozí osobní odběr.
       if (out.pickup_mode == null) out.pickup_mode = 'pickup'
 
@@ -323,6 +385,9 @@ export default function ServiceItemEditor({
     out.max_quantity_per_order = null
     out.min_quantity_per_order = null
     out.pickup_mode = null
+    out.package_quantity = null
+    out.package_unit = null
+    if (out.price_unit_quantity == null || out.price_unit_quantity < 1) out.price_unit_quantity = 1
     out.production_capacity = null
     out.lead_time_days = null
     out.available_days = null
@@ -543,6 +608,17 @@ export default function ServiceItemEditor({
           </p>
         </div>
 
+        {/* ── FOTKA POLOŽKY (nepovinné, sdílené) ──
+            Jedna fotka přímo u téhle konkrétní nabídky — hlavně u výrobku dává
+            smysl (zákazník vidí konkrétní dort, ne obecnou galerii karty), ale
+            klidně ji přidá i poskytovatel služby. */}
+        <div>
+          <label className="mb-1.5 block text-[13px] font-bold text-slate-800">
+            Fotka {jeVyrobek ? 'výrobku' : 'položky'} <span className="font-normal text-slate-400">(nepovinné)</span>
+          </label>
+          <ItemImageUpload value={v.image_url} onChange={(url) => set('image_url', url)} />
+        </div>
+
         {/* ── 2. KOLIK TO STOJÍ ── */}
         <div>
           <label className="mb-1.5 block text-[13px] font-bold text-slate-800">Kolik to stojí?</label>
@@ -565,19 +641,97 @@ export default function ServiceItemEditor({
 
           {/* Pevná cena */}
           {jePevna && (
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Cena (Kč)</label>
-                <input type="number" min={0} value={v.price ?? ''} onChange={e => set('price', numOrNull(e.target.value))}
-                  className="w-full rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 outline-none focus:border-emerald-500" />
+            <div className="mt-3 space-y-3">
+              {/* VÝROBEK: nejdřív "jak se prodává", teprve pak konkrétní jednotka. */}
+              {jeVyrobek && (
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-600">Jak se výrobek prodává?</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PRODEJ.map(pm => (
+                      <button
+                        key={pm.id}
+                        type="button"
+                        onClick={() => prepniJednotku(pm.units[0])}
+                        className={`rounded-lg border-[1.5px] px-2.5 py-1.5 text-[12.5px] font-bold transition ${
+                          prodejMode === pm.id
+                            ? 'border-emerald-500 bg-emerald-50 text-emerald-800'
+                            : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300'
+                        }`}
+                      >
+                        {pm.popis}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Cena (Kč)</label>
+                  <input type="number" min={0} value={v.price ?? ''} onChange={e => set('price', numOrNull(e.target.value))}
+                    className="w-full rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 outline-none focus:border-emerald-500" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Cena je za</label>
+                  {/* U výrobku nabízíme jen jednotky zvoleného způsobu prodeje;
+                      když má způsob jen jednu (za kus), select se nezobrazuje. */}
+                  {jeVyrobek && aktualniJednotky.length <= 1 ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number" min={1}
+                        value={v.price_unit_quantity}
+                        onChange={e => set('price_unit_quantity', Math.max(1, Number(e.target.value) || 1))}
+                        className="w-20 rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                      />
+                      <span className="text-sm font-semibold text-slate-700">{unitShort(v.price_unit)}</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number" min={1}
+                        value={v.price_unit_quantity}
+                        onChange={e => set('price_unit_quantity', Math.max(1, Number(e.target.value) || 1))}
+                        className="w-20 rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                      />
+                      <select value={v.price_unit} onChange={e => prepniJednotku(e.target.value as PriceUnit)}
+                        className="min-w-0 flex-1 rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 outline-none focus:border-emerald-500">
+                        {aktualniJednotky.map(u => <option key={u} value={u}>{unitShort(u)}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Zákazník uvidí: <strong className="text-slate-500">{nahledCeny}</strong>
+                  </p>
+                </div>
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Cena je za</label>
-                <select value={v.price_unit} onChange={e => prepniJednotku(e.target.value as PriceUnit)}
-                  className="w-full rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 outline-none focus:border-emerald-500">
-                  {(jeVyrobek ? UNITS_PRODUCT : UNITS_SERVICE).map(u => <option key={u} value={u}>{PRICE_UNIT_LABELS[u] ?? u}</option>)}
-                </select>
-              </div>
+
+              {/* Co obsahuje balení — jen u prodeje "za balení". */}
+              {jeVyrobek && v.price_unit === 'baleni' && (
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">
+                    Co balení obsahuje? <span className="font-normal text-slate-400">(nepovinné)</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number" min={0} step="any"
+                      value={v.package_quantity ?? ''}
+                      onChange={e => set('package_quantity', numOrNull(e.target.value))}
+                      placeholder="např. 6"
+                      className="w-24 rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                    />
+                    <select
+                      value={v.package_unit ?? 'kus'}
+                      onChange={e => set('package_unit', e.target.value)}
+                      className="rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                    >
+                      {PACKAGE_UNITS.map(pu => <option key={pu.id} value={pu.id}>{pu.popis}</option>)}
+                    </select>
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                    Ukáže se zákazníkovi u ceny — předejdete tím dotazům „kolik toho dostanu?".
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -743,6 +897,18 @@ export default function ServiceItemEditor({
                     />
                   </div>
                 </div>
+
+                {/* Tohle číslo neřídí jen výrobu — automaticky podle něj funguje
+                    i storno při zrušení zaplacené objednávky (viz payout.ts):
+                    zrušení s tímhle předstihem = plná vratka, blíž k termínu
+                    se vrací míň. Provider ho nenastavuje zvlášť. */}
+                {Number(v.lead_time_days ?? 0) > 0 && (
+                  <p className="rounded-lg bg-white/70 px-3 py-2 text-[11px] leading-relaxed text-slate-500">
+                    Podle tohohle čísla se řídí i vratka při zrušení: zákazník dostane vše zpět, když zruší
+                    aspoň {v.lead_time_days} {Number(v.lead_time_days) === 1 ? 'den' : Number(v.lead_time_days)! < 5 ? 'dny' : 'dní'} předem,
+                    blíž k termínu se vrací míň.
+                  </p>
+                )}
 
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-600">Kdy lze vyzvednout / doručit</label>

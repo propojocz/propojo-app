@@ -6,8 +6,12 @@
 import { useState, useRef } from 'react'
 import { X, Loader2, Plus } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { resizeImage } from '@/lib/image-resize'
 
 const MAX_PHOTOS = 15
+// Zdrojový soubor se před uploadem zmenší, takže tenhle limit je jen pojistka
+// proti absurdně velkým souborům (omylem vybrané video, panorama v plném rozlišení).
+const MAX_SOURCE_MB = 25
 
 interface GalleryUploadProps {
   value: string[]
@@ -41,13 +45,18 @@ export default function GalleryUpload({ value, onChange }: GalleryUploadProps) {
     const newUrls: string[] = []
     for (const file of toUpload) {
       if (!file.type.startsWith('image/')) { setError('Vyberte jen obrázky.'); continue }
-      if (file.size > 5 * 1024 * 1024) { setError('Některý obrázek je větší než 5 MB.'); continue }
+      if (file.size > MAX_SOURCE_MB * 1024 * 1024) { setError(`Některý obrázek je větší než ${MAX_SOURCE_MB} MB.`); continue }
 
-      const ext = file.name.split('.').pop()
-      const fileName = `${user.id}/gallery/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+      // Zmenšení a překódování V PROHLÍŽEČI před odesláním — fotka z mobilu
+      // klidně váží 10 MB ve 4000px šířce, na kartu se z ní zobrazí pár set px.
+      // Když se zmenšení z libovolného důvodu nepovede, resizeImage tiše
+      // vrátí originál beze změny — upload tím nikdy neblokuje.
+      const prepared = await resizeImage(file, 1600, 0.85)
+
+      const fileName = `${user.id}/gallery/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${prepared.ext}`
       const { data, error: upErr } = await supabase.storage
         .from('images')
-        .upload(fileName, file, { upsert: false, contentType: file.type })
+        .upload(fileName, prepared.blob, { upsert: false, contentType: prepared.contentType })
       if (upErr) { setError('Nahrávání některé fotky selhalo.'); continue }
 
       const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(data.path)
@@ -100,7 +109,7 @@ export default function GalleryUpload({ value, onChange }: GalleryUploadProps) {
         )}
       </div>
 
-      <p className="text-xs text-slate-400">{photos.length} / {MAX_PHOTOS} fotek · JPG, PNG, WebP · max. 5 MB</p>
+      <p className="text-xs text-slate-400">{photos.length} / {MAX_PHOTOS} fotek · JPG, PNG, WebP · zmenšíme a optimalizujeme automaticky</p>
       {error && <p className="text-xs text-red-600">{error}</p>}
 
       <input

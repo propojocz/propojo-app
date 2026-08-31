@@ -23,6 +23,12 @@ type ServiceLite = {
   deposit_amount: number | null
   quote_fee: number | null
   location_type: string | null
+  // Adresa provozovny — zákazník musí vědět, KAM si má pro výrobek dojít.
+  address: string | null
+  address_lat: number | null
+  address_lng: number | null
+  address_public: boolean | null
+  phone: string | null
 }
 
 type OrderRow = {
@@ -46,6 +52,8 @@ type OrderRow = {
   slot_id: string | null
   hold_expires_at: string | null
   service_item_id: string | null
+  quantity: number
+  needed_at: string | null
   services: ServiceLite | null
   service_items: {
     name: string | null
@@ -57,6 +65,10 @@ type OrderRow = {
     duration_minutes: number | null
     quote_fee: number | null
     fee_mode: string | null
+    // Výrobek
+    item_type: string | null
+    stock_mode: string | null
+    lead_time_days: number | null
   } | null
 }
 
@@ -89,7 +101,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
 
   const { data: order, error } = await supabase
     .from('orders')
-    .select('*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee, location_type), service_items(name, price, price_unit, deposit_amount, deposit_type, payment_model, duration_minutes, quote_fee, fee_mode)')
+    .select('*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee, location_type, address, address_lat, address_lng, address_public, phone), service_items(name, price, price_unit, deposit_amount, deposit_type, payment_model, duration_minutes, quote_fee, fee_mode, item_type, stock_mode, lead_time_days)')
     .eq('id', params.id)
     .single() as { data: OrderRow | null; error: any }
 

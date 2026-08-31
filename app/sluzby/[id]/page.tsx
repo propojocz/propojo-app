@@ -104,6 +104,12 @@ export default async function ServiceDetailPage({ params }: Props) {
     .order('sort_order', { ascending: true }) as { data: ServiceItem[] | null }
   const items = itemsRaw ?? []
   const cheapest = cheapestActive(items)
+  const hasActiveServiceItems = items.some(i => i.is_active && (i as any).item_type !== 'product')
+  const hasActiveProductItems = items.some(i => i.is_active && (i as any).item_type === 'product')
+  // Smíšená karta = má vedle sebe službu i výrobek. Řídí terminologii („Volné
+  // termíny služeb" místo obecného „Nejbližší volné termíny"), ať je jasné,
+  // že se termíny týkají jen služeb, ne výrobků na téže kartě.
+  const isMixedOffer = hasActiveServiceItems && hasActiveProductItems
 
   // Volná budoucí okna, ve kterých se tato karta nabízí (slot_services → availability_slots).
   // Modal z nich zákazníkovi nabídne termíny (filtruje podle délky úkonu na klientu).
@@ -288,7 +294,7 @@ export default async function ServiceDetailPage({ params }: Props) {
               <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-2">
                 {cheapest && (
                   <span className="text-2xl font-black text-emerald-600 sm:text-3xl">
-                    od {Number(cheapest.price).toLocaleString('cs-CZ')} Kč
+                    Nabídka od {Number(cheapest.price).toLocaleString('cs-CZ')} Kč
                   </span>
                 )}
                 {subcatNames.length > 0 && (
@@ -304,10 +310,10 @@ export default async function ServiceDetailPage({ params }: Props) {
             </section>
 
             {/* ── TERMÍNY – převzatá logika z prvního návrhu: 3 kompaktní termíny + další. ── */}
-            {freeSlots.length > 0 && (
+            {hasActiveServiceItems && freeSlots.length > 0 && (
               <section id="volne-terminy" className="scroll-mt-24">
                 <div className="mb-3 flex items-center justify-between gap-3">
-                  <h2 className="text-lg font-black text-slate-950">Nejbližší volné termíny</h2>
+                  <h2 className="text-lg font-black text-slate-950">{isMixedOffer ? 'Volné termíny služeb' : 'Nejbližší volné termíny'}</h2>
                   {freeSlots.length > 3 && (
                     <a href="#dalsi-terminy" className="shrink-0 text-sm font-bold text-emerald-700 hover:underline">
                       Další termíny →
@@ -373,7 +379,7 @@ export default async function ServiceDetailPage({ params }: Props) {
                     href="#cenik"
                     className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-3 py-3 text-sm font-black text-white shadow-sm transition hover:bg-emerald-600 sm:text-base"
                   >
-                    <CalendarDays className="h-5 w-5" /> Objednat službu
+                    <ListChecks className="h-5 w-5" /> Vybrat z nabídky
                   </a>
                   <div className="min-w-0 [&>*]:h-full [&>*]:w-full">
                     <AskProviderButton serviceId={s.id} isLoggedIn={!!user} variant="siroke" />
@@ -390,10 +396,10 @@ export default async function ServiceDetailPage({ params }: Props) {
             <section id="cenik" className="scroll-mt-24">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <h2 className="flex items-center gap-2 text-lg font-black text-slate-950">
-                  <ListChecks className="h-5 w-5 text-emerald-600" /> Ceník úkonů
+                  <ListChecks className="h-5 w-5 text-emerald-600" /> Nabídka a ceník
                 </h2>
                 {items.filter(i => i.is_active).length > 3 && (
-                  <span className="text-xs font-bold text-emerald-700 sm:text-sm">{items.filter(i => i.is_active).length} úkonů</span>
+                  <span className="text-xs font-bold text-emerald-700 sm:text-sm">{items.filter(i => i.is_active).length} položek</span>
                 )}
               </div>
               <PriceListPublic
@@ -413,7 +419,7 @@ export default async function ServiceDetailPage({ params }: Props) {
                 city={s.city}
               />
               <p className="mt-2.5 text-xs leading-relaxed text-slate-400">
-                Nevyhovuje žádný z volných termínů? Vyberte úkon a pošlete poptávku — poskytovatel vám navrhne čas.
+                Vyberte konkrétní položku. Před objednáním vždy uvidíte cenu, způsob platby a další podmínky.
               </p>
             </section>
 
@@ -560,7 +566,7 @@ export default async function ServiceDetailPage({ params }: Props) {
           <div className="mx-auto flex max-w-2xl items-center gap-2">
             {cheapest && (
               <div className="min-w-0 flex-1 pl-1">
-                <p className="truncate text-sm font-black text-slate-950">od {Number(cheapest.price).toLocaleString('cs-CZ')} Kč</p>
+                <p className="truncate text-sm font-black text-slate-950">Nabídka od {Number(cheapest.price).toLocaleString('cs-CZ')} Kč</p>
                 <p className="text-[11px] text-slate-400">Orientační cena</p>
               </div>
             )}
@@ -568,7 +574,7 @@ export default async function ServiceDetailPage({ params }: Props) {
               href="#cenik"
               className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-black text-white shadow-sm transition hover:bg-emerald-600"
             >
-              <CalendarDays className="h-4 w-4" /> Objednat službu
+              <ListChecks className="h-4 w-4" /> Vybrat z nabídky
             </a>
           </div>
         </div>

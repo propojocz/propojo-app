@@ -1,7 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
-import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2, CreditCard, ShieldCheck, Clock, XCircle, Flag, AlertTriangle, ImagePlus, X, RotateCcw } from 'lucide-react'
+import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2, CreditCard, ShieldCheck, Clock, XCircle, Flag, AlertTriangle, ImagePlus, X, RotateCcw, Package } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import OrderStatusButton from '../OrderStatusButton'
 import { sendOrderMessage, updateOrderStatus, setOrderAddress } from '@/lib/actions/orders'
@@ -15,6 +15,7 @@ import ServiceMap from '@/components/ui/ServiceMap'
 import StornoPanel from '@/components/ui/StornoPanel'
 import { terminDlouze, datumCas } from '@/lib/format'
 import OrderTimeline from '@/components/ui/OrderTimeline'
+import { vyrobekStornoPodil } from '@/lib/product-storno'
 
 type ServiceLite = {
   id: string
@@ -28,6 +29,11 @@ type ServiceLite = {
   deposit_amount: number | null
   quote_fee: number | null
   location_type: string | null
+  address: string | null
+  address_lat: number | null
+  address_lng: number | null
+  address_public: boolean | null
+  phone: string | null
 }
 
 type OrderRow = {
@@ -49,6 +55,8 @@ type OrderRow = {
   scheduled_at: string | null
   slot_id: string | null
   hold_expires_at: string | null
+  quantity: number
+  needed_at: string | null
   services: ServiceLite | null
   service_items?: {
     name: string | null
@@ -60,6 +68,10 @@ type OrderRow = {
     duration_minutes: number | null
     quote_fee: number | null
     fee_mode: string | null
+    // Výrobek
+    item_type: string | null
+    stock_mode: string | null
+    lead_time_days: number | null
   } | null
 }
 
@@ -196,6 +208,17 @@ export default function OrderDetailClient({
     Number((order as any).no_show_fee_amount ?? 0),
     Number(order.deposit_amount ?? depositAmount ?? 0)
   )
+  // Výrobek na objednávku: stejný náhled, ale procentem podle blízkosti
+  // termínu dodání — stejný vzorec, jaký použije server při skutečném zrušení.
+  const jeVyrobek = item?.item_type === 'product'
+  const jeVyrobekNaObjednavku = jeVyrobek && item?.stock_mode === 'made_to_order'
+  // Doručení vs. osobní odběr — u výrobku se ukládá do service_location stejně
+  // jako místo výkonu u služby ('u_zakaznika' = doručit).
+  const productDelivery = jeVyrobek && order.service_location === 'u_zakaznika'
+  const vyrobekPodil = jeVyrobekNaObjednavku
+    ? vyrobekStornoPodil(order.needed_at, item?.lead_time_days)
+    : 0
+  const vyrobekStornoCastka = Math.round(Number(order.deposit_amount ?? depositAmount ?? 0) * vyrobekPodil)
   // Konec služby = termín + délka úkonu. Po něm smí zakázku uzavřít i zákazník,
   // kdyby na to poskytovatel zapomněl — jinak objednávka visí donekonečna.
   const sluzbaSkoncila = (() => {
@@ -317,7 +340,9 @@ export default function OrderDetailClient({
   const handleCustomerCancel = async () => {
     const zprava = stornoRezim && stornoCastka > 0
       ? `Opravdu zrušit? Poskytovatel si nechá storno poplatek ${stornoCastka.toLocaleString('cs-CZ')} Kč.`
-      : 'Opravdu chcete objednávku zrušit?'
+      : jeVyrobekNaObjednavku && vyrobekStornoCastka > 0
+        ? `Opravdu zrušit? Blízko termínu dodání si poskytovatel nechá ${vyrobekStornoCastka.toLocaleString('cs-CZ')} Kč.`
+        : 'Opravdu chcete objednávku zrušit?'
     if (!confirm(zprava)) return
     setCancelBusy(true)
     setCancelErr('')
@@ -484,6 +509,36 @@ export default function OrderDetailClient({
             </div>
           )}
 
+          {/* Výrobek nemá termín (scheduled_at) — místo něj množství, den
+              dodání/vyzvednutí a způsob převzetí (service_location se u
+              výrobku ukládá stejně jako u služby: u_zakaznika = doručení). */}
+          {jeVyrobek && order.status !== 'zruseno' && (
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm">
+              <Package className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Objednávka</p>
+                <p className="font-bold text-slate-800">
+                  {order.quantity}× {item?.name ?? 'výrobek'}
+                </p>
+                <p className="mt-0.5 text-slate-600">
+                  {order.needed_at && (
+                    <>
+                      {jeVyrobekNaObjednavku ? 'Dodání' : 'Vyzvednutí'}{': '}
+                      {new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long' })
+                        .format(new Date(`${order.needed_at}T00:00:00`))}
+                    </>
+                  )}
+                  {order.needed_at && order.service_location ? ' · ' : ''}
+                  {order.service_location === 'u_zakaznika'
+                    ? 'Doručení'
+                    : order.service_location === 'u_poskytovatele'
+                      ? 'Osobní odběr'
+                      : ''}
+                </p>
+              </div>
+            </div>
+          )}
+
           {canRequestTimeChange && (
             <div className="mt-2">
               <button
@@ -511,11 +566,36 @@ export default function OrderDetailClient({
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Místo</p>
                 {!atCustomer
-                  ? <p className="font-medium text-slate-800">U poskytovatele (provozovna)</p>
+                  ? (
+                    // Adresa provozovny — bez ní zákazník neví, kam si má dojít.
+                    // Přesnou adresu ukážeme až po potvrzení objednávky; předtím
+                    // (nebo když ji poskytovatel nezveřejnil) jen město.
+                    <>
+                      {service?.address && order.status !== 'cekajici' ? (
+                        <p className="font-medium text-slate-800">{service.address}</p>
+                      ) : (
+                        <p className="font-medium text-slate-800">
+                          {service?.city ?? '—'}
+                          {service?.address ? ' — přesnou adresu uvidíte po potvrzení objednávky' : ''}
+                        </p>
+                      )}
+                      {service?.phone && order.status !== 'cekajici' ? (
+                        <p className="mt-0.5 text-xs text-slate-500">Telefon: {service.phone}</p>
+                      ) : null}
+                    </>
+                  )
                   : order.location_address && order.status !== 'cekajici'
                     ? <p className="font-medium text-slate-800">{order.location_address}</p>
                     : <p className="font-medium text-slate-800">{order.location_city ?? '—'}{order.status === 'cekajici' ? '' : ' (přesná adresa se doplní)'}</p>}
               </div>
+            </div>
+          )}
+
+          {/* Mapa pro ZÁKAZNÍKA — kam si dojít pro výrobek / na službu do provozovny */}
+          {!isProvider && !atCustomer && service?.address_lat != null && service?.address_lng != null
+            && order.status !== 'zruseno' && order.status !== 'cekajici' && (
+            <div className="mt-4">
+              <ServiceMap lat={service.address_lat} lng={service.address_lng} label={service.address ?? 'Provozovna'} />
             </div>
           )}
 
@@ -544,34 +624,6 @@ export default function OrderDetailClient({
                 durationMinutes={(order as any).service_items?.duration_minutes ?? null}
                 canAcceptWithoutTime={isModelB}
               />
-            </div>
-          )}
-
-          {/* Zrušení zákazníkem */}
-          {canCustomerCancel && (
-            <div className="mt-5 border-t border-slate-100 pt-5">
-              <button
-                onClick={handleCustomerCancel}
-                disabled={cancelBusy}
-                className="flex items-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition-all hover:bg-red-50 disabled:opacity-60"
-              >
-                {cancelBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
-                Zrušit objednávku
-              </button>
-              {isPaid && (
-                stornoRezim && stornoCastka > 0 ? (
-                  <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
-                    <strong>Pozor na storno poplatek.</strong> Při zrušení si poskytovatel nechá{' '}
-                    <strong>{stornoCastka.toLocaleString('cs-CZ')} Kč</strong>
-                    {Number(order.deposit_amount ?? depositAmount ?? 0) - stornoCastka > 0
-                      ? <>, zbylých {(Number(order.deposit_amount ?? depositAmount ?? 0) - stornoCastka).toLocaleString('cs-CZ')} Kč vám vrátíme.</>
-                      : <> — to je celá zaplacená částka.</>}
-                  </p>
-                ) : (
-                  <p className="mt-2 text-xs text-slate-400">Zaplacená záloha vám bude vrácena.</p>
-                )
-              )}
-              {cancelErr && <p className="mt-2 text-sm text-red-600">{cancelErr}</p>}
             </div>
           )}
 
@@ -649,7 +701,9 @@ export default function OrderDetailClient({
         )}
 
         {/* ── PLATBA ZÁLOHY (jen zákazník, po přijetí) ───────── */}
-        {isCustomer && hasDeposit && (order.status === 'prijato' || order.status === 'v_procesu') && (
+        {/* isRefunded: u vrácené platby nemá smysl nabízet zaplacení — dřív se
+            tenhle blok ukázal současně s hláškou „peníze jsme vrátili". */}
+        {isCustomer && hasDeposit && !isRefunded && (order.status === 'prijato' || order.status === 'v_procesu') && (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             {platbaStav === 'uspech' && (
               <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
@@ -739,6 +793,46 @@ export default function OrderDetailClient({
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Zrušení zákazníkem */}
+        {canCustomerCancel && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <button
+              onClick={handleCustomerCancel}
+              disabled={cancelBusy}
+              className="flex items-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition-all hover:bg-red-50 disabled:opacity-60"
+            >
+              {cancelBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+              Zrušit objednávku
+            </button>
+            {isPaid && (
+              stornoRezim && stornoCastka > 0 ? (
+                <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
+                  <strong>Pozor na storno poplatek.</strong> Při zrušení si poskytovatel nechá{' '}
+                  <strong>{stornoCastka.toLocaleString('cs-CZ')} Kč</strong>
+                  {Number(order.deposit_amount ?? depositAmount ?? 0) - stornoCastka > 0
+                    ? <>, zbylých {(Number(order.deposit_amount ?? depositAmount ?? 0) - stornoCastka).toLocaleString('cs-CZ')} Kč vám vrátíme.</>
+                    : <> — to je celá zaplacená částka.</>}
+                </p>
+              ) : jeVyrobekNaObjednavku && vyrobekStornoCastka > 0 ? (
+                <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
+                  <strong>Blíží se termín dodání.</strong> Při zrušení teď si poskytovatel nechá{' '}
+                  <strong>{vyrobekStornoCastka.toLocaleString('cs-CZ')} Kč</strong>
+                  {Number(order.deposit_amount ?? depositAmount ?? 0) - vyrobekStornoCastka > 0
+                    ? <>, zbylých {(Number(order.deposit_amount ?? depositAmount ?? 0) - vyrobekStornoCastka).toLocaleString('cs-CZ')} Kč vám vrátíme.</>
+                    : <> — to je celá zaplacená částka.</>}
+                </p>
+              ) : jeVyrobekNaObjednavku ? (
+                <p className="mt-2 text-xs text-slate-400">
+                  Zrušíte-li teď, vrátíme celou zaplacenou částku. Blíž k termínu dodání se vrací méně.
+                </p>
+              ) : (
+                <p className="mt-2 text-xs text-slate-400">Zaplacená záloha vám bude vrácena.</p>
+              )
+            )}
+            {cancelErr && <p className="mt-2 text-sm text-red-600">{cancelErr}</p>}
           </div>
         )}
 
@@ -833,6 +927,10 @@ export default function OrderDetailClient({
           isInquiry={(order as any).is_inquiry === true}
           hasTimeProposals={hasTimeProposals}
           paymentInterrupted={paymentInterrupted}
+          isProduct={jeVyrobek}
+          neededAt={order.needed_at}
+          isDelivery={productDelivery}
+          quantity={order.quantity}
         />
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

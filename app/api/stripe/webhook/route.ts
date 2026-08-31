@@ -145,7 +145,7 @@ async function handleDepositPaid(
 
   const { data: order } = await db
     .from('orders')
-    .select('id, status, slot_id, service_id, scheduled_at, scheduled_end, provider_id, customer_id, deposit_status, deposit_amount, hold_expires_at, stripe_checkout_session_id, service_items(name, duration_minutes), services(title)')
+    .select('id, status, slot_id, service_id, scheduled_at, scheduled_end, provider_id, customer_id, deposit_status, deposit_amount, hold_expires_at, stripe_checkout_session_id, service_items(name, duration_minutes, item_type), services(title)')
     .eq('id', orderId)
     .single() as { data: any }
 
@@ -175,8 +175,13 @@ async function handleDepositPaid(
     if (!slot || slot.order_id !== orderId || slot.status !== 'zabrano') {
       platna = false
     }
-  } else if (platna && !order.slot_id && !order.scheduled_at) {
+  } else if (platna && !order.slot_id && !order.scheduled_at && order.service_items?.item_type !== 'product') {
     // Domluvený termín už byl mezitím zrušen / vrácen do domlouvání.
+    //
+    // VÝROBEK JE VÝJIMKA: objednávka výrobku nemá slot ANI scheduled_at nikdy —
+    // není to propadlá rezervace, je to prostě jiný druh objednávky (kusy +
+    // volitelný den dodání). Bez téhle podmínky webhook považoval každou
+    // zaplacenou objednávku výrobku za neplatnou a rovnou vracel peníze.
     platna = false
   }
 
@@ -208,10 +213,12 @@ async function handleDepositPaid(
         type: 'status_change',
         orderId,
         actorId: order.customer_id,
-        title: vraceno ? 'Rezervace už nebyla platná — peníze vracíme' : 'Rezervace už nebyla platná',
+        // Text nesmí mluvit o „rezervaci" a „novém termínu" — u výrobku
+        // (kusy + den vyzvednutí) by to nedávalo smysl.
+        title: vraceno ? 'Objednávku nešlo dokončit — peníze vracíme' : 'Objednávku nešlo dokončit',
         preview: vraceno
-          ? `${nazev ?? 'Rezervace'} · platba se vrací na kartu, domluvte prosím nový termín.`
-          : `${nazev ?? 'Rezervace'} · ozvěte se nám na admin@propojo.cz, vyřešíme to.`,
+          ? `${nazev ?? 'Objednávka'} · platba se vrací na kartu, zkuste prosím objednat znovu.`
+          : `${nazev ?? 'Objednávka'} · ozvěte se nám na admin@propojo.cz, vyřešíme to.`,
       })
     } catch (err) {
       console.error('[webhook] notifikace o vratce:', err)
@@ -306,9 +313,10 @@ async function handleDepositExpired(
 
   // ── VÝROBEK ──
   // Objednávka výrobku nemá termín ani slot, takže by spadla do větve „vrátit do
-  // domluvy" (status 'cekajici', deposit_status 'none'). Jenže taková objednávka
-  // se pak v počítání dostupnosti tváří jako ŽIVÁ a držela by kusy napořád.
-  // Nezaplacený výrobek proto rovnou rušíme — tím se sklad i denní kapacita uvolní.
+  // domlouvání" (status 'cekajici', deposit_status 'none'). Jenže taková
+  // objednávka se pak v počítání dostupnosti tváří jako ŽIVÁ a držela by kusy
+  // napořád. Nezaplacený výrobek proto rovnou rušíme — tím se sklad i denní
+  // kapacita uvolní.
   if (order.service_items?.item_type === 'product') {
     await (db.from('orders') as any)
       .update({ status: 'zruseno', hold_expires_at: null, stripe_checkout_session_id: null })

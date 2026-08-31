@@ -7,6 +7,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { stripe } from '@/lib/stripe'
 import { revalidatePath } from 'next/cache'
 import { createNotification } from '@/lib/actions/notifications'
+import { vyrobekStornoPodil } from '@/lib/product-storno'
 
 function getAdminClient() {
   return createAdminClient(
@@ -175,8 +176,8 @@ export async function refundDeposit(orderId: string, byUserId: string): Promise<
     .from('orders')
     .select(`
       id, customer_id, provider_id, deposit_status, deposit_amount, stripe_payment_intent_id,
-      no_show_fee_amount, scheduled_at,
-      service_items(fee_mode),
+      no_show_fee_amount, scheduled_at, needed_at,
+      service_items(fee_mode, item_type, lead_time_days),
       profiles!orders_provider_id_fkey(stripe_account_id)
     `)
     .eq('id', orderId)
@@ -193,14 +194,22 @@ export async function refundDeposit(orderId: string, byUserId: string): Promise<
   const providerAccount = order.profiles?.stripe_account_id
 
   // ── STORNO POPLATEK ───────────────────────────────────────────
-  // Strhne se JEN když: poskytovatel ho u úkonu nastavil (fee_mode='storno'),
-  // ruší ZÁKAZNÍK (ne poskytovatel — to je jeho rozhodnutí, ať nese sám),
-  // a termín ještě nenastal (po termínu se řeší nedostavením).
+  // Strhne se JEN když ruší ZÁKAZNÍK (ne poskytovatel — to je jeho rozhodnutí,
+  // ať nese sám). Dvě různé logiky podle typu položky:
+  //   • SLUŽBA: pevná částka, jen když ji poskytovatel nastavil (fee_mode='storno').
+  //   • VÝROBEK NA OBJEDNÁVKU: procento podle odstupu od termínu dodání —
+  //     viz vyrobekStornoPodil níž. Sklad/bez omezení storno neřeší (kdykoli
+  //     plná vratka — fyzický kus se dá prodat jinam, nic se "nezačalo").
   const rusiZakaznik = byUserId === order.customer_id
   const maStorno = order.service_items?.fee_mode === 'storno'
-  const stornoPoplatek = (rusiZakaznik && maStorno)
-    ? Math.min(Number(order.no_show_fee_amount ?? 0), zaplaceno)
-    : 0
+  const jeVyrobekNaObjednavku = order.service_items?.item_type === 'product'
+  const stornoPoplatek = !rusiZakaznik
+    ? 0
+    : maStorno
+      ? Math.min(Number(order.no_show_fee_amount ?? 0), zaplaceno)
+      : jeVyrobekNaObjednavku
+        ? Math.round(zaplaceno * vyrobekStornoPodil(order.needed_at, order.service_items?.lead_time_days))
+        : 0
 
   // Nic ke strhnutí → celá vratka, jak to bylo dřív.
   if (stornoPoplatek <= 0 || !providerAccount) {

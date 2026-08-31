@@ -408,9 +408,13 @@ export type Database = {
           duration_minutes: number | null
           free_km: number | null
           id: string
+          image_url: string | null
           is_active: boolean
           item_type: string
           lead_time_days: number | null
+          price_unit_quantity: number
+          package_quantity: number | null
+          package_unit: string | null
           max_quantity_per_order: number | null
           min_quantity_per_order: number | null
           name: string
@@ -440,9 +444,13 @@ export type Database = {
           duration_minutes?: number | null
           free_km?: number | null
           id?: string
+          image_url?: string | null
           is_active?: boolean
           item_type?: string
           lead_time_days?: number | null
+          price_unit_quantity?: number
+          package_quantity?: number | null
+          package_unit?: string | null
           max_quantity_per_order?: number | null
           min_quantity_per_order?: number | null
           name: string
@@ -472,9 +480,13 @@ export type Database = {
           duration_minutes?: number | null
           free_km?: number | null
           id?: string
+          image_url?: string | null
           is_active?: boolean
           item_type?: string
           lead_time_days?: number | null
+          price_unit_quantity?: number
+          package_quantity?: number | null
+          package_unit?: string | null
           max_quantity_per_order?: number | null
           min_quantity_per_order?: number | null
           name?: string
@@ -783,7 +795,7 @@ export type ServiceCategory = string
 // Číselníky používané ve formulářích
 export type PaymentModel = 'A' | 'B'
 export type PriceType = 'fixed' | 'range' | 'on_agreement'
-export type PriceUnit = 'ukon' | 'hod' | 'kus' | 'den' | 'projekt' | 'm2' | 'bm' | 'm3' | 'baleni' | 'sada' | 'porce' | 'kg' | 'sto_g' | 'litr' | 'metr'
+export type PriceUnit = 'ukon' | 'hod' | 'kus' | 'den' | 'projekt' | 'osoba' | 'm2' | 'bm' | 'm3' | 'baleni' | 'sada' | 'porce' | 'g' | 'kg' | 'sto_g' | 'ml' | 'litr' | 'metr'
 export type LocationType = 'u_poskytovatele' | 'u_zakaznika' | 'oboji'
 
 // Popisky jednotek ceny — jediné místo, odkud je brát v UI.
@@ -791,6 +803,7 @@ export const PRICE_UNIT_LABELS: Record<PriceUnit, string> = {
   ukon: 'za úkon',
   hod: 'za hodinu',
   den: 'za den',
+  osoba: 'za osobu',
   kus: 'za kus',
   projekt: 'za projekt',
   m2: 'za m²',
@@ -799,8 +812,10 @@ export const PRICE_UNIT_LABELS: Record<PriceUnit, string> = {
   baleni: 'za balení',
   sada: 'za sadu',
   porce: 'za porci',
+  g: 'za gram',
   kg: 'za kg',
   sto_g: 'za 100 g',
+  ml: 'za ml',
   litr: 'za litr',
   metr: 'za metr',
 }
