@@ -46,6 +46,7 @@ const itemSchema = z.object({
   max_quantity_per_order: z.number().int().min(1).max(10000).nullable().optional(),
   min_quantity_per_order: z.number().int().min(1).max(10000).nullable().optional(),
   pickup_mode: z.enum(['pickup', 'delivery', 'both'] as const).nullable().optional(),
+  pickup_timing: z.enum(['opening_hours', 'by_agreement'] as const).nullable().optional(),
   price_unit_quantity: z.number().int().min(1).max(100000).optional(),
   package_quantity: z.number().min(0).max(1000000).nullable().optional(),
   package_unit: z.enum(['kus', 'g', 'kg', 'ml', 'litr'] as const).nullable().optional(),
@@ -184,6 +185,14 @@ function normalizeItem(d: ItemParsed): ItemParsed {
     // Způsob převzetí. Výchozí osobní odběr.
     if (out.pickup_mode == null) out.pickup_mode = 'pickup'
 
+    // Kdy si zákazník může přijít — jen když je osobní odběr vůbec možný.
+    // U čistého doručení by volba neměla co znamenat.
+    if (out.pickup_mode === 'delivery') {
+      out.pickup_timing = null
+    } else if (out.pickup_timing == null) {
+      out.pickup_timing = 'opening_hours'
+    }
+
     // Minimální množství. Default 1 (= bez omezení). Musí sedět pod maximum.
     if (out.min_quantity_per_order == null || out.min_quantity_per_order < 1) out.min_quantity_per_order = 1
     if (out.max_quantity_per_order != null && out.min_quantity_per_order > out.max_quantity_per_order) {
@@ -201,6 +210,7 @@ function normalizeItem(d: ItemParsed): ItemParsed {
   out.max_quantity_per_order = null
   out.min_quantity_per_order = null
   out.pickup_mode = null
+  out.pickup_timing = null
   out.package_quantity = null
   out.package_unit = null
   out.production_capacity = null

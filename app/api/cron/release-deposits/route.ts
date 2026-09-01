@@ -1,10 +1,12 @@
 // app/api/cron/release-deposits/route.ts
-// Denní úklid peněz a termínů — čtyři věci naráz, ať stačí jeden cron:
+// Denní úklid peněz a termínů — pět věcí naráz, ať stačí jeden cron:
 //   1) uvolní zálohy u zakázek, které zákazník do 7 dnů nepotvrdil,
 //   2) vyřídí nedostavení, kde zákazník do 24 h nepodal námitku
 //      (storno poskytovateli, zbytek zpět zákazníkovi),
 //   3) vyřídí storna, kde poskytovatel do 24 h poplatek neodpustil,
-//   4) uvolní termíny u rezervací, které zákazník do 24 h nezaplatil.
+//   4) uvolní termíny u rezervací, které zákazník do 24 h nezaplatil,
+//   5) zruší objednávky výrobků, které poskytovatel včas nepotvrdil —
+//      tím se uvolní držené kusy i denní kapacita.
 //
 // Spouští Vercel Cron (vercel.json). Chráněno tajemstvím CRON_SECRET —
 // bez něj by endpoint mohl spustit kdokoli.
@@ -16,6 +18,7 @@ import {
   autoResolveStorno,
   autoReleaseUnpaidReservations,
 } from '@/lib/actions/payout'
+import { autoDeclineExpiredConfirmations } from '@/lib/actions/product-order'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -31,11 +34,12 @@ export async function GET(request: Request) {
 
   try {
     // Běží nezávisle na sobě — chyba v jednom nesmí shodit ostatní.
-    const [deposits, noShows, storna, nezaplacene] = await Promise.allSettled([
+    const [deposits, noShows, storna, nezaplacene, nepotvrzene] = await Promise.allSettled([
       autoReleaseStaleDeposits(),
       autoResolveNoShows(),
       autoResolveStorno(),
       autoReleaseUnpaidReservations(),
+      autoDeclineExpiredConfirmations(),
     ])
 
     return NextResponse.json({
@@ -44,6 +48,7 @@ export async function GET(request: Request) {
       nedostaveni: noShows.status === 'fulfilled' ? noShows.value : { chyba: true },
       storna: storna.status === 'fulfilled' ? storna.value : { chyba: true },
       nezaplacene_rezervace: nezaplacene.status === 'fulfilled' ? nezaplacene.value : { chyba: true },
+      nepotvrzene_vyrobky: nepotvrzene.status === 'fulfilled' ? nepotvrzene.value : { chyba: true },
     })
   } catch (err) {
     console.error('[cron/release-deposits]', err)

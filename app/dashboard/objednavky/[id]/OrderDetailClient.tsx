@@ -57,6 +57,11 @@ type OrderRow = {
   hold_expires_at: string | null
   quantity: number
   needed_at: string | null
+  service_item_id: string | null
+  product_fulfillment_status: string | null
+  product_ready_at: string | null
+  ready_photo_url: string | null
+  product_handed_over_at: string | null
   services: ServiceLite | null
   service_items?: {
     name: string | null
@@ -535,6 +540,19 @@ export default function OrderDetailClient({
                       ? 'Osobní odběr'
                       : ''}
                 </p>
+
+                {/* Fotka hotové objednávky od poskytovatele. */}
+                {order.ready_photo_url && (
+                  <div className="mt-3">
+                    <p className="mb-1 text-xs font-semibold text-emerald-700">Vaše objednávka je hotová</p>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={order.ready_photo_url}
+                      alt="Hotová objednávka"
+                      className="max-h-56 w-full rounded-xl border border-emerald-200 object-cover"
+                    />
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -623,6 +641,14 @@ export default function OrderDetailClient({
                 scheduledAt={order.scheduled_at}
                 durationMinutes={(order as any).service_items?.duration_minutes ?? null}
                 canAcceptWithoutTime={isModelB}
+                isProduct={jeVyrobek}
+                productQuantity={order.quantity}
+                productName={item?.name ?? null}
+                neededAt={order.needed_at}
+                confirmationDeadline={(order as any).confirmation_deadline ?? null}
+                serviceItemId={order.service_item_id ?? null}
+                fulfillmentStatus={order.product_fulfillment_status}
+                isDelivery={productDelivery}
               />
             </div>
           )}
@@ -842,19 +868,46 @@ export default function OrderDetailClient({
             <div className="mb-1 flex items-center gap-2">
               <Flag className="h-5 w-5 text-purple-600" />
               <h2 className="font-black text-slate-900">
-                {order.status === 'ceka_potvrzeni'
-                  ? 'Poskytovatel označil zakázku jako splněnou'
-                  : 'Proběhlo všechno v pořádku?'}
+                {jeVyrobek
+                  ? (order.status === 'ceka_potvrzeni'
+                      ? (productDelivery ? 'Objednávka byla doručena' : 'Objednávka byla předána')
+                      : (productDelivery ? 'Dorazila objednávka v pořádku?' : 'Převzali jste objednávku?'))
+                  : (order.status === 'ceka_potvrzeni'
+                      ? 'Poskytovatel označil zakázku jako splněnou'
+                      : 'Proběhlo všechno v pořádku?')}
               </h2>
             </div>
             <p className="mb-4 text-sm text-slate-500">
-              {order.status === 'ceka_potvrzeni'
-                ? <>Pokud {isModelB ? 'výjezd a nacenění proběhly' : 'řemeslník dorazil a plní zakázku'}, potvrďte to.</>
-                : <>Termín už proběhl. Potvrďte, že {isModelB ? 'výjezd a nacenění proběhly' : 'práce proběhla'} — nemusíte čekat, až to udělá řemeslník.</>}
-              {hasDeposit && ' Tím se mu uvolní zaplacená částka.'}
-              {' '}Další domluva o ceně a postupu probíhá přímo s řemeslníkem.
+              {jeVyrobek ? (
+                <>
+                  Pokud jste {order.quantity > 1 ? `${order.quantity}× ` : ''}{item?.name ?? 'objednávku'}{' '}
+                  {productDelivery ? 'obdrželi' : 'převzali'} a je vše v pořádku, potvrďte to.
+                </>
+              ) : order.status === 'ceka_potvrzeni' ? (
+                <>Pokud {isModelB ? 'výjezd a nacenění proběhly' : 'řemeslník dorazil a plní zakázku'}, potvrďte to.</>
+              ) : (
+                <>Termín už proběhl. Potvrďte, že {isModelB ? 'výjezd a nacenění proběhly' : 'práce proběhla'} — nemusíte čekat, až to udělá řemeslník.</>
+              )}
+              {/* Konkrétní částka místo interního pojmu „záloha" — zákazník mohl
+                  zaplatit zálohu i celou cenu. */}
+              {hasDeposit && (
+                <> Tím se poskytovateli uvolní{' '}
+                  <strong className="text-slate-700">
+                    {Number(order.deposit_amount ?? depositAmount ?? 0).toLocaleString('cs-CZ')} Kč
+                  </strong>.
+                </>
+              )}
+              {!jeVyrobek && ' Další domluva o ceně a postupu probíhá přímo s řemeslníkem.'}
             </p>
-            <ConfirmCompletionButton orderId={order.id} hasDeposit={hasDeposit} />
+            <ConfirmCompletionButton
+              orderId={order.id}
+              hasDeposit={hasDeposit}
+              confirmLabel={jeVyrobek ? (productDelivery ? 'Potvrdit doručení' : 'Potvrdit převzetí') : undefined}
+              disputeHint={jeVyrobek
+                ? 'Popište, co není v pořádku (např. objednávku jsem nepřevzal, výrobek je poškozený nebo neodpovídá objednávce).'
+                : undefined}
+              heldAmount={Number(order.deposit_amount ?? depositAmount ?? 0)}
+            />
           </div>
         )}
 
@@ -931,6 +984,9 @@ export default function OrderDetailClient({
           neededAt={order.needed_at}
           isDelivery={productDelivery}
           quantity={order.quantity}
+          fulfillmentStatus={order.product_fulfillment_status}
+          readyAt={order.product_ready_at}
+          handedOverAt={order.product_handed_over_at}
         />
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

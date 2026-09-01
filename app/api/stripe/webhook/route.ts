@@ -145,7 +145,7 @@ async function handleDepositPaid(
 
   const { data: order } = await db
     .from('orders')
-    .select('id, status, slot_id, service_id, scheduled_at, scheduled_end, provider_id, customer_id, deposit_status, deposit_amount, hold_expires_at, stripe_checkout_session_id, service_items(name, duration_minutes, item_type), services(title)')
+    .select('id, status, slot_id, service_id, scheduled_at, scheduled_end, provider_id, customer_id, deposit_status, deposit_amount, hold_expires_at, stripe_checkout_session_id, service_items(name, duration_minutes, item_type, deposit_type), services(title)')
     .eq('id', orderId)
     .single() as { data: any }
 
@@ -267,14 +267,24 @@ async function handleDepositPaid(
 
   if (!order.provider_id) return
 
+  const jeVyrobekPlatba = order.service_items?.item_type === 'product'
+  const plnaPlatba = order.service_items?.deposit_type === 'plna_platba'
+  const castkaText = order.deposit_amount != null
+    ? `${Number(order.deposit_amount).toLocaleString('cs-CZ')} Kč`
+    : null
+
   try {
     await createNotification({
       userId: order.provider_id,
       type: 'status_change',
       orderId,
       actorId: order.customer_id ?? null,
-      title: 'Záloha zaplacena — termín je potvrzený',
-      preview: nazev,
+      // Text musí sedět na to, co zákazník opravdu zaplatil (záloha vs. celá
+      // cena) a na typ položky (výrobek nemá „termín").
+      title: jeVyrobekPlatba
+        ? (plnaPlatba ? 'Zaplaceno — objednávka je potvrzená' : 'Záloha zaplacena — objednávka je potvrzená')
+        : (plnaPlatba ? 'Zaplaceno — termín je potvrzený' : 'Záloha zaplacena — termín je potvrzený'),
+      preview: castkaText ? `${nazev} · ${castkaText}` : nazev,
     })
   } catch (err) {
     console.error('[webhook] notifikace o záloze:', err)

@@ -1,6 +1,11 @@
 'use client'
 // components/ui/FreeSlotReminder.tsx
-// Připomínka na dashboardu: „máte volný termín, o kterém nikdo neví".
+// Připomínka na dashboardu: „zaplňte volný termín".
+//
+// FRAMING JE ZÁMĚRNÝ: dřív tu stálo „máte termín, o kterém nikdo neví", což
+// znělo jako přiznání, že na Propoju nikdo není a poskytovatel si má zákazníky
+// sehnat sám. Termín se přitom v marketplace nabízí normálně — sdílení je
+// NAVÍC, ne náhrada. Proto se tu mluví o zaplnění a využití vlastní klientely.
 //
 // Ukazuje se jen tehdy, když má poskytovatel volné okno v nejbližších dnech
 // a ještě na něj nikoho neupozornil. Jakmile rozešle, zmizí — nemá otravovat.
@@ -45,14 +50,18 @@ export default function FreeSlotReminder({ slot }: { slot: ReminderSlot }) {
             <Megaphone className="h-5 w-5 text-emerald-600" />
           </div>
           <div className="min-w-0">
-            <p className="font-black text-slate-900">Máte volný termín, o kterém nikdo neví</p>
+            <p className="font-black text-slate-900">Zaplňte volný termín</p>
             <p className="mt-0.5 text-sm text-slate-600">
               <strong className="text-slate-900">{slot.label}</strong>
               {slot.services && <span className="text-slate-500"> · {slot.services}</span>}
             </p>
+            <p className="mt-1 text-xs leading-relaxed text-slate-500">
+              Termín se zákazníkům na Propoju nabízí sám. Můžete ho navíc poslat lidem,
+              kteří u vás už byli, nebo sdílet na sítích — tím se zaplní rychleji.
+            </p>
             {slot.moreCount > 0 && (
-              <p className="mt-0.5 text-xs text-slate-400">
-                a další {slot.moreCount} {slot.moreCount === 1 ? 'okno' : slot.moreCount < 5 ? 'okna' : 'oken'} bez upozornění
+              <p className="mt-1 text-xs text-slate-400">
+                Máte ještě {slot.moreCount} {slot.moreCount === 1 ? 'další volný termín' : slot.moreCount < 5 ? 'další volné termíny' : 'dalších volných termínů'}
               </p>
             )}
           </div>
@@ -64,7 +73,7 @@ export default function FreeSlotReminder({ slot }: { slot: ReminderSlot }) {
             onClick={() => setOpen(true)}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-2.5 font-bold text-white transition hover:bg-emerald-600"
           >
-            <Megaphone className="h-4 w-4" /> Nabídnout zákazníkům
+            <Megaphone className="h-4 w-4" /> Sdílet volný termín
           </button>
           <Link
             href="/dashboard/terminy"

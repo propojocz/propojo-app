@@ -133,6 +133,13 @@ export type Database = {
           location_lat: number | null
           location_lng: number | null
           needed_at: string | null
+          confirmation_deadline: string | null
+          cancelled_by: string | null
+          completed_at: string | null
+          product_fulfillment_status: string | null
+          product_ready_at: string | null
+          ready_photo_url: string | null
+          product_handed_over_at: string | null
           provider_id: string
           quantity: number
           scheduled_at: string | null
@@ -161,6 +168,13 @@ export type Database = {
           location_lat?: number | null
           location_lng?: number | null
           needed_at?: string | null
+          confirmation_deadline?: string | null
+          cancelled_by?: string | null
+          completed_at?: string | null
+          product_fulfillment_status?: string | null
+          product_ready_at?: string | null
+          ready_photo_url?: string | null
+          product_handed_over_at?: string | null
           provider_id: string
           quantity?: number
           scheduled_at?: string | null
@@ -189,6 +203,13 @@ export type Database = {
           location_lat?: number | null
           location_lng?: number | null
           needed_at?: string | null
+          confirmation_deadline?: string | null
+          cancelled_by?: string | null
+          completed_at?: string | null
+          product_fulfillment_status?: string | null
+          product_ready_at?: string | null
+          ready_photo_url?: string | null
+          product_handed_over_at?: string | null
           provider_id?: string
           quantity?: number
           scheduled_at?: string | null
@@ -412,6 +433,7 @@ export type Database = {
           is_active: boolean
           item_type: string
           lead_time_days: number | null
+          pickup_timing: string | null
           price_unit_quantity: number
           package_quantity: number | null
           package_unit: string | null
@@ -448,6 +470,7 @@ export type Database = {
           is_active?: boolean
           item_type?: string
           lead_time_days?: number | null
+          pickup_timing?: string | null
           price_unit_quantity?: number
           package_quantity?: number | null
           package_unit?: string | null
@@ -484,6 +507,7 @@ export type Database = {
           is_active?: boolean
           item_type?: string
           lead_time_days?: number | null
+          pickup_timing?: string | null
           price_unit_quantity?: number
           package_quantity?: number | null
           package_unit?: string | null

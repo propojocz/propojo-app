@@ -1,11 +1,30 @@
 'use client'
 // components/ui/ConfirmCompletionButton.tsx
-// Zákazník u stavu ceka_potvrzeni: buď POTVRDÍ (uvolní zálohu), nebo NAHLÁSÍ PROBLÉM (spor).
+// Zákazník u stavu ceka_potvrzeni: buď POTVRDÍ, nebo NAHLÁSÍ PROBLÉM (spor).
+//
+// TEXTY SE LIŠÍ podle toho, co si zákazník objednal. U výrobku nedává smysl
+// mluvit o „uvolnění zálohy" (mohl zaplatit celou cenu) ani o „řemeslníkovi,
+// co nedorazil" — proto se popisky předávají zvenčí.
 import { useState } from 'react'
 import { Loader2, CheckCircle2, AlertTriangle, X } from 'lucide-react'
 import { releaseDeposit, reportDispute } from '@/lib/actions/payout'
 
-export default function ConfirmCompletionButton({ orderId, hasDeposit }: { orderId: string; hasDeposit: boolean }) {
+export default function ConfirmCompletionButton({
+  orderId,
+  hasDeposit,
+  confirmLabel,
+  disputeHint,
+  heldAmount = null,
+}: {
+  orderId: string
+  hasDeposit: boolean
+  /** Např. „Potvrdit převzetí" u výrobku. Bez něj se použije text pro službu. */
+  confirmLabel?: string
+  /** Nápověda v hlášení problému — u výrobku se nemluví o řemeslníkovi. */
+  disputeHint?: string
+  /** Kolik peněz se potvrzením uvolní. Zákazník má vidět částku, ne pojem „záloha". */
+  heldAmount?: number | null
+}) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [showDispute, setShowDispute] = useState(false)
@@ -40,8 +59,15 @@ export default function ConfirmCompletionButton({ orderId, hasDeposit }: { order
     <div className="space-y-3">
       {/* Hlavní akce: potvrdit */}
       <button onClick={handleConfirm} disabled={busy} className="btn-primary w-full justify-center disabled:opacity-60">
-        {busy && !showDispute ? <><Loader2 className="h-4 w-4 animate-spin" /> Potvrzuji…</> : <><CheckCircle2 className="h-4 w-4" /> Potvrdit a {hasDeposit ? 'uvolnit zálohu' : 'dokončit'}</>}
+        {busy && !showDispute
+          ? <><Loader2 className="h-4 w-4 animate-spin" /> Potvrzuji…</>
+          : <><CheckCircle2 className="h-4 w-4" /> {confirmLabel ?? `Potvrdit a ${hasDeposit ? 'uvolnit zálohu' : 'dokončit'}`}</>}
       </button>
+      {hasDeposit && heldAmount != null && heldAmount > 0 && (
+        <p className="-mt-1 text-center text-xs text-slate-500">
+          Potvrzením se poskytovateli uvolní <strong className="text-slate-700">{heldAmount.toLocaleString('cs-CZ')} Kč</strong>.
+        </p>
+      )}
 
       {/* Sekundární: nahlásit problém */}
       {!showDispute ? (
@@ -59,7 +85,8 @@ export default function ConfirmCompletionButton({ orderId, hasDeposit }: { order
             <button onClick={() => { setShowDispute(false); setReason(''); setError('') }} className="text-amber-700 hover:text-amber-900"><X className="h-4 w-4" /></button>
           </div>
           <p className="mb-3 text-xs text-amber-800">
-            Popište, co neproběhlo (např. řemeslník nedorazil). Zálohu zatím podržíme a problém posoudí Propojo.
+            {disputeHint ?? 'Popište, co neproběhlo (např. řemeslník nedorazil).'}{' '}
+            Platbu zatím podržíme a problém posoudí Propojo.
           </p>
           <textarea
             value={reason}

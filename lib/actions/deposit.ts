@@ -43,7 +43,15 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
   }
 
   if (order.status !== 'prijato') {
-    return { success: false, error: 'Platbu lze dokončit až po potvrzení termínu.' }
+    // U výrobku čekajícího na vyjádření poskytovatele je to očekávaný stav,
+    // ne chyba — zákazník má vědět, na co se čeká.
+    const cekaNaPotvrzeni = order.status === 'cekajici' && order.service_items?.item_type === 'product'
+    return {
+      success: false,
+      error: cekaNaPotvrzeni
+        ? 'Platba se zpřístupní, jakmile poskytovatel objednávku potvrdí.'
+        : 'Platbu lze dokončit až po potvrzení termínu.',
+    }
   }
 
   if (order.deposit_status === 'paid' || order.deposit_status === 'released') {

@@ -22,6 +22,7 @@ import { Loader2, X, Truck, Tag, ChevronDown, AlertTriangle, Package, Store, Pac
 import ItemImageUpload from '@/components/ui/ItemImageUpload'
 import { PRICE_UNIT_LABELS } from '@/types/database'
 import { unitShort, formatItemPrice } from '@/lib/price-format'
+import { vyzadujePotvrzeni } from '@/lib/product-confirmation'
 import InfoTip from '@/components/ui/InfoTip'
 import type { PaymentModel, PriceType, PriceUnit } from '@/types/database'
 
@@ -65,6 +66,7 @@ export interface ServiceItemValues {
   // ── VÝROBEK ──
   item_type: 'service' | 'product'
   pickup_mode: 'pickup' | 'delivery' | 'both' | null
+  pickup_timing: 'opening_hours' | 'by_agreement' | null
   min_quantity_per_order: number | null
   price_unit_quantity: number
   package_quantity: number | null
@@ -143,6 +145,7 @@ const EMPTY: ServiceItemValues = {
   quote_days: null,
   item_type: 'service',
   pickup_mode: null,
+  pickup_timing: null,
   min_quantity_per_order: null,
   price_unit_quantity: 1,
   package_quantity: null,
@@ -360,6 +363,9 @@ export default function ServiceItemEditor({
 
       // Způsob převzetí — výchozí osobní odběr.
       if (out.pickup_mode == null) out.pickup_mode = 'pickup'
+      // Čas vyzvednutí dává smysl jen když je osobní odběr možný.
+      if (out.pickup_mode === 'delivery') out.pickup_timing = null
+      else if (out.pickup_timing == null) out.pickup_timing = 'opening_hours'
 
       // Minimum množství, default 1, nesmí být nad maximem.
       if (out.min_quantity_per_order == null || out.min_quantity_per_order < 1) out.min_quantity_per_order = 1
@@ -385,6 +391,7 @@ export default function ServiceItemEditor({
     out.max_quantity_per_order = null
     out.min_quantity_per_order = null
     out.pickup_mode = null
+    out.pickup_timing = null
     out.package_quantity = null
     out.package_unit = null
     if (out.price_unit_quantity == null || out.price_unit_quantity < 1) out.price_unit_quantity = 1
@@ -1003,6 +1010,48 @@ export default function ServiceItemEditor({
             </div>
             <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-400">
               Podrobnosti doručení (cena, oblast) domluvíte se zákazníkem v chatu u objednávky.
+            </p>
+
+            {/* Kdy si zákazník může přijít — jen když je osobní odběr možný.
+                Z téhle odpovědi Propojo odvodí, jestli musíte objednávku
+                potvrzovat, nebo se potvrdí sama. */}
+            {(v.pickup_mode ?? 'pickup') !== 'delivery' && (
+              <div className="mt-3">
+                <label className="mb-1.5 block text-xs font-semibold text-slate-600">Kdy si ho může vyzvednout?</label>
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                  {([
+                    ['opening_hours', 'Během otevírací doby', 'Zboží mám na provozovně, zákazník si přijde.'],
+                    ['by_agreement', 'Po domluvě', 'Prodávám z domu nebo dílny — čas si domluvíme.'],
+                  ] as const).map(([id, popis, vysvetleni]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => set('pickup_timing', id)}
+                      className={`rounded-xl border-[1.5px] px-3 py-2.5 text-left transition ${
+                        (v.pickup_timing ?? 'opening_hours') === id
+                          ? 'border-emerald-500 bg-emerald-50'
+                          : 'border-slate-200 bg-white hover:border-emerald-300'
+                      }`}
+                    >
+                      <span className={`block text-[12.5px] font-bold ${
+                        (v.pickup_timing ?? 'opening_hours') === id ? 'text-emerald-800' : 'text-slate-700'
+                      }`}>{popis}</span>
+                      <span className="mt-0.5 block text-[11px] leading-relaxed text-slate-400">{vysvetleni}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Co z toho plyne — ať provider ví, co ho čeká, bez technických pojmů. */}
+            <p className="mt-2 rounded-lg bg-white/70 px-3 py-2 text-[11px] leading-relaxed text-slate-500">
+              {vyzadujePotvrzeni({
+                stock_mode: v.stock_mode,
+                pickup_mode: v.pickup_mode,
+                pickup_timing: v.pickup_timing,
+              })
+                ? 'Objednávku vám pošleme k potvrzení — zákazník zaplatí, až ji přijmete. Na odpověď máte 24 hodin.'
+                : 'Objednávka se potvrdí sama a zákazník rovnou zaplatí. Zboží máte skladem a k vyzvednutí v otevírací době.'}
             </p>
           </div>
         )}

@@ -54,6 +54,12 @@ type OrderRow = {
   service_item_id: string | null
   quantity: number
   needed_at: string | null
+  confirmation_deadline: string | null
+  cancelled_by: string | null
+  product_fulfillment_status: string | null
+  product_ready_at: string | null
+  product_handed_over_at: string | null
+  ready_photo_url: string | null
   services: ServiceLite | null
   service_items: {
     name: string | null
@@ -101,7 +107,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
 
   const { data: order, error } = await supabase
     .from('orders')
-    .select('*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee, location_type, address, address_lat, address_lng, address_public, phone), service_items(name, price, price_unit, deposit_amount, deposit_type, payment_model, duration_minutes, quote_fee, fee_mode, item_type, stock_mode, lead_time_days)')
+    .select('*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee, location_type, address, address_lat, address_lng, address_public, phone), service_items(name, price, price_unit, deposit_amount, deposit_type, payment_model, duration_minutes, quote_fee, fee_mode, item_type, stock_mode, lead_time_days, pickup_mode, pickup_timing)')
     .eq('id', params.id)
     .single() as { data: OrderRow | null; error: any }
 

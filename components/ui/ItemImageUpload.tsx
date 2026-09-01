@@ -18,12 +18,15 @@ import { resizeImage } from '@/lib/image-resize'
 interface Props {
   value: string | null
   onChange: (url: string | null) => void
+  /** Podsložka ve Storage. 'items' = fotka v nabídce, 'orders' = fotka hotové
+   *  objednávky. Oddělené, ať se v bucketu dá vyznat. */
+  folder?: 'items' | 'orders'
 }
 
 // Jen pojistka proti absurdně velkým souborům — skutečnou velikost řeší zmenšení.
 const MAX_SOURCE_MB = 25
 
-export default function ItemImageUpload({ value, onChange }: Props) {
+export default function ItemImageUpload({ value, onChange, folder = 'items' }: Props) {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -43,7 +46,7 @@ export default function ItemImageUpload({ value, onChange }: Props) {
     // síťové/uploadové selhání.
     try {
       const prepared = await resizeImage(file)
-      const fileName = `${user.id}/items/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${prepared.ext}`
+      const fileName = `${user.id}/${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${prepared.ext}`
       const { data, error: upErr } = await supabase.storage
         .from('images')
         .upload(fileName, prepared.blob, { upsert: false, contentType: prepared.contentType })

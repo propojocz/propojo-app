@@ -78,6 +78,7 @@ function itemToValues(it: ServiceItem): ServiceItemValues {
     // Výrobková pole — u starších řádků bezpečně spadnou na službu / null.
     item_type: ((it as any).item_type as 'service' | 'product') ?? 'service',
     pickup_mode: ((it as any).pickup_mode as 'pickup' | 'delivery' | 'both' | null) ?? null,
+    pickup_timing: ((it as any).pickup_timing as 'opening_hours' | 'by_agreement' | null) ?? null,
     min_quantity_per_order: (it as any).min_quantity_per_order ?? null,
     stock_mode: ((it as any).stock_mode as 'stock' | 'made_to_order' | 'unlimited' | null) ?? null,
     stock_quantity: (it as any).stock_quantity ?? null,

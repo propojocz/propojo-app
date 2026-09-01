@@ -24,6 +24,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { createNotification } from './notifications'
+import { vyzadujePotvrzeni, confirmationDeadline, nejdrivejsiDenDodani } from '@/lib/product-confirmation'
 
 // Kolik času má zákazník na dokončení platby. Stejný princip jako u termínů.
 const HOLD_MINUTES = 30
@@ -36,7 +37,7 @@ function getAdminClient() {
 }
 
 type Result =
-  | { success: true; id: string; needsPayment: boolean }
+  | { success: true; id: string; needsPayment: boolean; awaitingConfirmation: boolean }
   | { success: false; error: string }
 
 type ItemRow = {
@@ -51,11 +52,34 @@ type ItemRow = {
   deposit_amount: number | null
   stock_mode: string | null
   stock_quantity: number | null
-  min_quantity_per_order: number | null
   max_quantity_per_order: number | null
   production_capacity: number | null
   lead_time_days: number | null
   available_days: number[] | null
+  min_quantity_per_order: number | null
+  pickup_mode: string | null
+  pickup_timing: string | null
+}
+
+// Drží tahle objednávka zboží?
+//
+// Tři situace, ne dvě (dřív se rozlišovalo jen „pending vs. zbytek", takže
+// objednávka s deposit_status 'none' držela kusy navždy):
+//   1) zaplaceno                    → drží, dokud ji někdo nezruší
+//   2) potvrzená bez platby předem  → drží (bez_platby: platí se až na místě)
+//   3) cokoli s běžícím holdem      → drží jen dokud hold trvá
+//      (čeká na platbu NEBO čeká na potvrzení poskytovatele)
+function zabiraZbozi(
+  o: { status: string; deposit_status: string | null; hold_expires_at: string | null },
+  now: number,
+): boolean {
+  if (o.deposit_status === 'paid' || o.deposit_status === 'released') return true
+  if (o.status === 'prijato' && (o.deposit_status === 'none' || o.deposit_status == null)) {
+    // Přijatá objednávka, u které se předem neplatí — drží zboží natrvalo.
+    // Hold u ní nemá smysl, protože není na co čekat.
+    return !o.hold_expires_at || new Date(o.hold_expires_at).getTime() > now
+  }
+  return o.hold_expires_at ? new Date(o.hold_expires_at).getTime() > now : false
 }
 
 // Počet kusů, které právě drží živé objednávky. Volitelně jen pro jeden den.
@@ -82,13 +106,7 @@ async function zabranoKusu(
   const now = Date.now()
   return (data ?? [])
     .filter((o) => o.id !== krome)
-    .filter((o) => {
-      // Čeká na platbu → drží zboží jen dokud běží hold.
-      if (o.deposit_status === 'pending') {
-        return o.hold_expires_at ? new Date(o.hold_expires_at).getTime() > now : false
-      }
-      return true
-    })
+    .filter((o) => zabiraZbozi(o, now))
     .reduce((soucet, o) => soucet + (Number(o.quantity) || 1), 0)
 }
 
@@ -98,14 +116,14 @@ function zkontrolujDen(item: ItemRow, den: string): string | null {
   const cil = new Date(`${den}T00:00:00`)
   if (isNaN(cil.getTime())) return 'Vyberte prosím platný den dodání.'
 
-  const dnes = new Date()
-  dnes.setHours(0, 0, 0, 0)
   const predstih = Number(item.lead_time_days ?? 0)
-  const nejdriv = new Date(dnes)
-  nejdriv.setDate(nejdriv.getDate() + predstih)
-  if (cil.getTime() < nejdriv.getTime()) {
+  // Nejbližší den bere v úvahu i to, že provider musí stihnout objednávku
+  // potvrdit PŘED začátkem svého předstihu. Objednávka podaná pozdě večer se
+  // proto posune o den — jinak by vznikla s už propadlou lhůtou.
+  const nejdrivIso = nejdrivejsiDenDodani(predstih, new Date(), vyzadujePotvrzeni(item))
+  if (den < nejdrivIso) {
     return predstih > 0
-      ? `Tento výrobek je potřeba objednat aspoň ${predstih} ${predstih === 1 ? 'den' : predstih < 5 ? 'dny' : 'dní'} dopředu.`
+      ? `Tento výrobek je potřeba objednat aspoň ${predstih} ${predstih === 1 ? 'den' : predstih < 5 ? 'dny' : 'dní'} dopředu. Nejbližší možný den je ${nejdrivIso}.`
       : 'Tento den už objednat nelze.'
   }
 
@@ -139,7 +157,7 @@ export async function orderProduct(values: {
   // ── Položka ────────────────────────────────────────────────
   const { data: item } = await admin
     .from('service_items')
-    .select('id, service_id, name, is_active, item_type, price, price_unit, deposit_type, deposit_amount, stock_mode, stock_quantity, min_quantity_per_order, max_quantity_per_order, production_capacity, lead_time_days, available_days')
+    .select('id, service_id, name, is_active, item_type, price, price_unit, deposit_type, deposit_amount, stock_mode, stock_quantity, max_quantity_per_order, min_quantity_per_order, production_capacity, lead_time_days, available_days, pickup_mode, pickup_timing')
     .eq('id', values.service_item_id)
     .single() as { data: ItemRow | null }
 
@@ -171,27 +189,14 @@ export async function orderProduct(values: {
   const rezim = item.stock_mode ?? 'stock'
   const den = rezim === 'made_to_order' ? (values.needed_at ?? null) : null
 
-  // ── Limity na jednu objednávku ─────────────────────────────
-  // Minimum musí hlídat i server — klientský stepper lze obejít.
-  const minNaObjednavku = Math.max(1, Number(item.min_quantity_per_order ?? 1))
-  if (mnozstvi < minNaObjednavku) {
-    return {
-      success: false,
-      error: `Minimální množství v jedné objednávce je ${minNaObjednavku} ks.`,
-    }
-  }
-
+  // ── Limit na jednu objednávku ──────────────────────────────
   const maxNaObjednavku = item.max_quantity_per_order
   if (maxNaObjednavku != null && mnozstvi > maxNaObjednavku) {
     return { success: false, error: `Najednou lze objednat nejvýš ${maxNaObjednavku} ks.` }
   }
-
-  // Pojistka proti nekonzistentnímu nastavení položky.
-  if (maxNaObjednavku != null && maxNaObjednavku < minNaObjednavku) {
-    return {
-      success: false,
-      error: 'Poskytovatel má u výrobku neplatně nastavené minimální a maximální množství.',
-    }
+  const minNaObjednavku = item.min_quantity_per_order
+  if (minNaObjednavku != null && minNaObjednavku > 1 && mnozstvi < minNaObjednavku) {
+    return { success: false, error: `Nejmenší možná objednávka je ${minNaObjednavku} ks.` }
   }
 
   // ── Předběžná kontrola dostupnosti ─────────────────────────
@@ -213,18 +218,13 @@ export async function orderProduct(values: {
     const chyba = zkontrolujDen(item, den)
     if (chyba) return { success: false, error: chyba }
 
+    // KAPACITA JE MĚKKÁ, ne skladový limit.
+    // Sklad je fyzický (víc kusů prostě není), ale denní kapacita je jen
+    // „kolik obvykle zvládnu". Cukrář může kvůli dobré objednávce zůstat déle
+    // v kuchyni — proto zákazníka neblokujeme a rozhodnutí necháme na
+    // providerovi, který objednávku stejně potvrzuje (a vidí u ní upozornění).
     const kapacita = Number(item.production_capacity ?? 0)
     if (kapacita <= 0) return { success: false, error: 'Poskytovatel nemá nastavenou kapacitu výroby.' }
-    const zabrano = await zabranoKusu(admin, item.id, den)
-    const volne = kapacita - zabrano
-    if (volne < mnozstvi) {
-      return {
-        success: false,
-        error: volne > 0
-          ? `Na tento den zbývá kapacita ${volne} ${volne === 1 ? 'kus' : volne < 5 ? 'kusy' : 'kusů'}. Vyberte jiný den nebo menší počet.`
-          : 'Na tento den je už kapacita plná. Vyberte prosím jiný den.',
-      }
-    }
   }
 
   // ── Cena a platba ──────────────────────────────────────────
@@ -244,26 +244,42 @@ export async function orderProduct(values: {
   const needsPayment = castkaPredem > 0
 
   // ── Založení objednávky ────────────────────────────────────
-  // Status 'prijato': poskytovatel výrobek vypsal s dostupností, takže objednávku
-  // neschvaluje zvlášť — stejná logika jako u rezervace vypsaného termínu.
+  // DVĚ CESTY podle toho, jestli se provider musí vyjádřit (viz product-confirmation):
+  //
+  //  a) POTVRZUJE PROVIDER (dort na zakázku, doručení, odběr po domluvě)
+  //     → status 'cekajici', zákazník zatím NEPLATÍ. Zboží/kapacita se ale
+  //       drží po dobu confirmation_deadline, jinak by ho mezitím koupil někdo
+  //       jiný. Platba se odemkne až přijetím.
+  //
+  //  b) AUTOMATICKY (skladem + odběr v otevírací době)
+  //     → status 'prijato' a rovnou platba, jak to fungovalo dosud.
+  const potvrzuje = vyzadujePotvrzeni(item)
+  const deadline = potvrzuje
+    ? confirmationDeadline(den, item.lead_time_days)
+    : null
+
   const { data: order, error: orderErr } = await (admin.from('orders') as any)
     .insert({
       customer_id: user.id,
       provider_id: card.provider_id,
       service_id: values.service_id,
       service_item_id: item.id,
-      status: 'prijato',
+      status: potvrzuje ? 'cekajici' : 'prijato',
       is_inquiry: false,
       description: values.message?.trim() || null,
       quantity: mnozstvi,
       unit_price: cenaZaKus > 0 ? cenaZaKus : null,
       total_price: celkem,
       needed_at: den,
-      deposit_amount: needsPayment ? castkaPredem : null,
-      deposit_status: needsPayment ? 'pending' : 'none',
-      hold_expires_at: needsPayment
-        ? new Date(Date.now() + HOLD_MINUTES * 60_000).toISOString()
-        : null,
+      // Dokud provider nepotvrdí, nemá smysl počítat zálohu ani platbu.
+      deposit_amount: potvrzuje ? null : (needsPayment ? castkaPredem : null),
+      deposit_status: potvrzuje ? 'none' : (needsPayment ? 'pending' : 'none'),
+      // hold_expires_at drží zboží v obou fázích — během čekání na potvrzení
+      // až do deadline, po přijetí pak po dobu platebního okna.
+      hold_expires_at: potvrzuje
+        ? deadline!.toISOString()
+        : (needsPayment ? new Date(Date.now() + HOLD_MINUTES * 60_000).toISOString() : null),
+      confirmation_deadline: potvrzuje ? deadline!.toISOString() : null,
       location_city: values.location_city?.trim() || card.city || null,
       service_location: values.service_location ?? null,
     })
@@ -278,11 +294,10 @@ export async function orderProduct(values: {
   // ── Kontrola souběhu ───────────────────────────────────────
   // Teď už je naše objednávka v databázi, takže ji uvidí i ten druhý. Sečteme
   // znovu VŠECHNO včetně sebe: když jsme přes limit, couvá ten, kdo přišel později.
-  const limit = rezim === 'stock'
-    ? Number(item.stock_quantity ?? 0)
-    : rezim === 'made_to_order'
-      ? Number(item.production_capacity ?? 0)
-      : null
+  // Souběh řešíme jen u SKLADU — tam je limit fyzický a přeprodat ho nelze.
+  // U výroby na objednávku je kapacita měkká, takže se nic nevrací zpět;
+  // překročení jen uvidí provider při potvrzování.
+  const limit = rezim === 'stock' ? Number(item.stock_quantity ?? 0) : null
 
   if (limit != null) {
     const celkemZabrano = await zabranoKusu(admin, item.id, den)
@@ -299,10 +314,7 @@ export async function orderProduct(values: {
       const now = Date.now()
       const zive = (starsi ?? []).filter((o: any) => {
         if (den && o.needed_at !== den) return false
-        if (o.deposit_status === 'pending') {
-          return o.hold_expires_at ? new Date(o.hold_expires_at).getTime() > now : false
-        }
-        return true
+        return zabiraZbozi(o, now)
       })
       const predNami = zive.reduce((s: number, o: any) => s + (Number(o.quantity) || 1), 0)
 
@@ -319,17 +331,20 @@ export async function orderProduct(values: {
   }
 
   // ── Oznámení poskytovateli ─────────────────────────────────
-  // U placené objednávky čekáme na zaplacení (řeší webhook), ať poskytovateli
-  // nechodí zprávy o objednávkách, které nikdo nedoplatí.
-  if (!needsPayment) {
+  // Čeká-li se na jeho potvrzení, musí se dozvědět HNED — běží mu lhůta.
+  // U rovnou přijaté a placené objednávky čekáme na zaplacení (řeší webhook),
+  // ať mu nechodí zprávy o objednávkách, které nikdo nedoplatí.
+  if (potvrzuje || !needsPayment) {
     try {
       await createNotification({
         userId: card.provider_id,
         type: 'status_change',
         orderId: order.id,
         actorId: user.id,
-        title: 'Nová objednávka výrobku',
-        preview: `${mnozstvi}× ${item.name}`,
+        title: potvrzuje ? 'Nová objednávka — potvrďte ji' : 'Nová objednávka výrobku',
+        preview: potvrzuje
+          ? `${mnozstvi}× ${item.name}${den ? ` · potřeba do ${den}` : ''}`
+          : `${mnozstvi}× ${item.name}`,
       })
     } catch (err) {
       console.error('[orderProduct] notifikace:', err)
@@ -338,7 +353,12 @@ export async function orderProduct(values: {
 
   revalidatePath(`/sluzby/${values.service_id}`)
   revalidatePath('/dashboard/objednavky')
-  return { success: true, id: order.id, needsPayment }
+  return {
+    success: true,
+    id: order.id,
+    needsPayment: potvrzuje ? false : needsPayment,
+    awaitingConfirmation: potvrzuje,
+  }
 }
 
 // ── Dostupnost pro zobrazení v UI ────────────────────────────
@@ -394,5 +414,349 @@ export async function setStockQuantity(itemId: string, quantity: number): Promis
 
   revalidatePath('/dashboard/nabidky')
   revalidatePath(`/sluzby/${item.service_id}`)
+  return { success: true }
+}
+
+// ── POTVRZENÍ / ODMÍTNUTÍ POSKYTOVATELEM ─────────────────────
+// Objednávka výrobku, u které se čeká na vyjádření (viz vyzadujePotvrzeni).
+// Přijetím se odemkne platba, odmítnutím se uvolní držené zboží.
+
+/** Provider přijímá objednávku — teprve teď se zákazníkovi zpřístupní platba. */
+export async function acceptProductOrder(orderId: string): Promise<{ success: boolean; error?: string }> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+
+  const admin = getAdminClient()
+  const { data: order } = await admin
+    .from('orders')
+    .select('id, provider_id, customer_id, status, quantity, needed_at, service_items(name, deposit_type, deposit_amount, price, item_type)')
+    .eq('id', orderId)
+    .single() as { data: any }
+
+  if (!order) return { success: false, error: 'Objednávka nenalezena.' }
+  if (order.provider_id !== user.id) return { success: false, error: 'Tato objednávka vám nepatří.' }
+  if (order.service_items?.item_type !== 'product') return { success: false, error: 'Tohle není objednávka výrobku.' }
+  if (order.status !== 'cekajici') return { success: false, error: 'Tuhle objednávku už nelze potvrdit.' }
+
+  // Kolik má zákazník zaplatit předem. Stejný výpočet jako při zakládání —
+  // záloha se u výrobku počítá za kus.
+  const polozka = order.service_items
+  const pocet = Math.max(1, Number(order.quantity ?? 1))
+  const cenaZaKus = Number(polozka?.price ?? 0)
+  const celkem = cenaZaKus > 0 ? cenaZaKus * pocet : null
+  const rezim = polozka?.deposit_type ?? 'plna_platba'
+  let castkaPredem = 0
+  if (rezim === 'plna_platba') {
+    castkaPredem = celkem ?? 0
+  } else if (rezim === 'zaloha') {
+    castkaPredem = Number(polozka?.deposit_amount ?? 0) * pocet
+    if (celkem != null && castkaPredem > celkem) castkaPredem = celkem
+  }
+  const needsPayment = castkaPredem > 0
+
+  const { error } = await (admin.from('orders') as any)
+    .update({
+      status: 'prijato',
+      confirmation_deadline: null,
+      deposit_amount: needsPayment ? castkaPredem : null,
+      deposit_status: needsPayment ? 'pending' : 'none',
+      // Od přijetí běží platební okno. Bez platby předem se zboží drží natrvalo.
+      hold_expires_at: needsPayment
+        ? new Date(Date.now() + HOLD_MINUTES * 60_000).toISOString()
+        : null,
+    })
+    .eq('id', orderId)
+    .eq('status', 'cekajici')
+
+  if (error) {
+    console.error('[acceptProductOrder]', error)
+    return { success: false, error: 'Objednávku se nepodařilo potvrdit.' }
+  }
+
+  try {
+    await createNotification({
+      userId: order.customer_id,
+      type: 'status_change',
+      orderId,
+      actorId: user.id,
+      title: needsPayment ? 'Objednávka potvrzena — můžete zaplatit' : 'Objednávka potvrzena',
+      preview: pocet + 'x ' + (polozka?.name ?? 'výrobek'),
+    })
+  } catch (err) {
+    console.error('[acceptProductOrder] notifikace:', err)
+  }
+
+  revalidatePath('/dashboard/objednavky')
+  revalidatePath('/dashboard/objednavky/' + orderId)
+  return { success: true }
+}
+
+/** Provider objednávku odmítá — držené zboží se uvolní, zákazník nic neplatil. */
+export async function declineProductOrder(orderId: string, duvod?: string): Promise<{ success: boolean; error?: string }> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+
+  const admin = getAdminClient()
+  const { data: order } = await admin
+    .from('orders')
+    .select('id, provider_id, customer_id, status, quantity, service_items(name, item_type)')
+    .eq('id', orderId)
+    .single() as { data: any }
+
+  if (!order) return { success: false, error: 'Objednávka nenalezena.' }
+  if (order.provider_id !== user.id) return { success: false, error: 'Tato objednávka vám nepatří.' }
+  if (order.status !== 'cekajici') return { success: false, error: 'Tuhle objednávku už nelze odmítnout.' }
+
+  const { error } = await (admin.from('orders') as any)
+    .update({
+      status: 'zruseno',
+      cancelled_by: 'provider',
+      confirmation_deadline: null,
+      hold_expires_at: null,
+    })
+    .eq('id', orderId)
+    .eq('status', 'cekajici')
+
+  if (error) {
+    console.error('[declineProductOrder]', error)
+    return { success: false, error: 'Objednávku se nepodařilo odmítnout.' }
+  }
+
+  // Důvod jako zpráva v chatu, ať zákazník ví, na čem je.
+  if (duvod && duvod.trim()) {
+    try {
+      await (admin.from('messages') as any).insert({
+        order_id: orderId,
+        sender_id: user.id,
+        content: duvod.trim(),
+      })
+    } catch { /* zpráva není kritická */ }
+  }
+
+  try {
+    await createNotification({
+      userId: order.customer_id,
+      type: 'status_change',
+      orderId,
+      actorId: user.id,
+      title: 'Objednávku nešlo přijmout',
+      preview: (order.service_items?.name ?? 'Výrobek') + ' · nic jsme vám neúčtovali.',
+    })
+  } catch (err) {
+    console.error('[declineProductOrder] notifikace:', err)
+  }
+
+  revalidatePath('/dashboard/objednavky')
+  revalidatePath('/dashboard/objednavky/' + orderId)
+  return { success: true }
+}
+
+// ── CRON: vypršelá lhůta na potvrzení ────────────────────────
+// Provider se do lhůty nevyjádřil → objednávka se ruší a držené zboží se uvolní.
+// Bez tohohle by objednávka visela věčně a blokovala sklad.
+export async function autoDeclineExpiredConfirmations(): Promise<{ cancelled: number }> {
+  const admin = getAdminClient()
+  const { data: rows } = await admin
+    .from('orders')
+    .select('id, customer_id, provider_id, service_items(name)')
+    .eq('status', 'cekajici')
+    .not('confirmation_deadline', 'is', null)
+    .lt('confirmation_deadline', new Date().toISOString()) as { data: any[] | null }
+
+  let cancelled = 0
+  for (const o of rows ?? []) {
+    const { error } = await (admin.from('orders') as any)
+      .update({
+        status: 'zruseno',
+        cancelled_by: 'system',
+        confirmation_deadline: null,
+        hold_expires_at: null,
+      })
+      .eq('id', o.id)
+      .eq('status', 'cekajici')
+    if (error) {
+      console.error('[autoDeclineExpiredConfirmations]', o.id, error)
+      continue
+    }
+    cancelled++
+
+    const nazev = o.service_items?.name ?? 'Výrobek'
+    try {
+      await createNotification({
+        userId: o.customer_id,
+        type: 'status_change',
+        orderId: o.id,
+        actorId: o.customer_id,
+        title: 'Poskytovatel nestihl odpovědět',
+        preview: nazev + ' · nic jsme vám neúčtovali, zkuste prosím jiného poskytovatele.',
+      })
+      await createNotification({
+        userId: o.provider_id,
+        type: 'status_change',
+        orderId: o.id,
+        actorId: o.provider_id,
+        title: 'Objednávce vypršela lhůta',
+        preview: nazev + ' · nepotvrdili jste ji včas, zboží jsme uvolnili.',
+      })
+    } catch { /* notifikace nejsou kritické */ }
+  }
+
+  return { cancelled }
+}
+
+/**
+ * Vytížení dne u výroby na objednávku — podklad pro upozornění providerovi.
+ *
+ * Kapacita je MĚKKÁ: nebrání objednat ani potvrdit, jen říká, jak je den plný.
+ * `over` = objednávek je víc, než kolik provider běžně zvládne.
+ */
+export async function getDayLoad(
+  itemId: string,
+  den: string,
+): Promise<{ used: number; capacity: number; over: boolean } | null> {
+  const admin = getAdminClient()
+  const { data: item } = await admin
+    .from('service_items')
+    .select('stock_mode, production_capacity')
+    .eq('id', itemId)
+    .single() as { data: { stock_mode: string | null; production_capacity: number | null } | null }
+
+  if (!item || item.stock_mode !== 'made_to_order') return null
+  const capacity = Number(item.production_capacity ?? 0)
+  if (capacity <= 0) return null
+
+  const used = await zabranoKusu(admin, itemId, den)
+  return { used, capacity, over: used > capacity }
+}
+
+// ── FYZICKÝ STAV VÝROBKU ─────────────────────────────────────
+// Oddělené od orders.status schválně (viz vyrobky-vrstva6.sql). Tady se řeší,
+// kde výrobek fyzicky je; obchodní stav a výplaty řídí dál orders.status.
+
+type FulfillResult = { success: boolean; error?: string }
+
+async function nactiProProvidera(orderId: string, userId: string) {
+  const admin = getAdminClient()
+  const { data: order } = await admin
+    .from('orders')
+    .select('id, provider_id, customer_id, status, quantity, deposit_status, service_location, product_fulfillment_status, service_items(name, item_type)')
+    .eq('id', orderId)
+    .single() as { data: any }
+  if (!order) return { admin, order: null, error: 'Objednávka nenalezena.' }
+  if (order.provider_id !== userId) return { admin, order: null, error: 'Tato objednávka vám nepatří.' }
+  if (order.service_items?.item_type !== 'product') return { admin, order: null, error: 'Tohle není objednávka výrobku.' }
+  return { admin, order, error: null as string | null }
+}
+
+/**
+ * Provider označí, že je výrobek hotový a čeká na zákazníka.
+ *
+ * POZOR: tohle NESPOUŠTÍ výplatu. orders.status zůstává 'prijato', takže se
+ * objednávka nedostane do 'ceka_potvrzeni' ani do dvoudenního automatu.
+ * Peníze se uvolní až po skutečném předání.
+ */
+export async function markProductReady(orderId: string, photoUrl?: string | null): Promise<FulfillResult> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+
+  const { admin, order, error: loadErr } = await nactiProProvidera(orderId, user.id)
+  if (loadErr || !order) return { success: false, error: loadErr ?? 'Objednávka nenalezena.' }
+  if (order.status !== 'prijato') return { success: false, error: 'Objednávku lze označit jako připravenou až po přijetí a zaplacení.' }
+
+  const { error } = await (admin.from('orders') as any)
+    .update({
+      product_fulfillment_status: 'ready',
+      product_ready_at: new Date().toISOString(),
+      // Fotka hotové objednávky — nepovinná, ale u zakázkové výroby to je
+      // moment, kdy Propojo působí líp než obyčejná zpráva v chatu.
+      ready_photo_url: photoUrl?.trim() || null,
+    })
+    .eq('id', orderId)
+    .eq('status', 'prijato')
+
+  if (error) {
+    console.error('[markProductReady]', error)
+    return { success: false, error: 'Nepodařilo se uložit.' }
+  }
+
+  const doruceni = order.service_location === 'u_zakaznika'
+  try {
+    await createNotification({
+      userId: order.customer_id,
+      type: 'status_change',
+      orderId,
+      actorId: user.id,
+      title: doruceni ? 'Objednávka je připravená k doručení' : 'Objednávka je připravená k vyzvednutí',
+      preview: (order.quantity > 1 ? order.quantity + 'x ' : '') + (order.service_items?.name ?? 'výrobek')
+        + (photoUrl?.trim() ? ' · přidána fotka' : ''),
+    })
+  } catch (err) {
+    console.error('[markProductReady] notifikace:', err)
+  }
+
+  revalidatePath('/dashboard/objednavky')
+  revalidatePath('/dashboard/objednavky/' + orderId)
+  return { success: true }
+}
+
+/**
+ * Provider označí, že výrobek předal / doručil.
+ *
+ * TEPRVE TADY přechází objednávka do 'ceka_potvrzeni' — od toho okamžiku běží
+ * dvoudenní automat na uvolnění peněz (payout.autoReleaseStaleDeposits počítá
+ * od completed_at). Zákazník má mezitím možnost potvrdit nebo nahlásit problém.
+ */
+export async function markProductHandedOver(orderId: string): Promise<FulfillResult> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+
+  const { admin, order, error: loadErr } = await nactiProProvidera(orderId, user.id)
+  if (loadErr || !order) return { success: false, error: loadErr ?? 'Objednávka nenalezena.' }
+  if (order.status !== 'prijato') return { success: false, error: 'Tuhle objednávku už nelze označit jako předanou.' }
+
+  // Bez zaplacení není co uvolňovat — stejná ochrana jako u služeb.
+  const zaplaceno = order.deposit_status === 'paid' || order.deposit_status === 'released'
+  const bezPlatbyPredem = order.deposit_status === 'none' || order.deposit_status == null
+  if (!zaplaceno && !bezPlatbyPredem) {
+    return { success: false, error: 'Objednávka ještě není zaplacená.' }
+  }
+
+  const ted = new Date().toISOString()
+  const { error } = await (admin.from('orders') as any)
+    .update({
+      product_fulfillment_status: 'handed_over',
+      product_handed_over_at: ted,
+      // Od téhle chvíle běží lhůta na potvrzení zákazníkem.
+      status: 'ceka_potvrzeni',
+      completed_at: ted,
+    })
+    .eq('id', orderId)
+    .eq('status', 'prijato')
+
+  if (error) {
+    console.error('[markProductHandedOver]', error)
+    return { success: false, error: 'Nepodařilo se uložit.' }
+  }
+
+  const doruceni = order.service_location === 'u_zakaznika'
+  try {
+    await createNotification({
+      userId: order.customer_id,
+      type: 'status_change',
+      orderId,
+      actorId: user.id,
+      title: doruceni ? 'Objednávka byla doručena' : 'Objednávka byla předána',
+      preview: 'Potvrďte prosím, že je vše v pořádku.',
+    })
+  } catch (err) {
+    console.error('[markProductHandedOver] notifikace:', err)
+  }
+
+  revalidatePath('/dashboard/objednavky')
+  revalidatePath('/dashboard/objednavky/' + orderId)
   return { success: true }
 }

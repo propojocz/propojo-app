@@ -7,9 +7,11 @@
 // rovnou uzavírá zakázku tlačítkem „Potvrdit pro uvolnění výplaty" → ceka_potvrzeni,
 // čímž se u zákazníka objeví potvrzení + hodnocení a spustí se výplata.
 
-import { useState } from 'react'
-import { Loader2, CheckCircle2, XCircle, Wallet } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Loader2, CheckCircle2, XCircle, Wallet, AlertTriangle, Package, PackageCheck } from 'lucide-react'
 import { updateOrderStatus } from '@/lib/actions/orders'
+import ItemImageUpload from '@/components/ui/ItemImageUpload'
+import { acceptProductOrder, declineProductOrder, getDayLoad, markProductReady, markProductHandedOver } from '@/lib/actions/product-order'
 
 const NEXT_STATUS: Record<string, { status: string; label: string; icon: any; color: string }[]> = {
   cekajici: [
@@ -25,21 +27,52 @@ export default function OrderStatusButton({
   depositStatus = null,
   scheduledAt = null,
   durationMinutes = null,
+  isProduct = false,
+  productQuantity = 1,
+  productName = null,
+  neededAt = null,
+  confirmationDeadline = null,
+  serviceItemId = null,
+  fulfillmentStatus = null,
+  isDelivery = false,
   canAcceptWithoutTime = false,
 }: {
   orderId: string
   currentStatus: string
   depositStatus?: string | null
+  /** Výrobek má vlastní přijetí/odmítnutí — musí uvolnit rezervovanou zásobu. */
+  isProduct?: boolean
+  productQuantity?: number
+  productName?: string | null
+  neededAt?: string | null
+  confirmationDeadline?: string | null
+  serviceItemId?: string | null
+  fulfillmentStatus?: string | null
+  isDelivery?: boolean
+  /** Model B (výjezd a nacenění) — přijmout jde i bez domluveného termínu. */
+  canAcceptWithoutTime?: boolean
   /** Domluvený termín — dřív než nastane, nemá smysl zakázku uzavírat. */
   scheduledAt?: string | null
   /** Délka úkonu v minutách — uzavírat jde až po jejím uplynutí,
       ne hned na začátku termínu (barvení trvá 90 minut). */
   durationMinutes?: number | null
-  /** Model B / jiný tok, kde lze objednávku přijmout i bez přesného termínu. */
-  canAcceptWithoutTime?: boolean
 }) {
   const [loading, setLoading] = useState<string | null>(null)
   const [err, setErr] = useState('')
+  // Vytížení dne u výroby na objednávku. Kapacita je měkká — jen upozorníme,
+  // přijetí nikdy neblokujeme.
+  const [dayLoad, setDayLoad] = useState<{ used: number; capacity: number; over: boolean } | null>(null)
+  // Nepovinná fotka hotové objednávky — posílá se spolu s „připraveno".
+  const [readyPhoto, setReadyPhoto] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!isProduct || currentStatus !== 'cekajici' || !serviceItemId || !neededAt) return
+    let cancelled = false
+    getDayLoad(serviceItemId, neededAt)
+      .then((r) => { if (!cancelled) setDayLoad(r) })
+      .catch(() => { /* upozornění je nice-to-have */ })
+    return () => { cancelled = true }
+  }, [isProduct, currentStatus, serviceItemId, neededAt])
 
   const handleAction = async (status: string) => {
     setErr('')
@@ -49,9 +82,80 @@ export default function OrderStatusButton({
     setLoading(null)
   }
 
-  // Běžná služba bez termínu se nejdřív musí domluvit. Server to stejně hlídá,
-  // ale v UI nedává smysl ukazovat tlačítko, které vždy skončí chybou.
-  // Model B je výjimka: výjezd/nacenění lze přijmout i bez scheduled_at.
+  // ── VÝROBEK ČEKÁ NA POTVRZENÍ ───────────────────────────────
+  // Vlastní akce (ne updateOrderStatus): přijetím se odemkne platba,
+  // odmítnutím se uvolní rezervovaná zásoba i kapacita dne.
+  if (isProduct && currentStatus === 'cekajici') {
+    const denText = neededAt
+      ? new Intl.DateTimeFormat('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long' })
+          .format(new Date(`${neededAt}T00:00:00`))
+      : null
+    const lhuta = confirmationDeadline
+      ? new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })
+          .format(new Date(confirmationDeadline))
+      : null
+
+    const handleAccept = async () => {
+      setErr(''); setLoading('accept')
+      const res = await acceptProductOrder(orderId)
+      if (!res.success) setErr(res.error ?? 'Nepodařilo se potvrdit.')
+      setLoading(null)
+    }
+    const handleDecline = async () => {
+      if (!confirm('Opravdu objednávku odmítnout? Zákazníkovi dáme vědět a nic mu nebudeme účtovat.')) return
+      setErr(''); setLoading('decline')
+      const res = await declineProductOrder(orderId)
+      if (!res.success) setErr(res.error ?? 'Nepodařilo se odmítnout.')
+      setLoading(null)
+    }
+
+    return (
+      <div className="w-full">
+        <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-4">
+          <p className="mb-0.5 text-sm font-bold text-slate-900">Potvrďte objednávku</p>
+          <p className="mb-3 text-xs leading-relaxed text-slate-600">
+            {productQuantity > 1 ? `${productQuantity}× ` : ''}{productName ?? 'Výrobek'}
+            {denText ? <> · zákazník potřebuje <strong className="text-slate-800">{denText}</strong></> : null}
+            <br />
+            Zákazník zaplatí, až objednávku přijmete.
+            {lhuta ? <> Odpovězte prosím do <strong className="text-slate-800">{lhuta}</strong>, jinak objednávka propadne.</> : null}
+          </p>
+          {dayLoad?.over && (
+            <p className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11.5px] leading-relaxed text-amber-800">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                Na tento den už máte {dayLoad.used} z běžných {dayLoad.capacity} ks.
+                Přijmout můžete i tak — jen ověřte, že to stihnete.
+              </span>
+            </p>
+          )}
+          <button
+            onClick={handleAccept}
+            disabled={!!loading}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-base font-bold text-white transition hover:bg-emerald-600 disabled:opacity-60"
+          >
+            {loading === 'accept'
+              ? <><Loader2 className="h-4 w-4 animate-spin" /> Potvrzuji…</>
+              : <><CheckCircle2 className="h-4 w-4" /> Přijmout objednávku</>}
+          </button>
+        </div>
+
+        <button
+          onClick={handleDecline}
+          disabled={!!loading}
+          className="mt-2 flex items-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-60"
+        >
+          {loading === 'decline' ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+          Tento termín nemohu splnit
+        </button>
+        {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
+      </div>
+    )
+  }
+
+  // ── SLUŽBA ČEKÁ NA TERMÍN ───────────────────────────────────
+  // Služba (ne výrobek) bez domluveného termínu: nejdřív se musí navrhnout
+  // termín. Model B (výjezd a nacenění) termín nemá, proto canAcceptWithoutTime.
   if (currentStatus === 'cekajici' && !scheduledAt && !canAcceptWithoutTime) {
     return (
       <div className="w-full">
@@ -74,6 +178,111 @@ export default function OrderStatusButton({
   // Ve stavu "čeká na potvrzení" poskytovatel jen čeká na zákazníka.
   if (currentStatus === 'ceka_potvrzeni') {
     return <p className="text-sm text-slate-500">Čeká se na potvrzení od zákazníka — jakmile potvrdí, převedeme vám platbu.</p>
+  }
+
+  // ── VÝROBEK: PŘÍPRAVA → PŘEDÁNÍ ─────────────────────────────
+  // Dva samostatné kroky. „Připraveno" NEspouští výplatu — objednávka zůstává
+  // 'prijato'. Do 'ceka_potvrzeni' (a tím do dvoudenního automatu) přejde až
+  // předáním, aby provider nedostal peníze za nevyzvednuté zboží.
+  if (isProduct && currentStatus === 'prijato') {
+    const cekaNaPlatbu = depositStatus === 'pending'
+    const jePripraveno = fulfillmentStatus === 'ready'
+    const slovoPredani = isDelivery ? 'doručeno' : 'předáno'
+
+    const handleReady = async () => {
+      setErr(''); setLoading('ready')
+      const res = await markProductReady(orderId, readyPhoto)
+      if (!res.success) setErr(res.error ?? 'Nepodařilo se uložit.')
+      setLoading(null)
+    }
+    const handleHandover = async () => {
+      const otazka = isDelivery
+        ? 'Opravdu označit jako doručené? Zákazník pak potvrdí převzetí a uvolní se platba.'
+        : 'Opravdu označit jako předané? Zákazník pak potvrdí převzetí a uvolní se platba.'
+      if (!confirm(otazka)) return
+      setErr(''); setLoading('handover')
+      const res = await markProductHandedOver(orderId)
+      if (!res.success) setErr(res.error ?? 'Nepodařilo se uložit.')
+      setLoading(null)
+    }
+
+    if (cekaNaPlatbu) {
+      return (
+        <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-500">
+          Zákazník ještě neuhradil objednávku. Jakmile zaplatí, dáme vám vědět a můžete začít připravovat.
+        </p>
+      )
+    }
+
+    return (
+      <div className="w-full">
+        <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-4">
+          <p className="mb-0.5 text-sm font-bold text-slate-900">
+            {jePripraveno
+              ? (isDelivery ? 'Objednávka čeká na doručení' : 'Objednávka čeká na vyzvednutí')
+              : 'Připravujete objednávku'}
+          </p>
+          <p className="mb-3 text-xs leading-relaxed text-slate-600">
+            {jePripraveno
+              ? <>Zákazníkovi jsme dali vědět. Až si zboží {isDelivery ? 'převezme při doručení' : 'vyzvedne'}, potvrďte to — teprve tím se spustí výplata.</>
+              : 'Až bude objednávka hotová, dejte zákazníkovi vědět. Výplata se spustí až po předání.'}
+          </p>
+
+          {!jePripraveno && (
+            <div className="mb-3">
+              <p className="mb-1.5 text-xs font-semibold text-slate-600">
+                Fotka hotové objednávky <span className="font-normal text-slate-400">(nepovinné)</span>
+              </p>
+              <ItemImageUpload value={readyPhoto} onChange={setReadyPhoto} folder="orders" />
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                Zákazník ji uvidí u objednávky. U dortů a zakázkové výroby potěší.
+              </p>
+            </div>
+          )}
+
+          {!jePripraveno ? (
+            <button
+              onClick={handleReady}
+              disabled={!!loading}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-base font-bold text-white transition hover:bg-emerald-600 disabled:opacity-60"
+            >
+              {loading === 'ready'
+                ? <><Loader2 className="h-4 w-4 animate-spin" /> Ukládám…</>
+                : <><Package className="h-4 w-4" /> Objednávka je připravená</>}
+            </button>
+          ) : (
+            <button
+              onClick={handleHandover}
+              disabled={!!loading}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-base font-bold text-white transition hover:bg-emerald-600 disabled:opacity-60"
+            >
+              {loading === 'handover'
+                ? <><Loader2 className="h-4 w-4 animate-spin" /> Ukládám…</>
+                : <><PackageCheck className="h-4 w-4" /> Označit jako {slovoPredani}</>}
+            </button>
+          )}
+
+          {jePripraveno && (
+            <p className="mt-2 text-center text-[11px] leading-relaxed text-slate-400">
+              Po předání zákazník potvrdí převzetí — pak převod spustíme hned, jinak automaticky do 2 dnů.
+            </p>
+          )}
+        </div>
+
+        <button
+          onClick={() => handleAction('zruseno')}
+          disabled={!!loading}
+          className="mt-2 flex items-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-60"
+        >
+          {loading === 'zruseno' ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+          Zrušit objednávku
+        </button>
+        {depositStatus === 'paid' && (
+          <p className="mt-1 text-xs text-slate-400">Při zrušení se zákazníkovi vrátí zaplacená částka.</p>
+        )}
+        {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
+      </div>
+    )
   }
 
   // ── HLAVNÍ VÝZVA K UZAVŘENÍ (po zaplacení) ──────────────────

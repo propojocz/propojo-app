@@ -33,6 +33,9 @@ export default function OrderTimeline({
   neededAt = null,
   isDelivery = false,
   quantity = 1,
+  fulfillmentStatus = null,
+  readyAt = null,
+  handedOverAt = null,
 }: {
   status: string
   depositStatus: string | null
@@ -52,6 +55,10 @@ export default function OrderTimeline({
   neededAt?: string | null
   isDelivery?: boolean
   quantity?: number
+  /** Kde fyzicky je výrobek — preparing | ready | handed_over. */
+  fulfillmentStatus?: string | null
+  readyAt?: string | null
+  handedOverAt?: string | null
 }) {
   // DOTAZ: zákazník napsal z karty, nic si neobjednal. Ukazovat klasickou osu by
   // bylo zavádějící — zatím probíhá jen konverzace.
@@ -131,15 +138,38 @@ export default function OrderTimeline({
       })
     }
 
-    const pripraveno = prijato && (!hasDeposit || zaplaceno)
+    // Příprava a předání jsou DVA kroky. „Připraveno" ještě neznamená peníze —
+    // ty se uvolní až po skutečném převzetí.
+    const muzePripravovat = prijato && (!hasDeposit || zaplaceno)
+    const jePripraveno = fulfillmentStatus === 'ready' || fulfillmentStatus === 'handed_over'
+    const jePredano = fulfillmentStatus === 'handed_over' || cekaPotvrzeni || dokonceno
+
     kroky.push({
-      nadpis: isDelivery ? 'Příprava a doručení' : 'Příprava k vyzvednutí',
-      popis: pripraveno
+      nadpis: jePripraveno ? 'Připraveno' : 'Příprava',
+      cas: jePripraveno ? fmt(readyAt) : null,
+      popis: jePripraveno
         ? (isCustomer
-            ? (denText ? `Domluvené ${prevzetiSlovo}: ${denText}.` : `Poskytovatel vás informuje, až bude zboží připravené k ${prevzetiSlovo}.`)
-            : (denText ? `Připravte na ${denText}.` : 'Připravte zboží a dejte zákazníkovi vědět.'))
+            ? (isDelivery ? 'Poskytovatel objednávku připravil k doručení.' : `Můžete si ji vyzvednout${denText ? ` — ${denText}` : ''}.`)
+            : null)
+        : muzePripravovat
+          ? (isCustomer
+              ? (denText ? `Poskytovatel připravuje objednávku na ${denText}.` : 'Poskytovatel objednávku připravuje.')
+              : (denText ? `Připravte na ${denText}.` : 'Připravte zboží a dejte zákazníkovi vědět.'))
+          : null,
+      stav: jePripraveno ? 'hotovo' : (muzePripravovat ? 'ted' : 'ceka'),
+    })
+
+    kroky.push({
+      nadpis: jePredano
+        ? (isDelivery ? 'Doručeno' : 'Předáno')
+        : (isDelivery ? 'Doručení' : 'Předání'),
+      cas: jePredano ? fmt(handedOverAt) : null,
+      popis: !jePredano && jePripraveno
+        ? (isCustomer
+            ? (isDelivery ? 'Poskytovatel vám objednávku doručí.' : 'Vyzvedněte si objednávku u poskytovatele.')
+            : (isDelivery ? 'Po doručení to prosím označte.' : 'Po předání to prosím označte.'))
         : null,
-      stav: (cekaPotvrzeni || dokonceno) ? 'hotovo' : (pripraveno ? 'ted' : 'ceka'),
+      stav: jePredano ? 'hotovo' : (jePripraveno ? 'ted' : 'ceka'),
     })
 
     kroky.push({

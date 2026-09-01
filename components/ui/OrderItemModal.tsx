@@ -28,6 +28,7 @@ import { orderProduct } from '@/lib/actions/product-order'
 import { createClient } from '@/lib/supabase/client'
 import type { ServiceItem, PriceUnit } from '@/types/database'
 import { formatItemPrice, packageLabel } from '@/lib/price-format'
+import { vyzadujePotvrzeni, nejdrivejsiDenDodani } from '@/lib/product-confirmation'
 import SearchAutocomplete from '@/components/ui/SearchAutocomplete'
 import { getItemPaymentDisplay } from '@/lib/item-payment-display'
 
@@ -252,13 +253,15 @@ export default function OrderItemModal({
   const minimumNeniDostupne = jeVyrobek && maxKusu < minKusu
   const vyprodano = jeVyrobek && rezim === 'stock' && productAvailable != null && productAvailable <= 0
 
-  // Nejbližší možný den dodání = dnes + předstih.
-  const minDen = (() => {
-    const d = new Date()
-    d.setHours(0, 0, 0, 0)
-    d.setDate(d.getDate() + Number(it.lead_time_days ?? 0))
-    return d.toISOString().slice(0, 10)
-  })()
+  // Nejbližší možný den dodání. Počítá i s tím, že provider musí objednávku
+  // stihnout potvrdit PŘED začátkem svého předstihu — jinak by objednávka
+  // vznikla s propadlou lhůtou. Stejná funkce běží i na serveru.
+  const potvrzujeProvider = vyzadujePotvrzeni({
+    stock_mode: it.stock_mode,
+    pickup_mode: it.pickup_mode,
+    pickup_timing: it.pickup_timing,
+  })
+  const minDen = nejdrivejsiDenDodani(it.lead_time_days, new Date(), potvrzujeProvider)
 
   // Vybraný den musí sedět do povolených dnů v týdnu.
   const denNepovoleny = (() => {
@@ -689,6 +692,15 @@ export default function OrderItemModal({
                                 : 'Vyberte den vyzvednutí nebo doručení.'}
                             </p>
                           )}
+                          {/* Nejdřív potvrzení, pak platba — zákazník musí vědět,
+                              že teď nic neplatí a na co se čeká. */}
+                          {potvrzujeProvider && (
+                            <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-[11px] leading-relaxed text-emerald-800">
+                              Objednávku nejdřív potvrdí poskytovatel (odpovídá do 24 hodin).
+                              <strong> Teď nic neplatíte</strong> — k platbě vás pustíme, až ji přijme.
+                            </p>
+                          )}
+
                           {/* Storno pravidlo — zákazník ho musí znát PŘED objednáním,
                               ne až ve chvíli, kdy chce zrušit. */}
                           {Number(it.lead_time_days ?? 0) > 0 && depositType !== 'bez_platby' && (
