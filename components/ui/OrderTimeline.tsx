@@ -141,8 +141,11 @@ export default function OrderTimeline({
     // Příprava a předání jsou DVA kroky. „Připraveno" ještě neznamená peníze —
     // ty se uvolní až po skutečném převzetí.
     const muzePripravovat = prijato && (!hasDeposit || zaplaceno)
-    const jePripraveno = fulfillmentStatus === 'ready' || fulfillmentStatus === 'handed_over'
     const jePredano = fulfillmentStatus === 'handed_over' || cekaPotvrzeni || dokonceno
+    // Předání znamená, že příprava proběhla — jinak by u starších objednávek
+    // (bez product_fulfillment_status) zůstala „Příprava" viset na „Čeká",
+    // zatímco další kroky už jsou hotové. Osa pak vypadá rozbitě.
+    const jePripraveno = fulfillmentStatus === 'ready' || jePredano
 
     kroky.push({
       nadpis: jePripraveno ? 'Připraveno' : 'Příprava',

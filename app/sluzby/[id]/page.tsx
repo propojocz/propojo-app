@@ -137,8 +137,20 @@ export default async function ServiceDetailPage({ params }: Props) {
     s.profiles?.display_name || s.profiles?.company_name || s.profiles?.full_name || 'Poskytovatel'
   const providerLegalName = s.profiles?.company_name || s.profiles?.full_name
   const showLegalName = !!providerLegalName && providerLegalName !== providerDisplayName
-  const providerRating = Number(s.profiles?.rating ?? 0)
-  const providerReviews = Number(s.profiles?.review_count ?? 0)
+  // Hodnocení se počítá ŽIVĚ z tabulky reviews. Uložené profiles.rating /
+  // review_count se nikdy nedopočítávaly, takže poskytovatel s pěti recenzemi
+  // vypadal jako nehodnocený a u nadpisu svítilo „Recenze (0)".
+  const { data: ratingRows } = await supabase
+    .from('reviews')
+    .select('rating')
+    .eq('provider_id', s.provider_id)
+    .is('reported_at', null) as { data: Array<{ rating: number | null }> | null }
+
+  const platneRecenze = (ratingRows ?? []).map((r) => Number(r.rating ?? 0)).filter((n) => n > 0)
+  const providerReviews = platneRecenze.length
+  const providerRating = providerReviews > 0
+    ? Math.round((platneRecenze.reduce((a, b) => a + b, 0) / providerReviews) * 10) / 10
+    : 0
 
   // Název kategorie z DB
   const { data: catRow } = await supabase
@@ -214,7 +226,7 @@ export default async function ServiceDetailPage({ params }: Props) {
     } : {}),
     areaServed: { '@type': 'City', name: s.city },
     ...(showAddress ? { address: { '@type': 'PostalAddress', streetAddress: adresa, addressLocality: s.city } } : {}),
-    ...(s.profiles.rating ? { aggregateRating: { '@type': 'AggregateRating', ratingValue: s.profiles.rating, reviewCount: s.profiles.review_count } } : {}),
+    ...(providerRating > 0 ? { aggregateRating: { '@type': 'AggregateRating', ratingValue: providerRating, reviewCount: providerReviews } } : {}),
     url: `${APP_URL}/sluzby/${s.id}`,
   }
 

@@ -639,11 +639,17 @@ type FulfillResult = { success: boolean; error?: string }
 
 async function nactiProProvidera(orderId: string, userId: string) {
   const admin = getAdminClient()
-  const { data: order } = await admin
+  const { data: order, error: dbErr } = await admin
     .from('orders')
     .select('id, provider_id, customer_id, status, quantity, deposit_status, service_location, product_fulfillment_status, service_items(name, item_type)')
     .eq('id', orderId)
-    .single() as { data: any }
+    .single() as { data: any; error: any }
+  // Chybu dotazu odlišíme od skutečně chybějící objednávky — jinak se
+  // neproběhlá migrace tváří jako „objednávka nenalezena" a hledá se marně.
+  if (dbErr) {
+    console.error('[product-order] dotaz na objednávku selhal:', dbErr)
+    return { admin, order: null, error: 'Objednávku se nepodařilo načíst. Zkuste to prosím znovu.' }
+  }
   if (!order) return { admin, order: null, error: 'Objednávka nenalezena.' }
   if (order.provider_id !== userId) return { admin, order: null, error: 'Tato objednávka vám nepatří.' }
   if (order.service_items?.item_type !== 'product') return { admin, order: null, error: 'Tohle není objednávka výrobku.' }

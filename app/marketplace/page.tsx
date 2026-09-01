@@ -173,6 +173,38 @@ async function ServiceList({
     for (const row of (subs ?? []) as any[]) activeSubscribers.add(row.user_id)
   }
 
+  // ── HODNOCENÍ POČÍTÁME ŽIVĚ Z RECENZÍ ─────────────────────────────────
+  // profiles.rating / review_count jsou uložené souhrny, které se nikdy
+  // nedopočítávaly — poskytovatel s pěti recenzemi vypadal jako nehodnocený
+  // a filtr podle hodnocení ho vyhodil úplně. Tady se čte pravda z tabulky
+  // reviews jedním dotazem pro všechny karty naráz.
+  const ratingOf = new Map<string, { avg: number; count: number }>()
+  if (candidateProviderIds.length > 0) {
+    const { data: revRows } = await supabase
+      .from('reviews')
+      .select('provider_id, rating')
+      .in('provider_id', candidateProviderIds) as { data: Array<{ provider_id: string; rating: number | null }> | null }
+
+    const soucet = new Map<string, { sum: number; count: number }>()
+    for (const r of revRows ?? []) {
+      const hodnota = Number(r.rating ?? 0)
+      if (!r.provider_id || hodnota <= 0) continue
+      const cur = soucet.get(r.provider_id) ?? { sum: 0, count: 0 }
+      cur.sum += hodnota
+      cur.count += 1
+      soucet.set(r.provider_id, cur)
+    }
+    for (const [pid, v] of soucet) {
+      ratingOf.set(pid, { avg: Math.round((v.sum / v.count) * 10) / 10, count: v.count })
+    }
+  }
+
+  /** Hodnocení poskytovatele — vždy živé, nikdy z profilu. */
+  const hodnoceni = (s: any) => {
+    const pid = (s.profiles as any)?.id ?? s.provider_id
+    return ratingOf.get(pid) ?? { avg: 0, count: 0 }
+  }
+
   let sorted = ((services as ServiceWithProvider[]) ?? []).filter((s) => {
     const pid = (s.profiles as any)?.id ?? s.provider_id
     return (
@@ -183,7 +215,7 @@ async function ServiceList({
 
   if (minRating) {
     const min = Number(minRating)
-    sorted = sorted.filter((s) => Number(s.profiles?.rating ?? 0) >= min)
+    sorted = sorted.filter((s) => hodnoceni(s).avg >= min)
   }
 
   // ── Filtr "Jen v mém dosahu" ──
@@ -271,7 +303,7 @@ async function ServiceList({
       return (pa - pb) * dir
     })
   } else if (sort === 'hodnoceni') {
-    sorted = [...sorted].sort((a, b) => Number(b.profiles?.rating ?? 0) - Number(a.profiles?.rating ?? 0))
+    sorted = [...sorted].sort((a, b) => hodnoceni(b).avg - hodnoceni(a).avg)
   }
 
   // ── ROZMANITOST VÝSLEDKŮ ──────────────────────────────────────
@@ -415,10 +447,19 @@ async function ServiceList({
       <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-3">
         {sorted.map((service, i) => {
           const pid = (service.profiles as any)?.id ?? service.provider_id
+          // Kartě předáváme profil s ŽIVÝM hodnocením — uložené profiles.rating
+          // je nespolehlivé (viz výpočet výše), takže ho tady přebijeme.
+          const r = hodnoceni(service)
+          const serviceSHodnocenim = {
+            ...service,
+            profiles: service.profiles
+              ? { ...(service.profiles as any), rating: r.avg, review_count: r.count }
+              : service.profiles,
+          }
           return (
             <ServiceCard
               key={service.id}
-              service={service}
+              service={serviceSHodnocenim as typeof service}
               index={i}
               categoryName={catName[service.category]}
               subcatNames={subsByService[service.id] ?? []}
