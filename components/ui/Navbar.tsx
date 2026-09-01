@@ -5,7 +5,7 @@ import Link from 'next/link'
 import NotificationBadge from './NotificationBadge'
 import MobileNav from './MobileNav'
 import SuspendedTopBar from './SuspendedTopBar'
-import { getCustomerTodoCount } from '@/lib/actions/order-alerts'
+import { getCustomerTodoCount, getProviderTodoCount } from '@/lib/actions/order-alerts'
 
 function getAdminClient() {
   return createAdminClient(
@@ -60,9 +60,19 @@ export default async function Navbar() {
     }
   }
 
-  // Objednávky čekající na akci zákazníka (platba, potvrzení) — ať mu
-  // rezervace nepropadne jen proto, že ji nenašel.
-  const todoCount = user ? await getCustomerTodoCount() : 0
+  // Objednávky čekající na MOJI akci. Sčítá obě role: člověk bývá zároveň
+  // zákazník i poskytovatel a obojí vede na stejnou stránku objednávek —
+  // dvě čísla vedle sebe by jen mátla.
+  //
+  // Pro poskytovatele je to důležité hlavně u výrobků: čekající objednávka mu
+  // po 24 h propadne a bez odznaku by o tom věděl jen z notifikace.
+  const [customerTodo, providerTodo] = user
+    ? await Promise.all([
+        getCustomerTodoCount(),
+        isProvider ? getProviderTodoCount() : Promise.resolve(0),
+      ])
+    : [0, 0]
+  const todoCount = customerTodo + providerTodo
 
   // Světlé postranní tlačítko (Poptávky, Objednávky) — jen na desktopu
   const sideBtn =

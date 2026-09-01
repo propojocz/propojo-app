@@ -9,7 +9,7 @@ import MobileDashboardNav from './MobileDashboardNav'
 import Avatar from '@/components/ui/Avatar'
 import SuspendedBanner from '@/components/ui/SuspendedBanner'
 import ConnectBanner from '@/components/ui/ConnectBanner'
-import { getCustomerTodoCount } from '@/lib/actions/order-alerts'
+import { getCustomerTodoCount, getProviderTodoCount } from '@/lib/actions/order-alerts'
 
 function getAdminClient() {
   return createAdminClient(
@@ -58,9 +58,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
     unansweredReviews = count ?? 0
   }
 
-  // Kolik objednávek čeká na moji akci (platba, potvrzení) — odznak u Objednávek,
-  // ať zákazník nemusí rezervaci hledat a nepropadne mu.
-  const todoCount = await getCustomerTodoCount()
+  // Kolik objednávek čeká na moji akci — odznak u Objednávek. Sčítá obě role
+  // (zákazník: platba/potvrzení, poskytovatel: přijetí a předání), protože
+  // obojí se řeší na stejné stránce.
+  const [customerTodo, providerTodo] = await Promise.all([
+    getCustomerTodoCount(),
+    isProvider ? getProviderTodoCount() : Promise.resolve(0),
+  ])
+  const todoCount = customerTodo + providerTodo
 
   const NAV = [
     { href: '/dashboard', label: 'Přehled', icon: 'LayoutDashboard' },

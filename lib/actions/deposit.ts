@@ -8,6 +8,7 @@
 // že zákazník objednávku ruší. Nový checkout nahradí předchozí session a obnoví hold.
 
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { stripe } from '@/lib/stripe'
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
@@ -28,7 +29,7 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
     .select(`
       id, customer_id, provider_id, status, deposit_status, deposit_amount, service_item_id,
       quantity, unit_price, needed_at,
-      scheduled_at, hold_expires_at, stripe_checkout_session_id,
+      scheduled_at, scheduled_end, hold_expires_at, stripe_checkout_session_id,
       services(title, payment_model, deposit_amount, quote_fee),
       service_items(name, payment_model, deposit_amount, quote_fee, deposit_type, price, item_type),
       profiles!orders_provider_id_fkey(stripe_account_id, stripe_payouts_enabled)
@@ -93,6 +94,45 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
 
   if (amount < MIN_AMOUNT_CZK) {
     return { success: false, error: `Minimální částka platby je ${MIN_AMOUNT_CZK} Kč.` }
+  }
+
+  // ── JE TERMÍN JEŠTĚ VOLNÝ? ──────────────────────────────────
+  // Rezervace drží termín 10 minut (reserve-time.ts), ale checkout běží 30.
+  // Když zákazník otevře platbu později, mohl termín mezitím zabrat někdo jiný
+  // — a bez téhle kontroly by zaplatil na obsazený čas. Kontrolujeme až tady,
+  // těsně před platbou, ať to sedí na stav v tu chvíli.
+  if (!isModelB && !jeVyrobek && order.scheduled_at) {
+    const admin = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+    const konec = order.scheduled_end ?? order.scheduled_at
+    const { data: kolize } = await admin
+      .from('orders')
+      .select('id, deposit_status, hold_expires_at')
+      .eq('provider_id', order.provider_id)
+      .neq('status', 'zruseno')
+      .neq('id', orderId)
+      .lt('scheduled_at', konec)
+      .gt('scheduled_end', order.scheduled_at) as {
+        data: Array<{ id: string; deposit_status: string | null; hold_expires_at: string | null }> | null
+      }
+
+    const ted = Date.now()
+    const zive = (kolize ?? []).filter((o) => {
+      // Cizí rezervace s prošlým zámkem termín nedrží.
+      if (o.deposit_status === 'pending' && o.hold_expires_at) {
+        return new Date(o.hold_expires_at).getTime() > ted
+      }
+      return true
+    })
+
+    if (zive.length > 0) {
+      return {
+        success: false,
+        error: 'Tento termín byl mezitím zabraný. Vyberte prosím jiný — nic jsme vám neúčtovali.',
+      }
+    }
   }
 
   // Když už existuje předchozí checkout, nejdřív zjistíme, jestli náhodou nebyl
