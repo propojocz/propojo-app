@@ -56,6 +56,9 @@ type OrderRow = {
   needed_at: string | null
   confirmation_deadline: string | null
   cancelled_by: string | null
+  dispute_reason: string | null
+  dispute_category: string | null
+  dispute_photos: string[] | null
   product_fulfillment_status: string | null
   product_ready_at: string | null
   product_handed_over_at: string | null

@@ -136,6 +136,8 @@ export type Database = {
           confirmation_deadline: string | null
           cancelled_by: string | null
           completed_at: string | null
+          dispute_category: string | null
+          dispute_photos: string[] | null
           product_fulfillment_status: string | null
           product_ready_at: string | null
           ready_photo_url: string | null
@@ -171,6 +173,8 @@ export type Database = {
           confirmation_deadline?: string | null
           cancelled_by?: string | null
           completed_at?: string | null
+          dispute_category?: string | null
+          dispute_photos?: string[] | null
           product_fulfillment_status?: string | null
           product_ready_at?: string | null
           ready_photo_url?: string | null
@@ -206,6 +210,8 @@ export type Database = {
           confirmation_deadline?: string | null
           cancelled_by?: string | null
           completed_at?: string | null
+          dispute_category?: string | null
+          dispute_photos?: string[] | null
           product_fulfillment_status?: string | null
           product_ready_at?: string | null
           ready_photo_url?: string | null

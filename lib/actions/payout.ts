@@ -401,7 +401,13 @@ export async function autoResolveStorno(): Promise<{ resolved: number; failed: n
 }
 
 // ── NAHLÁŠENÍ SPORU (zákazník) ────────────────────────────
-export async function reportDispute(orderId: string, reason: string): Promise<Result> {
+export async function reportDispute(
+  orderId: string,
+  reason: string,
+  /** Kategorie problému a fotky jako důkaz. Nepovinné — starší volání
+   *  (jen s textem) fungují dál beze změny. */
+  extra?: { category?: string | null; photos?: string[] | null },
+): Promise<Result> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Nejste přihlášeni.' }
@@ -424,10 +430,13 @@ export async function reportDispute(orderId: string, reason: string): Promise<Re
   }
 
   const admin = getAdminClient()
+  const fotky = (extra?.photos ?? []).filter((u) => typeof u === 'string' && u.trim())
   await (admin.from('orders') as any)
     .update({
       status: 'spor',
       dispute_reason: trimmed,
+      dispute_category: extra?.category?.trim() || null,
+      dispute_photos: fotky.length > 0 ? fotky : null,
       dispute_created_at: new Date().toISOString(),
     })
     .eq('id', orderId)
@@ -440,7 +449,8 @@ export async function reportDispute(orderId: string, reason: string): Promise<Re
       orderId,
       actorId: user.id,
       title: 'Zákazník nahlásil problém – řeší Propojo',
-      preview: trimmed.length > 80 ? trimmed.slice(0, 80) + '…' : trimmed,
+      preview: (trimmed.length > 80 ? trimmed.slice(0, 80) + '…' : trimmed)
+        + (fotky.length > 0 ? ` · ${fotky.length} ${fotky.length === 1 ? 'fotka' : fotky.length < 5 ? 'fotky' : 'fotek'}` : ''),
     })
   } catch (err) {
     console.error('[reportDispute] notifikace:', err)

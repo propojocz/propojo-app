@@ -58,6 +58,9 @@ type OrderRow = {
   quantity: number
   needed_at: string | null
   service_item_id: string | null
+  dispute_reason: string | null
+  dispute_category: string | null
+  dispute_photos: string[] | null
   product_fulfillment_status: string | null
   product_ready_at: string | null
   ready_photo_url: string | null
@@ -117,6 +120,17 @@ const STATUS_COLORS: Record<string, string> = {
   dokonceno: 'bg-emerald-100 text-emerald-700 border-emerald-200',
   zruseno: 'bg-red-100 text-red-700 border-red-200',
   spor: 'bg-orange-100 text-orange-700 border-orange-200',
+}
+
+// Popisky kategorií sporu — musí sedět s hodnotami, které ukládá
+// ConfirmCompletionButton (a povoluje CHECK v DB).
+const DISPUTE_LABEL: Record<string, string> = {
+  nepredano: 'Objednávku zákazník nepřevzal',
+  poskozeno: 'Výrobek je poškozený',
+  neodpovida: 'Neodpovídá objednávce',
+  chybi: 'Něco v objednávce chybí',
+  nedorazil: 'Poskytovatel nedorazil',
+  jine: 'Jiný problém',
 }
 
 export default function OrderDetailClient({
@@ -676,9 +690,40 @@ export default function OrderDetailClient({
             </div>
             <p className="text-sm text-orange-800">
               {isCustomer
-                ? 'Nahlásili jste problém. Zálohu jsme podrželi a situaci posoudíme. Ozveme se vám.'
-                : 'Zákazník nahlásil problém. Zálohu jsme podrželi a situaci posoudíme. Ozveme se vám.'}
+                ? 'Nahlásili jste problém. Platbu jsme podrželi a situaci posoudíme. Ozveme se vám.'
+                : 'Zákazník nahlásil problém. Platbu jsme podrželi a situaci posoudíme. Ozveme se vám.'}
             </p>
+
+            {/* Co přesně zákazník nahlásil — poskytovatel to musí vidět,
+                jinak nemá jak reagovat, a fotky by neměly smysl nahrávat. */}
+            {(order.dispute_category || order.dispute_reason) && (
+              <div className="mt-3 rounded-xl border border-orange-200 bg-white p-3">
+                {order.dispute_category && (
+                  <p className="text-xs font-bold uppercase tracking-wide text-orange-700">
+                    {DISPUTE_LABEL[order.dispute_category] ?? 'Nahlášený problém'}
+                  </p>
+                )}
+                {order.dispute_reason && (
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                    {order.dispute_reason}
+                  </p>
+                )}
+                {order.dispute_photos && order.dispute_photos.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {order.dispute_photos.map((url, i) => (
+                      <a key={i} href={url} target="_blank" rel="noreferrer" className="block">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={url}
+                          alt={`Fotka problému ${i + 1}`}
+                          className="h-20 w-20 rounded-lg border border-orange-200 object-cover transition hover:opacity-90"
+                        />
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -903,9 +948,7 @@ export default function OrderDetailClient({
               orderId={order.id}
               hasDeposit={hasDeposit}
               confirmLabel={jeVyrobek ? (productDelivery ? 'Potvrdit doručení' : 'Potvrdit převzetí') : undefined}
-              disputeHint={jeVyrobek
-                ? 'Popište, co není v pořádku (např. objednávku jsem nepřevzal, výrobek je poškozený nebo neodpovídá objednávce).'
-                : undefined}
+              isProduct={jeVyrobek}
               heldAmount={Number(order.deposit_amount ?? depositAmount ?? 0)}
             />
           </div>

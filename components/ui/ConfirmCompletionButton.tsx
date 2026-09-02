@@ -8,27 +8,50 @@
 import { useState } from 'react'
 import { Loader2, CheckCircle2, AlertTriangle, X } from 'lucide-react'
 import { releaseDeposit, reportDispute } from '@/lib/actions/payout'
+import GalleryUpload from '@/components/ui/GalleryUpload'
+
+// Důvody problému. U výrobku a u služby jsou jiné — „dort byl poškozený"
+// a „řemeslník nedorazil" spolu nemají nic společného.
+const DUVODY_VYROBEK = [
+  { id: 'nepredano', label: 'Objednávku jsem nepřevzal' },
+  { id: 'poskozeno', label: 'Výrobek je poškozený' },
+  { id: 'neodpovida', label: 'Neodpovídá objednávce' },
+  { id: 'chybi', label: 'Něco v objednávce chybí' },
+  { id: 'jine', label: 'Jiný problém' },
+]
+
+const DUVODY_SLUZBA = [
+  { id: 'nedorazil', label: 'Poskytovatel nedorazil' },
+  { id: 'neodpovida', label: 'Práce neodpovídá domluvě' },
+  { id: 'jine', label: 'Jiný problém' },
+]
+
+// U těchhle důvodů má fotka největší cenu — bez ní se to dohaduje slovo
+// proti slovu. Povinná ale není, ať to nikoho neblokuje.
+const FOTKA_DOPORUCENA = ['poskozeno', 'neodpovida', 'chybi']
 
 export default function ConfirmCompletionButton({
   orderId,
   hasDeposit,
   confirmLabel,
-  disputeHint,
   heldAmount = null,
+  isProduct = false,
 }: {
   orderId: string
   hasDeposit: boolean
   /** Např. „Potvrdit převzetí" u výrobku. Bez něj se použije text pro službu. */
   confirmLabel?: string
-  /** Nápověda v hlášení problému — u výrobku se nemluví o řemeslníkovi. */
-  disputeHint?: string
   /** Kolik peněz se potvrzením uvolní. Zákazník má vidět částku, ne pojem „záloha". */
   heldAmount?: number | null
+  /** Výrobek má jiné důvody problému než služba. */
+  isProduct?: boolean
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [showDispute, setShowDispute] = useState(false)
   const [reason, setReason] = useState('')
+  const [category, setCategory] = useState<string>('')
+  const [photos, setPhotos] = useState<string[]>([])
 
   const handleConfirm = async () => {
     setBusy(true)
@@ -42,13 +65,17 @@ export default function ConfirmCompletionButton({
   }
 
   const handleDispute = async () => {
+    if (!category) {
+      setError('Vyberte prosím, o jaký problém jde.')
+      return
+    }
     if (!reason.trim()) {
       setError('Napište prosím, v čem je problém.')
       return
     }
     setBusy(true)
     setError('')
-    const res = await reportDispute(orderId, reason)
+    const res = await reportDispute(orderId, reason, { category, photos })
     if (!res.success) {
       setError(res.error)
       setBusy(false)
@@ -85,9 +112,32 @@ export default function ConfirmCompletionButton({
             <button onClick={() => { setShowDispute(false); setReason(''); setError('') }} className="text-amber-700 hover:text-amber-900"><X className="h-4 w-4" /></button>
           </div>
           <p className="mb-3 text-xs text-amber-800">
-            {disputeHint ?? 'Popište, co neproběhlo (např. řemeslník nedorazil).'}{' '}
-            Platbu zatím podržíme a problém posoudí Propojo.
+            Vyberte, o co jde, a krátce to popište. Platbu zatím podržíme a problém posoudí Propojo.
           </p>
+
+          {/* Kategorie problému */}
+          <div className="mb-3 space-y-1.5">
+            {(isProduct ? DUVODY_VYROBEK : DUVODY_SLUZBA).map((d) => (
+              <button
+                key={d.id}
+                type="button"
+                onClick={() => { setCategory(d.id); setError('') }}
+                className={`flex w-full items-center gap-2.5 rounded-lg border-[1.5px] px-3 py-2 text-left text-sm font-semibold transition ${
+                  category === d.id
+                    ? 'border-amber-500 bg-amber-100 text-amber-900'
+                    : 'border-amber-200 bg-white text-slate-700 hover:border-amber-400'
+                }`}
+              >
+                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
+                  category === d.id ? 'border-amber-600 bg-amber-600' : 'border-slate-300'
+                }`}>
+                  {category === d.id && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+                </span>
+                {d.label}
+              </button>
+            ))}
+          </div>
+
           <textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
@@ -95,6 +145,16 @@ export default function ConfirmCompletionButton({
             placeholder="V čem je problém?"
             className="mb-3 w-full rounded-lg border border-amber-200 px-3 py-2 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
           />
+          {/* Fotky jako důkaz */}
+          <div className="mb-3">
+            <p className="mb-1.5 text-xs font-semibold text-amber-900">
+              Fotky {FOTKA_DOPORUCENA.includes(category)
+                ? <span className="font-normal text-amber-700">— u tohohle problému hodně pomůžou</span>
+                : <span className="font-normal text-amber-700">(nepovinné)</span>}
+            </p>
+            <GalleryUpload value={photos} onChange={setPhotos} />
+          </div>
+
           <button
             onClick={handleDispute}
             disabled={busy}
