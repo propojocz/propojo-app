@@ -145,6 +145,16 @@ export async function orderProduct(values: {
   message?: string
   location_city?: string
   service_location?: string
+  /** Nákup na firmu — SNAPSHOT údajů odběratele k objednávce. Ukládá se kopie,
+   *  ne odkaz: doklad musí sedět na stav v době nákupu, i kdyby zákazník
+   *  později změnil sídlo nebo název. */
+  billing?: {
+    is_company: boolean
+    name?: string | null
+    ico?: string | null
+    dic?: string | null
+    address?: string | null
+  }
 }): Promise<Result> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -282,6 +292,11 @@ export async function orderProduct(values: {
       confirmation_deadline: potvrzuje ? deadline!.toISOString() : null,
       location_city: values.location_city?.trim() || card.city || null,
       service_location: values.service_location ?? null,
+      billing_is_company: values.billing?.is_company === true,
+      billing_name: values.billing?.name?.trim() || null,
+      billing_ico: values.billing?.ico?.trim() || null,
+      billing_dic: values.billing?.dic?.trim() || null,
+      billing_address: values.billing?.address?.trim() || null,
     })
     .select('id')
     .single() as { data: { id: string } | null; error: any }

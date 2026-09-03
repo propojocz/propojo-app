@@ -129,6 +129,15 @@ export async function createOrder(values: {
   price_agreed?: number
   location_city?: string
   service_location?: string
+  /** Nákup na firmu — SNAPSHOT údajů odběratele k objednávce. Ukládá se kopie,
+   *  ne odkaz na profil: doklad musí sedět na stav v době nákupu. */
+  billing?: {
+    is_company: boolean
+    name?: string | null
+    ico?: string | null
+    dic?: string | null
+    address?: string | null
+  }
 }): Promise<ActionResult> {
   const supabase = createClient()
   const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -174,6 +183,11 @@ export async function createOrder(values: {
       deposit_amount: item ? (itemIsModelB ? null : (item.deposit_amount ?? null)) : null,
       location_city: values.location_city ?? null,
       service_location: values.service_location ?? null,
+      billing_is_company: values.billing?.is_company === true,
+      billing_name: values.billing?.name?.trim() || null,
+      billing_ico: values.billing?.ico?.trim() || null,
+      billing_dic: values.billing?.dic?.trim() || null,
+      billing_address: values.billing?.address?.trim() || null,
       status: 'cekajici',
     } as any)
     .select('id')
@@ -292,7 +306,7 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   // vázaná na položku; jinak fallback na kartu (services) — starý tok.
   const { data: ordCheck } = await supabase
     .from('orders')
-    .select('customer_id, provider_id, attendance, deposit_status, slot_id, service_item_id, scheduled_at, services(payment_model, deposit_amount, quote_fee), service_items(payment_model, deposit_amount, quote_fee, deposit_type, price)')
+    .select('customer_id, provider_id, attendance, deposit_status, slot_id, service_item_id, scheduled_at, services(payment_model, deposit_amount, quote_fee), service_items(payment_model, deposit_amount, quote_fee, deposit_type, price, item_type)')
     .eq('id', orderId)
     .single() as { data: any }
 
@@ -334,6 +348,16 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   // po které se záloha uvolní i bez potvrzení zákazníka (autoReleaseStaleDeposits).
   // (status as string) — hodnotu 'ceka_potvrzeni' zatím nemusí znát typ OrderStatus.
   if ((status as string) === 'ceka_potvrzeni') {
+    // VÝROBEK má vlastní cestu: 'připraveno' → 'předáno' (markProductHandedOver).
+    // Teprve předání smí spustit dvoudenní automat na výplatu — kdyby se sem dalo
+    // vstoupit obecným uzavřením, provider by dostal peníze za nevyzvednuté zboží.
+    if (ordCheck.service_items?.item_type === 'product') {
+      return {
+        success: false,
+        error: 'U výrobku potvrďte předání zákazníkovi — tím se objednávka uzavře.',
+      }
+    }
+
     // Uzavřít jde jen ZAPLACENOU zakázku — jinak by výplata neměla z čeho vyjít.
     //
     // Neptáme se JEN na deposit_status === 'pending'. Ten se totiž nastavuje až

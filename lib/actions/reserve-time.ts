@@ -50,6 +50,14 @@ export async function reserveTime(values: {
   start: string
   message?: string
   location_city?: string
+  /** Nákup na firmu — snapshot údajů odběratele k objednávce. */
+  billing?: {
+    is_company: boolean
+    name?: string | null
+    ico?: string | null
+    dic?: string | null
+    address?: string | null
+  }
 }): Promise<Result> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -156,6 +164,11 @@ export async function reserveTime(values: {
         : null,
       location_city: values.location_city?.trim() || null,
       service_location: atCustomer ? 'u_zakaznika' : 'u_poskytovatele',
+      billing_is_company: values.billing?.is_company === true,
+      billing_name: values.billing?.name?.trim() || null,
+      billing_ico: values.billing?.ico?.trim() || null,
+      billing_dic: values.billing?.dic?.trim() || null,
+      billing_address: values.billing?.address?.trim() || null,
       scheduled_at: start.toISOString(),
       scheduled_end: new Date(endMs).toISOString(),
     })

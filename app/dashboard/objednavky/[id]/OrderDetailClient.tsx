@@ -245,10 +245,18 @@ export default function OrderDetailClient({
     const delka = Number((order as any).service_items?.duration_minutes ?? 0)
     return new Date(order.scheduled_at).getTime() + delka * 60_000 <= Date.now()
   })()
-  const muzePotvrdit = isCustomer && (
-    order.status === 'ceka_potvrzeni' ||
-    ((order.status === 'prijato' || order.status === 'v_procesu') && sluzbaSkoncila && isPaid)
-  )
+  // Potvrdit lze JEN ve stavu 'ceka_potvrzeni' — releaseDeposit jiný stav
+  // odmítne. Dřív se box ukazoval i po skončení termínu ve stavu 'prijato',
+  // takže zákazník klikl a dostal „Objednávka není připravená k potvrzení".
+  const muzePotvrdit = isCustomer && order.status === 'ceka_potvrzeni'
+
+  // Termín proběhl, zaplaceno, ale poskytovatel zakázku ještě neuzavřel.
+  // Zákazník nemá co potvrzovat — jen mu vysvětlíme, na co se čeká, ať
+  // nekliká na tlačítko, které stejně neprojde.
+  const cekaNaUzavreniPoskytovatelem = isCustomer
+    && (order.status === 'prijato' || order.status === 'v_procesu')
+    && sluzbaSkoncila
+    && isPaid
   const hasDeposit = depositAmount > 0
   const hasAddress = !!order.location_address || addrSaved
   const atCustomer = order.service_location
@@ -904,6 +912,22 @@ export default function OrderDetailClient({
               )
             )}
             {cancelErr && <p className="mt-2 text-sm text-red-600">{cancelErr}</p>}
+          </div>
+        )}
+
+        {/* Termín proběhl, ale poskytovatel zakázku ještě neuzavřel. */}
+        {cekaNaUzavreniPoskytovatelem && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-1 flex items-center gap-2">
+              <Clock className="h-5 w-5 text-slate-400" />
+              <h2 className="font-black text-slate-900">Čeká se na poskytovatele</h2>
+            </div>
+            <p className="text-sm leading-relaxed text-slate-500">
+              {jeVyrobek
+                ? 'Zaplaceno máte. Jakmile poskytovatel objednávku předá, potvrdíte převzetí a peníze se mu uvolní.'
+                : 'Zaplaceno máte a termín už proběhl. Jakmile poskytovatel zakázku uzavře, potvrdíte to a peníze se mu uvolní.'}
+              {' '}Pokud se nic neděje, napište mu ve zprávách níž.
+            </p>
           </div>
         )}
 

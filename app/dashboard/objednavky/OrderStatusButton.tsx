@@ -12,6 +12,7 @@ import { Loader2, CheckCircle2, XCircle, Wallet, AlertTriangle, Package, Package
 import { updateOrderStatus } from '@/lib/actions/orders'
 import ItemImageUpload from '@/components/ui/ItemImageUpload'
 import { acceptProductOrder, declineProductOrder, getDayLoad, markProductReady, markProductHandedOver } from '@/lib/actions/product-order'
+import { AUTO_RELEASE_DAYS, dnyText } from '@/lib/payout-config'
 
 const NEXT_STATUS: Record<string, { status: string; label: string; icon: any; color: string }[]> = {
   cekajici: [
@@ -264,7 +265,7 @@ export default function OrderStatusButton({
 
           {jePripraveno && (
             <p className="mt-2 text-center text-[11px] leading-relaxed text-slate-400">
-              Po předání zákazník potvrdí převzetí — pak převod spustíme hned, jinak automaticky do 2 dnů.
+              Po předání zákazník potvrdí převzetí — pak převod spustíme hned, jinak automaticky do {dnyText(AUTO_RELEASE_DAYS)}.
             </p>
           )}
         </div>
@@ -354,7 +355,7 @@ export default function OrderStatusButton({
               : <><Wallet className="h-4 w-4" /> Potvrdit pro uvolnění výplaty</>}
           </button>
           <p className="mt-2 text-center text-[11px] leading-relaxed text-slate-400">
-            Pošleme peníze na váš účet. Když zákazník potvrdí, převod se spustí hned — jinak automaticky do 2 dnů.
+            Pošleme peníze na váš účet. Když zákazník potvrdí, převod se spustí hned — jinak automaticky do {dnyText(AUTO_RELEASE_DAYS)}.
           </p>
         </div>
 

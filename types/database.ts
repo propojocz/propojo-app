@@ -136,6 +136,11 @@ export type Database = {
           confirmation_deadline: string | null
           cancelled_by: string | null
           completed_at: string | null
+          billing_is_company: boolean
+          billing_name: string | null
+          billing_ico: string | null
+          billing_dic: string | null
+          billing_address: string | null
           dispute_category: string | null
           dispute_photos: string[] | null
           product_fulfillment_status: string | null
@@ -173,6 +178,11 @@ export type Database = {
           confirmation_deadline?: string | null
           cancelled_by?: string | null
           completed_at?: string | null
+          billing_is_company?: boolean
+          billing_name?: string | null
+          billing_ico?: string | null
+          billing_dic?: string | null
+          billing_address?: string | null
           dispute_category?: string | null
           dispute_photos?: string[] | null
           product_fulfillment_status?: string | null
@@ -210,6 +220,11 @@ export type Database = {
           confirmation_deadline?: string | null
           cancelled_by?: string | null
           completed_at?: string | null
+          billing_is_company?: boolean
+          billing_name?: string | null
+          billing_ico?: string | null
+          billing_dic?: string | null
+          billing_address?: string | null
           dispute_category?: string | null
           dispute_photos?: string[] | null
           product_fulfillment_status?: string | null
@@ -321,6 +336,15 @@ export type Database = {
           full_name: string
           ico: string | null
           ico_verified: boolean | null
+          billing_mode: string | null
+          billing_name: string | null
+          billing_ico: string | null
+          billing_dic: string | null
+          billing_address: string | null
+          billing_registry: string | null
+          billing_vat_payer: boolean
+          invoice_prefix: string | null
+          invoice_auto: boolean
           id: string
           is_provider: boolean
           phone: string | null
@@ -338,6 +362,15 @@ export type Database = {
           full_name: string
           ico?: string | null
           ico_verified?: boolean | null
+          billing_mode?: string | null
+          billing_name?: string | null
+          billing_ico?: string | null
+          billing_dic?: string | null
+          billing_address?: string | null
+          billing_registry?: string | null
+          billing_vat_payer?: boolean
+          invoice_prefix?: string | null
+          invoice_auto?: boolean
           id: string
           is_provider?: boolean
           phone?: string | null
@@ -355,6 +388,15 @@ export type Database = {
           full_name?: string
           ico?: string | null
           ico_verified?: boolean | null
+          billing_mode?: string | null
+          billing_name?: string | null
+          billing_ico?: string | null
+          billing_dic?: string | null
+          billing_address?: string | null
+          billing_registry?: string | null
+          billing_vat_payer?: boolean
+          invoice_prefix?: string | null
+          invoice_auto?: boolean
           id?: string
           is_provider?: boolean
           phone?: string | null

@@ -96,6 +96,20 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
     return { success: false, error: `Minimální částka platby je ${MIN_AMOUNT_CZK} Kč.` }
   }
 
+  // ── NEPROBĚHL UŽ TERMÍN? ────────────────────────────────────
+  // Záloha se platí PŘED službou. Objednávka ale zůstává ve stavu 'prijato',
+  // dokud ji někdo neuzavře — takže bez téhle kontroly šlo zaplatit i měsíc
+  // po termínu, což nedává smysl ani zákazníkovi, ani poskytovateli.
+  if (!isModelB && !jeVyrobek && order.scheduled_at) {
+    const konecTerminu = new Date(order.scheduled_end ?? order.scheduled_at).getTime()
+    if (konecTerminu < Date.now()) {
+      return {
+        success: false,
+        error: 'Tento termín už proběhl. Domluvte se prosím s poskytovatelem na novém termínu — platbu pak spustíme znovu.',
+      }
+    }
+  }
+
   // ── JE TERMÍN JEŠTĚ VOLNÝ? ──────────────────────────────────
   // Rezervace drží termín 10 minut (reserve-time.ts), ale checkout běží 30.
   // Když zákazník otevře platbu později, mohl termín mezitím zabrat někdo jiný

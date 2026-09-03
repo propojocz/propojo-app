@@ -8,6 +8,7 @@ import { stripe } from '@/lib/stripe'
 import { revalidatePath } from 'next/cache'
 import { createNotification } from '@/lib/actions/notifications'
 import { vyrobekStornoPodil } from '@/lib/product-storno'
+import { AUTO_RELEASE_DAYS } from '@/lib/payout-config'
 
 function getAdminClient() {
   return createAdminClient(
@@ -640,7 +641,6 @@ export async function adminMessageToOrder(orderId: string, content: string, imag
 //
 // Bezpečné pustit opakovaně: bere jen status 'ceka_potvrzeni' + deposit 'paid',
 // a po zpracování stav změní, takže se stejná objednávka podruhé nechytí.
-const AUTO_RELEASE_DAYS = 7
 
 export async function autoReleaseStaleDeposits(): Promise<{ released: number; failed: number }> {
   const admin = getAdminClient()

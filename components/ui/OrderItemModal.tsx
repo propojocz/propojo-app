@@ -128,6 +128,24 @@ export default function OrderItemModal({
   // ── Výrobek: počet kusů a den dodání ──
   const [pocet, setPocet] = useState(() => Math.max(1, Number((item as any).min_quantity_per_order ?? 1)))
   const [denDodani, setDenDodani] = useState('')
+  // Nákup na firmu — údaje se uloží jako SNAPSHOT k objednávce, ať doklad sedí
+  // i kdyby zákazník později změnil sídlo nebo název firmy.
+  const [naFirmu, setNaFirmu] = useState(false)
+  const [firmaIco, setFirmaIco] = useState('')
+  const [firmaNazev, setFirmaNazev] = useState('')
+  const [firmaAdresa, setFirmaAdresa] = useState('')
+  const [firmaDic, setFirmaDic] = useState('')
+
+  /** Firemní údaje pro objednávku — posílá se všem třem cestám objednání. */
+  const billingPayload = () => (naFirmu
+    ? {
+        is_company: true,
+        name: firmaNazev.trim() || null,
+        ico: firmaIco.trim() || null,
+        dic: firmaDic.trim() || null,
+        address: firmaAdresa.trim() || null,
+      }
+    : undefined)
 
   const isModelB = item.payment_model === 'B'
   const itemAny = item as any
@@ -314,6 +332,7 @@ export default function OrderItemModal({
         message: message || undefined,
         location_city: needsCity ? city.trim() : undefined,
         service_location: atCustomer ? 'u_zakaznika' : 'u_poskytovatele',
+        billing: billingPayload(),
       })
       if (res.success) {
         setState('success')
@@ -347,6 +366,7 @@ export default function OrderItemModal({
         message: message || undefined,
         location_city: needsCity ? city.trim() : undefined,
         service_location: atCustomer ? 'u_zakaznika' : 'u_poskytovatele',
+        billing: billingPayload(),
       })
       if (res.success) {
         if (res.payUrl) {
@@ -374,6 +394,7 @@ export default function OrderItemModal({
       message: message || undefined,
       location_city: needsCity ? city.trim() : undefined,
       service_location: atCustomer ? 'u_zakaznika' : 'u_poskytovatele',
+      billing: billingPayload(),
     })
     if (result.success) setState('success')
     else { setState('error'); setErrorMsg(result.error) }
@@ -917,6 +938,53 @@ export default function OrderItemModal({
                 className="form-input resize-none text-sm"
                 maxLength={500}
               />
+
+              {/* Nákup na firmu — údaje se uloží k objednávce jako snapshot,
+                  ať doklad sedí i po pozdější změně sídla nebo názvu. */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <label className="flex items-center gap-2.5">
+                  <input
+                    type="checkbox"
+                    checked={naFirmu}
+                    onChange={(e) => setNaFirmu(e.target.checked)}
+                    className="h-4 w-4 shrink-0 accent-emerald-500"
+                  />
+                  <span className="text-sm font-semibold text-slate-700">Nakupuji na firmu</span>
+                </label>
+
+                {naFirmu && (
+                  <div className="mt-3 space-y-2">
+                    <input
+                      value={firmaIco}
+                      onChange={(e) => setFirmaIco(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                      placeholder="IČO"
+                      inputMode="numeric"
+                      className="form-input text-sm"
+                    />
+                    <input
+                      value={firmaNazev}
+                      onChange={(e) => setFirmaNazev(e.target.value)}
+                      placeholder="Název firmy"
+                      className="form-input text-sm"
+                    />
+                    <input
+                      value={firmaAdresa}
+                      onChange={(e) => setFirmaAdresa(e.target.value)}
+                      placeholder="Sídlo"
+                      className="form-input text-sm"
+                    />
+                    <input
+                      value={firmaDic}
+                      onChange={(e) => setFirmaDic(e.target.value)}
+                      placeholder="DIČ (nepovinné)"
+                      className="form-input text-sm"
+                    />
+                    <p className="text-[11px] leading-relaxed text-slate-400">
+                      Údaje uložíme k objednávce, aby je poskytovatel měl pro doklad.
+                    </p>
+                  </div>
+                )}
+              </div>
 
               {state === 'error' && <p className="text-xs text-red-600">{errorMsg}</p>}
 

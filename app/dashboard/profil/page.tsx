@@ -21,6 +21,8 @@ import ImageUpload from '@/components/ui/ImageUpload'
 import GalleryUpload from '@/components/ui/GalleryUpload'
 import type { Profile } from '@/types/database'
 import ChangePasswordSection from '@/components/ui/ChangePasswordSection'
+import BillingSettings from '@/components/ui/BillingSettings'
+import { getBillingSettings, previewNextInvoiceNumber, type BillingSettings as BillingValues } from '@/lib/actions/billing'
 import AddressInput from '@/components/ui/AddressInput'
 
 const schema = z.object({
@@ -59,6 +61,11 @@ export default function ProfilPage() {
   const [icoVerified, setIcoVerified] = useState(false)
   const [companyName, setCompanyName] = useState<string | null>(null) // z ARES, jen ke čtení
   const [isProvider, setIsProvider] = useState(false)
+  // Fakturační nastavení se načítá zvlášť — stránka je klientská, takže
+  // hodnoty tahá server akce až po přihlášení uživatele.
+  const [billing, setBilling] = useState<BillingValues | null>(null)
+  const [billingNext, setBillingNext] = useState<string | null>(null)
+  const [billingLoaded, setBillingLoaded] = useState(false)
   const [gallery, setGallery] = useState<string[]>([])
   const [userEmail, setUserEmail] = useState('')
 
@@ -91,6 +98,16 @@ export default function ProfilPage() {
         setIcoVerified(d.ico_verified === true)
         setCompanyName(d.company_name ?? null)
         setIsProvider(data.is_provider === true)
+        if (data.is_provider === true) {
+          // Fakturace je jen pro poskytovatele — zákazníkovi ji nenačítáme.
+          Promise.all([getBillingSettings(), previewNextInvoiceNumber()])
+            .then(([nastaveni, dalsiCislo]) => {
+              setBilling(nastaveni)
+              setBillingNext(dalsiCislo)
+              setBillingLoaded(true)
+            })
+            .catch(() => setBillingLoaded(true))
+        }
         setGallery(d.gallery ?? [])
       }
       setLoading(false)
@@ -333,6 +350,11 @@ export default function ProfilPage() {
           </button>
         </form>
       </div>
+
+      {/* Fakturace zákazníkům — jen poskytovatel */}
+      {isProvider && billingLoaded && (
+        <BillingSettings initial={billing} nextNumberPreview={billingNext} />
+      )}
 
       {/* Zabezpečení — změna hesla */}
       {userEmail && <ChangePasswordSection userEmail={userEmail} />}

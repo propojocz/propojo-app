@@ -6,6 +6,7 @@
 
 import { Check } from 'lucide-react'
 import { datumCas } from '@/lib/format'
+import { AUTO_RELEASE_DAYS, dnyText } from '@/lib/payout-config'
 
 type Stav = 'hotovo' | 'ted' | 'ceka'
 
@@ -180,8 +181,8 @@ export default function OrderTimeline({
       cas: dokonceno ? fmt(completedAt) : null,
       popis: cekaPotvrzeni
         ? (isCustomer
-            ? 'Potvrďte, že vše proběhlo v pořádku. Když nic nenamítnete, platba se poskytovateli odešle automaticky do 2 dnů.'
-            : 'Čeká se na potvrzení zákazníka. Bez námitky se platba odešle automaticky do 2 dnů.')
+            ? `Potvrďte, že vše proběhlo v pořádku. Když nic nenamítnete, platba se poskytovateli odešle automaticky do ${dnyText(AUTO_RELEASE_DAYS)}.`
+            : `Čeká se na potvrzení zákazníka. Bez námitky se platba odešle automaticky do ${dnyText(AUTO_RELEASE_DAYS)}.`)
         : null,
       stav: dokonceno ? 'hotovo' : (cekaPotvrzeni ? 'ted' : 'ceka'),
     })
@@ -289,8 +290,8 @@ export default function OrderTimeline({
     cas: dokonceno ? fmt(completedAt) : null,
     popis: cekaPotvrzeni
       ? (isCustomer
-          ? 'Potvrďte, že vše proběhlo v pořádku. Když nic nenamítnete, platba se poskytovateli odešle automaticky do 2 dnů.'
-          : 'Čeká se na potvrzení zákazníka. Bez námitky se platba odešle automaticky do 2 dnů.')
+          ? `Potvrďte, že vše proběhlo v pořádku. Když nic nenamítnete, platba se poskytovateli odešle automaticky do ${dnyText(AUTO_RELEASE_DAYS)}.`
+          : `Čeká se na potvrzení zákazníka. Bez námitky se platba odešle automaticky do ${dnyText(AUTO_RELEASE_DAYS)}.`)
       : null,
     stav: dokonceno ? 'hotovo' : (cekaPotvrzeni ? 'ted' : 'ceka'),
   })
