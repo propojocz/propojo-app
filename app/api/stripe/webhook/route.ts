@@ -9,6 +9,10 @@
 //
 // Zapisujeme přes SERVICE ROLE (webhook nemá přihlášeného uživatele) — a navíc
 // service role obchází ochranný trigger na profiles.
+//
+// MODEL V2: platby nových rezervací (metadata.kind = 'booking_v2') vznikají na účtu
+// providera a jejich události chodí na /api/stripe/connect-webhook. Tady se zpracují
+// jen předplatné a staré zálohy (kind = 'deposit'); nic jiného se nesmí dotknout.
 
 import { NextResponse } from 'next/server'
 import { headers } from 'next/headers'

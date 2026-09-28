@@ -11,6 +11,7 @@ import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { Landmark, ArrowRight } from 'lucide-react'
 import HideOnPath from '@/components/ui/HideOnPath'
+import { adminDb, getProviderAccount } from '@/lib/booking/payments'
 
 export default async function ConnectBanner() {
   const supabase = createClient()
@@ -19,13 +20,15 @@ export default async function ConnectBanner() {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('is_provider, stripe_payouts_enabled')
+    .select('is_provider')
     .eq('id', user.id)
-    .single() as { data: { is_provider: boolean | null; stripe_payouts_enabled: boolean | null } | null }
+    .single() as { data: { is_provider: boolean | null } | null }
 
-  // Jen poskytovatel, který ještě nemá napojené příjmy plateb
+  // Jen poskytovatel, jehož Standard účet ještě nemůže přijímat platby (stripe_accounts,
+  // čte se přes service role po kontrole, že jde o jeho vlastní účet).
   if (profile?.is_provider !== true) return null
-  if (profile?.stripe_payouts_enabled === true) return null
+  const account = await getProviderAccount(adminDb(), user.id)
+  if (account.blocks.length === 0) return null
 
   return (
     <HideOnPath paths={['/dashboard/vyplaty', '/dashboard/predplatne']}>
@@ -34,9 +37,9 @@ export default async function ConnectBanner() {
           <div className="flex gap-3">
             <Landmark className="h-5 w-5 shrink-0 text-amber-600" />
             <div>
-              <p className="font-bold text-amber-900">Napojte si bankovní účet</p>
+              <p className="font-bold text-amber-900">Napojte si účet pro platby</p>
               <p className="mt-1 text-sm text-amber-800">
-                Dokud nemáte napojený účet, zákazníci u vás nemohou zaplatit zálohu a nemůžete přijímat platby.
+                Dokud nemáte napojený a ověřený Stripe účet, zákazníci si u vás nemohou rezervovat termín s platbou.
                 Napojení zabere pár minut.
               </p>
             </div>

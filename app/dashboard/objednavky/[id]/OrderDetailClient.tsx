@@ -253,7 +253,18 @@ export default function OrderDetailClient({
   // Termín proběhl, zaplaceno, ale poskytovatel zakázku ještě neuzavřel.
   // Zákazník nemá co potvrzovat — jen mu vysvětlíme, na co se čeká, ať
   // nekliká na tlačítko, které stejně neprojde.
+  // Model v2: stav rezervace s platbou řídí booking_state (štítek nad detailem).
+  const bookingState = ((order as any).booking_state ?? null) as string | null
+  const v2Platba = bookingState === null || bookingState === 'pending_payment' || bookingState === 'payment_expired'
+  // Rezervace s předautorizací nebo po ní: staré akce (přijmout, zrušit, změna termínu,
+  // platební box) se jí netýkají – stav ukazuje BookingStateBadge, akce přijdou ve vrstvě 3.
+  const v2Rezervace = bookingState !== null && bookingState !== 'payment_expired' && bookingState !== 'pending_payment'
+  const v2Aktivni = bookingState !== null && bookingState !== 'payment_expired'
+  // Objednávka položky nového modelu (má typ nabídky) – platí se Rezervační poplatek / Cena výjezdu
+  const jeV2Polozka = !!(order as any).offer_kind || bookingState !== null
+
   const cekaNaUzavreniPoskytovatelem = isCustomer
+    && bookingState === null
     && (order.status === 'prijato' || order.status === 'v_procesu')
     && sluzbaSkoncila
     && isPaid
@@ -272,6 +283,8 @@ export default function OrderDetailClient({
     && (order.status === 'prijato' || order.status === 'v_procesu')
     && !isPaid
     && !isRefunded
+    // Předautorizovaná / potvrzená rezervace už platbu nepotřebuje.
+    && v2Platba
   const paymentInterrupted = paymentDue && platbaStav === 'zruseno'
 
   const handleSaveAddress = async () => {
@@ -406,8 +419,9 @@ export default function OrderDetailClient({
     </div>
   )
 
-  const canCustomerCancel = isCustomer && ['cekajici', 'prijato', 'v_procesu'].includes(order.status)
+  const canCustomerCancel = isCustomer && !v2Aktivni && ['cekajici', 'prijato', 'v_procesu'].includes(order.status)
   const canRequestTimeChange = isCustomer
+    && !v2Aktivni
     && order.status === 'prijato'
     && !!order.scheduled_at
     && new Date(order.scheduled_at).getTime() > Date.now()
@@ -455,7 +469,14 @@ export default function OrderDetailClient({
             )}
           </div>
 
-          {!isModelB && depositType !== 'bez_platby' && depositAmount > 0 && (
+          {/* Model v2: Rezervační poplatek / Cena výjezdu není záloha a nezapočítává se do ceny
+              Hlavní smlouvy. Stav platby ukazuje štítek nad detailem. */}
+          {jeV2Polozka && depositAmount > 0 && (
+            <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${isModelB ? 'border-blue-200 bg-blue-50 text-blue-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+              <strong>{isModelB ? 'Cena výjezdu' : 'Rezervační poplatek'}:</strong> {depositAmount.toLocaleString('cs-CZ')} Kč
+            </div>
+          )}
+          {!jeV2Polozka && !isModelB && depositType !== 'bez_platby' && depositAmount > 0 && (
             <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
               {isFullPayment ? (
                 <>
@@ -470,14 +491,14 @@ export default function OrderDetailClient({
               )}
             </div>
           )}
-          {isModelB && (
+          {!jeV2Polozka && isModelB && (
             <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
               <strong>Výjezd a nacenění</strong>{depositAmount > 0 ? `: poplatek za výjezd ${depositAmount.toLocaleString('cs-CZ')} Kč` : ''}
             </div>
           )}
 
           {/* Stav zálohy i pro POSKYTOVATELE */}
-          {isProvider && hasDeposit && order.status !== 'cekajici' && order.status !== 'zruseno' && (
+          {isProvider && hasDeposit && !jeV2Polozka && order.status !== 'cekajici' && order.status !== 'zruseno' && (
             <div className={`mt-4 flex items-center gap-2 rounded-xl px-4 py-3 text-sm ${isPaid ? 'border border-emerald-200 bg-emerald-50 text-emerald-800' : 'border border-amber-200 bg-amber-50 text-amber-800'}`}>
               {isPaid ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <Clock className="h-4 w-4 shrink-0" />}
               {order.deposit_status === 'released'
@@ -653,8 +674,8 @@ export default function OrderDetailClient({
             </div>
           )}
 
-          {/* Akce poskytovatele */}
-          {isProvider && (
+          {/* Akce poskytovatele (u rezervace nového modelu přijdou ve vrstvě 3) */}
+          {isProvider && !v2Aktivni && (
             <div className="mt-5 border-t border-slate-100 pt-5">
               <OrderStatusButton
                 orderId={order.id}
@@ -782,7 +803,7 @@ export default function OrderDetailClient({
         {/* ── PLATBA ZÁLOHY (jen zákazník, po přijetí) ───────── */}
         {/* isRefunded: u vrácené platby nemá smysl nabízet zaplacení — dřív se
             tenhle blok ukázal současně s hláškou „peníze jsme vrátili". */}
-        {isCustomer && hasDeposit && !isRefunded && (order.status === 'prijato' || order.status === 'v_procesu') && (
+        {isCustomer && hasDeposit && !isRefunded && !v2Rezervace && (order.status === 'prijato' || order.status === 'v_procesu') && (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             {platbaStav === 'uspech' && (
               <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
@@ -819,20 +840,39 @@ export default function OrderDetailClient({
               <div>
                 <div className="mb-1 flex items-center gap-2">
                   <CreditCard className="h-5 w-5 text-emerald-600" />
-                  <h2 className="font-black text-slate-900">Zaplaťte {payLabel}</h2>
+                  <h2 className="font-black text-slate-900">
+                    {jeV2Polozka ? `Zaplaťte ${isModelB ? 'Cenu výjezdu' : 'Rezervační poplatek'}` : `Zaplaťte ${payLabel}`}
+                  </h2>
                 </div>
-                <p className="mb-4 text-sm text-slate-500">
-                  Poskytovatel objednávku přijal. Pro potvrzení uhraďte {payLabel} ve výši{' '}
-                  <strong className="text-slate-800">{depositAmount.toLocaleString('cs-CZ')} Kč</strong>.
-                  {!isModelB && (isFullPayment
-                    ? ' Po zaplacení už za tento úkon na místě nic nedoplácíte.'
-                    : ' Záloha se započítá do konečné ceny.')}
-                </p>
+                {jeV2Polozka ? (
+                  // Model v2: preautorizace na účtu poskytovatele, strhne se až po jeho potvrzení.
+                  <>
+                    <p className="mb-4 text-sm text-slate-500">
+                      {isModelB ? 'Cena výjezdu' : 'Rezervační poplatek'} je{' '}
+                      <strong className="text-slate-800">{depositAmount.toLocaleString('cs-CZ')} Kč</strong>.
+                      Částka se na kartě jen zablokuje a strhne se až poté, co poskytovatel rezervaci potvrdí.
+                    </p>
+                    <div className="mb-4 flex items-start gap-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
+                      <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                      <span>Když poskytovatel rezervaci nepotvrdí, blokace se uvolní a nic se nestrhne.</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="mb-4 text-sm text-slate-500">
+                      Poskytovatel objednávku přijal. Pro potvrzení uhraďte {payLabel} ve výši{' '}
+                      <strong className="text-slate-800">{depositAmount.toLocaleString('cs-CZ')} Kč</strong>.
+                      {!isModelB && (isFullPayment
+                        ? ' Po zaplacení už za tento úkon na místě nic nedoplácíte.'
+                        : ' Záloha se započítá do konečné ceny.')}
+                    </p>
 
-                <div className="mb-4 flex items-start gap-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
-                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                  <span>Platba je bezpečně držená přes Propojo a poskytovateli se uvolní až po {isModelB ? 'provedení výjezdu' : 'dokončení práce'}.</span>
-                </div>
+                    <div className="mb-4 flex items-start gap-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
+                      <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                      <span>Platba je bezpečně držená přes Propojo a poskytovateli se uvolní až po {isModelB ? 'provedení výjezdu' : 'dokončení práce'}.</span>
+                    </div>
+                  </>
+                )}
 
                 {atCustomer && !hasAddress ? (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -1037,6 +1077,7 @@ export default function OrderDetailClient({
 
         {/* Kde v procesu jsme a co bude dál */}
         <OrderTimeline
+          bookingState={bookingState}
           status={order.status}
           depositStatus={order.deposit_status}
           createdAt={order.created_at}

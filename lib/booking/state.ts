@@ -1,8 +1,10 @@
 // lib/booking/state.ts
 // Stavy rezervace, povolené přechody a výpočty lhůt. Čisté funkce bez DB a Stripe.
 //
-// orders.booking_state je nový sloupec; stará objednávka ho má prázdný a starý kód
-// dál čte orders.status. Nový tok zapisuje jen booking_state.
+// orders.booking_state je nový sloupec a jediný zdroj pravdy pro nový tok; stará objednávka
+// ho má prázdný. Kalendář a staré obrazovky ale dál čtou status / deposit_status /
+// hold_expires_at, proto nový tok k booking_state zapisuje i jejich odvozené zrcadlo
+// (lib/booking/legacy.ts). Zrcadlo zmizí s odstraněním legacy logiky.
 
 import { BOOKING_POLICY, type BookingPolicy } from './policy'
 
@@ -43,6 +45,7 @@ export const CANCEL_REASONS = [
 export type CancelReason = (typeof CANCEL_REASONS)[number]
 
 export const BOOKING_EVENTS = [
+  'checkout_started', // zákazník otevřel Stripe Checkout (i opakovaný pokus)
   'checkout_expired', // Checkout vypršel / zákazník odešel
   'authorized', // preautorizace hotová (PaymentIntent requires_capture)
   'confirm_started', // provider klikl Potvrdit, jde se na capture
@@ -70,10 +73,20 @@ export type BookingEvent = (typeof BOOKING_EVENTS)[number]
 
 type TransitionTable = { [S in BookingState]?: { [E in BookingEvent]?: BookingState } }
 
+// Objednávka bez booking_state (domluva, stará objednávka) může vstoupit jen založením checkoutu.
+const INITIAL_TRANSITIONS: { [E in BookingEvent]?: BookingState } = {
+  checkout_started: 'pending_payment',
+}
+
 const TRANSITIONS: TransitionTable = {
   pending_payment: {
+    checkout_started: 'pending_payment',
     checkout_expired: 'payment_expired',
     authorized: 'awaiting_confirmation',
+  },
+  // Jen domluvený termín se po vypršení vrací do domluvy a jde zaplatit znovu.
+  payment_expired: {
+    checkout_started: 'pending_payment',
   },
   awaiting_confirmation: {
     confirm_started: 'capture_in_progress',
@@ -120,8 +133,8 @@ export type TransitionResult =
   | { ok: false }
 
 /** Vrátí nový stav, nebo ok:false, pokud přechod není povolený (např. duplicitní webhook) */
-export function transition(state: BookingState, event: BookingEvent): TransitionResult {
-  const next = TRANSITIONS[state]?.[event]
+export function transition(state: BookingState | null, event: BookingEvent): TransitionResult {
+  const next = state === null ? INITIAL_TRANSITIONS[event] : TRANSITIONS[state]?.[event]
   if (!next) return { ok: false }
   return { ok: true, next, cancelReason: CANCEL_REASON_BY_EVENT[event] ?? null }
 }
@@ -199,7 +212,9 @@ export function noShowResponseDeadline(
 
 /** Typy záznamů v logu událostí (orders → order_events); slouží jako evidence */
 export const ORDER_EVENT_TYPES = [
+  'booking_created', // payload.direct = přímá rezervace času / okna (ne domluva přes návrhy)
   'state_changed',
+  'authorization_released', // preautorizace zrušena (payload.reason)
   'stripe_event',
   'provider_instruction_consent',
   'early_performance_request',

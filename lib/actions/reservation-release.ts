@@ -17,6 +17,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { stripe } from '@/lib/stripe'
 import { createNotification } from '@/lib/actions/notifications'
 import { releaseSlotAndMerge } from '@/lib/slot-merge'
+import { applyTransition, expireCheckoutIfOpen, loadBookingOrder } from '@/lib/booking/payments'
 
 function getAdminClient() {
   return createAdminClient(
@@ -47,7 +48,7 @@ export async function releaseUnpaidReservation(
 
   const { data: order } = await admin
     .from('orders')
-    .select('id, customer_id, provider_id, status, deposit_status, slot_id, scheduled_at, scheduled_end, stripe_checkout_session_id, service_items(name), services(title)')
+    .select('id, customer_id, provider_id, status, deposit_status, booking_state, stripe_account_id, slot_id, scheduled_at, scheduled_end, stripe_checkout_session_id, service_items(name), services(title)')
     .eq('id', orderId)
     .single() as { data: any }
 
@@ -59,6 +60,49 @@ export async function releaseUnpaidReservation(
   // Zaplacené / refundované peníze se touto akcí nikdy nesmí uvolňovat.
   if (order.deposit_status === 'paid' || order.deposit_status === 'released' || order.deposit_status === 'refunded') {
     return { released: false }
+  }
+
+  const nazev = order.service_items?.name || order.services?.title || 'Rezervace'
+
+  // ── Model v2 ──
+  // Checkout leží na Stripe účtu providera. Stav i uvolnění termínu řídí booking_state
+  // (přímá rezervace → zrušeno, domluvený termín → zpět do domluvy).
+  if (order.booking_state != null) {
+    if (order.booking_state !== 'pending_payment') return { released: false }
+    if (order.stripe_checkout_session_id) {
+      await expireCheckoutIfOpen(order.stripe_account_id, order.stripe_checkout_session_id)
+    }
+    const booking = await loadBookingOrder(admin, orderId)
+    if (!booking) return { released: false }
+    const r = await applyTransition(admin, booking, 'checkout_expired', { type: 'customer', id: user.id }, {
+      payload: { reason: intent },
+    })
+    if (!r.ok) return { released: false }
+
+    // applyTransition u domluveného termínu smaže termín = návrat do domluvy
+    const outcome = booking.scheduled_at === null ? 'negotiation' : 'cancelled'
+    if (outcome === 'negotiation' && intent === 'change_term') {
+      try {
+        await (admin.from('messages') as any).insert({
+          order_id: orderId,
+          sender_id: order.customer_id,
+          content: 'Zvolený termín mi nevyhovuje. Prosím o návrh jiného termínu.',
+        })
+        await createNotification({
+          userId: order.provider_id,
+          type: 'status_change',
+          orderId,
+          actorId: order.customer_id,
+          title: 'Zákazník chce jiný termín',
+          preview: `${nazev} · objednávka zůstává otevřená.`,
+        })
+      } catch { /* zpráva/notifikace nejsou kritické */ }
+    }
+
+    revalidatePath('/dashboard/objednavky')
+    revalidatePath('/dashboard/terminy')
+    revalidatePath(`/dashboard/objednavky/${orderId}`)
+    return { released: true, outcome }
   }
 
   // Aktuální checkout ukončíme, protože zákazník právě řekl, že TENHLE termín
@@ -73,8 +117,6 @@ export async function releaseUnpaidReservation(
       console.warn('[releaseUnpaidReservation] session.expire:', err)
     }
   }
-
-  const nazev = order.service_items?.name || order.services?.title || 'Rezervace'
 
   if (order.slot_id) {
     // Přímá rezervace: fyzický slot vrátíme. Tahle konkrétní objednávka končí;

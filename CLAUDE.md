@@ -36,7 +36,7 @@ Právní a produktová rozhodnutí se dělají mimo repo (claude.ai projekt Prop
 - Pravidla peněz (stavy, lhůty, provize, refundy, check-in) patří jen do `lib/booking/`, ne do komponent.
 - Stav plateb a refundů jen podle Stripe webhooků, včetně událostí z připojených účtů.
 - Automatický refund z účtu providera jen ve spouštěčích z `lib/booking/rules.ts` a jen v rozsahu pokynu, který provider odsouhlasil.
-- Stripe se testuje v sandboxu. Webhooky na localhost jen přes Stripe CLI (`stripe listen`), jinak chodí jen na propojo.cz.
+- Stripe se testuje v Test mode hlavního účtu Propojo (klíče `sk_test_…`), ne v sandboxu. Webhooky na localhost jen přes Stripe CLI (`stripe listen`), jinak chodí jen na propojo.cz.
 
 ## UI a texty
 - Veškeré UI česky, formálně (vykání).
@@ -61,7 +61,14 @@ Právní a produktová rozhodnutí se dělají mimo repo (claude.ai projekt Prop
 - Do `main` až s hotovou vrstvou 3, která musí obsahovat:
   - UI potvrzení/odmítnutí providerem + hlídání 48h lhůty,
   - zákazník nikde (seznam objednávek, e-maily, notifikace) nevidí Přijato/Potvrzeno před úspěšným capture – vše se řídí `booking_state`,
-  - rekapitulaci před platbou s telefonem a e-mailem poskytovatele (model §15) a výslovnou žádost zákazníka o plnění před uplynutím lhůty pro odstoupení uloženou do `booking_consents` (model §17).
+  - rekapitulaci před platbou s telefonem a e-mailem poskytovatele (model §15) a výslovnou žádost zákazníka o plnění před uplynutím lhůty pro odstoupení uloženou do `booking_consents` (model §17),
+  - objednávku z veřejné poptávky (`selectProvider`, dnes vzniká bez `service_item_id`, a proto ve v2 nejde zaplatit):
+    - konkrétní položku (Nabídku) vybírá poskytovatel při návrhu termínu; pole je povinné a nabízí jen jeho aktivní položky typu A nebo B s platbou aspoň 200 Kč,
+    - u navrženého termínu zákazník vidí název položky a Rezervační poplatek / Cenu výjezdu,
+    - po přijetí termínu se položka zapíše do objednávky a dál jde standardní cesta v2,
+    - Model C z poptávky ne, jen přes stránku výrobku s individuálním zadáním,
+    - délka navrženého termínu se řídí položkou, ne pevnými 60 minutami; když položka délku nemá, navrhnout řešení v plánu vrstvy 3,
+  - kratší Stripe onboarding: při zakládání Standard účtu předvyplnit e-mail, telefon, IČO, název a adresu z ARES, odvětví (MCC) podle kategorie nabídky, web = veřejný profil na Propojo, popis podnikání z nabídky. Nejdřív ověřit v dokumentaci Stripe, co jde u Standard účtu předvyplnit.
 - Pořadí vrstev, technické korekce a parametry k potvrzení: konec `docs/model-v2.md`.
 
 ## Před ostrým spuštěním (vypnutím údržby)

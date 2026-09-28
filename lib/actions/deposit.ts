@@ -1,21 +1,24 @@
 'use server'
 // lib/actions/deposit.ts
-// Platba zálohy (Model A) / poplatku za výjezd (Model B) za objednávku.
-// Peníze přitečou na Propojo a DRŽÍ se (separate charges and transfers).
-// Převod poskytovateli / vratka = vrstva 4.
+// Model v2: platba rezervace = preautorizace Rezervačního poplatku (A, C) / Ceny výjezdu (B)
+// přímo na Stripe účtu providera (Direct Charge, manual capture). Propojo peníze nedrží;
+// provize (application fee) vznikne až při capture po potvrzení providerem.
 //
-// Opakovaný pokus o platbu je podporovaný: návrat z Checkout přes „zpět" neznamená,
-// že zákazník objednávku ruší. Nový checkout nahradí předchozí session a obnoví hold.
+// Název funkce zůstává kvůli volajícím (rezervace času, okna, návrhy termínů, detail objednávky).
+// Opakovaný pokus o platbu je podporovaný: nový checkout nahradí předchozí session a obnoví hold.
 
 import { createClient } from '@/lib/supabase/server'
-import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { stripe } from '@/lib/stripe'
-
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-const MIN_AMOUNT_CZK = 20
-const CHECKOUT_MINUTES = 30
-// O pár minut déle než checkout kvůli případnému zpoždění webhooku.
-const HOLD_MINUTES = 35
+import { policySnapshot } from '@/lib/booking/policy'
+import { bookingBufferMs } from '@/lib/booking/rules'
+import {
+  adminDb,
+  applyTransition,
+  checkNewBooking,
+  createBookingCheckoutSession,
+  expireCheckoutIfOpen,
+  loadBookingOrder,
+} from '@/lib/booking/payments'
 
 type Result = { success: true; url: string } | { success: false; error: string }
 
@@ -24,212 +27,133 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Nejste přihlášeni.' }
 
-  const { data: order } = await supabase
-    .from('orders')
-    .select(`
-      id, customer_id, provider_id, status, deposit_status, deposit_amount, service_item_id,
-      quantity, unit_price, needed_at,
-      scheduled_at, scheduled_end, hold_expires_at, stripe_checkout_session_id,
-      services(title, payment_model, deposit_amount, quote_fee),
-      service_items(name, payment_model, deposit_amount, quote_fee, deposit_type, price, item_type),
-      profiles!orders_provider_id_fkey(stripe_account_id, stripe_payouts_enabled)
-    `)
-    .eq('id', orderId)
-    .single() as { data: any }
-
+  const db = adminDb()
+  const order = await loadBookingOrder(db, orderId)
   if (!order) return { success: false, error: 'Objednávka nenalezena.' }
+  if (order.customer_id !== user.id) return { success: false, error: 'K této objednávce nemáte přístup.' }
 
-  if (order.customer_id !== user.id) {
-    return { success: false, error: 'K této objednávce nemáte přístup.' }
+  // Platit jde jen objednávku, kde rezervace ještě nevznikla nebo je rozpracovaná platba.
+  const state = order.booking_state
+  if (state !== null && state !== 'pending_payment' && state !== 'payment_expired') {
+    return { success: false, error: 'Platba k této rezervaci už proběhla nebo už není možná.' }
   }
 
+  const { data: itemRow } = await db
+    .from('service_items')
+    .select('name, item_type, offer_kind, deposit_amount, quote_fee, deposit_type, buffer_minutes')
+    .eq('id', order.service_item_id ?? '')
+    .maybeSingle()
+  const item = itemRow as {
+    name: string | null; item_type: string | null; offer_kind: string | null
+    deposit_amount: number | null; quote_fee: number | null; deposit_type: string | null; buffer_minutes: number | null
+  } | null
+
   if (order.status !== 'prijato') {
-    // U výrobku čekajícího na vyjádření poskytovatele je to očekávaný stav,
-    // ne chyba — zákazník má vědět, na co se čeká.
-    const cekaNaPotvrzeni = order.status === 'cekajici' && order.service_items?.item_type === 'product'
+    // U výrobku čekajícího na vyjádření poskytovatele je to očekávaný stav, ne chyba.
+    const cekaNaPotvrzeni = order.status === 'cekajici' && item?.item_type === 'product'
     return {
       success: false,
       error: cekaNaPotvrzeni
         ? 'Platba se zpřístupní, jakmile poskytovatel objednávku potvrdí.'
-        : 'Platbu lze dokončit až po potvrzení termínu.',
+        : 'Platbu lze dokončit až po domluvení termínu.',
     }
   }
+  if (!item) return { success: false, error: 'Tuto objednávku nelze v novém modelu rezervovat.' }
 
-  if (order.deposit_status === 'paid' || order.deposit_status === 'released') {
-    return { success: false, error: 'Záloha už byla zaplacena.' }
+  const start = order.scheduled_at ? new Date(order.scheduled_at) : null
+  const end = order.scheduled_end ? new Date(order.scheduled_end) : null
+  const check = await checkNewBooking(db, { item, providerId: order.provider_id, start, end })
+  if (!check.ok) return { success: false, error: check.error }
+
+  // ── Je termín pořád volný? ──────────────────────────────────
+  // Rezervace drží čas jen krátce; mezitím ho mohl zabrat někdo jiný.
+  const ownEnd = end!.getTime() + Math.max(0, Number(item.buffer_minutes ?? 0)) * 60_000
+  const { data: kolize } = await db
+    .from('orders')
+    .select('id, booking_state, offer_kind, scheduled_at, scheduled_end, deposit_status, hold_expires_at, service_items(duration_minutes, buffer_minutes)')
+    .eq('provider_id', order.provider_id)
+    .neq('status', 'zruseno')
+    .neq('id', orderId)
+    .not('scheduled_at', 'is', null)
+    .lt('scheduled_at', new Date(ownEnd).toISOString())
+  const ted = Date.now()
+  const zive = ((kolize ?? []) as any[]).filter((o) => {
+    // Cizí rozpracovaná platba s prošlým zámkem termín nedrží.
+    if (o.deposit_status === 'pending' && o.hold_expires_at && new Date(o.hold_expires_at).getTime() <= ted) return false
+    const s = new Date(o.scheduled_at).getTime()
+    const fallback = (Number(o.service_items?.duration_minutes ?? 60) || 60) * 60_000
+    const e = (o.scheduled_end ? new Date(o.scheduled_end).getTime() : s + fallback) + bookingBufferMs(o)
+    return s < ownEnd && e > start!.getTime()
+  })
+  if (zive.length > 0) {
+    return { success: false, error: 'Tento termín byl mezitím zabraný. Vyberte prosím jiný – nic jsme vám neúčtovali.' }
   }
 
-  const providerAccount = order.profiles?.stripe_account_id
-  const payoutsEnabled = order.profiles?.stripe_payouts_enabled === true
-  if (!providerAccount || !payoutsEnabled) {
-    return { success: false, error: 'Poskytovatel zatím nemá nastavené příjmy plateb. Zkuste to prosím později.' }
-  }
-
-  const svc = order.services
-  const item = order.service_items ?? null
-  const isModelB = (item?.payment_model ?? svc?.payment_model) === 'B'
-
-  // Musí být před podmínkou termínu — výrobek termín nemá a nesmí být blokovaný.
-  const jeVyrobek = item?.item_type === 'product'
-  const pocetKusu = Math.max(1, Number(order.quantity ?? 1))
-
-  // Výrobek se neplánuje v kalendáři — termín u něj neexistuje a nemá se čekat.
-  if (!isModelB && !jeVyrobek && !order.scheduled_at) {
-    return { success: false, error: 'Nejdřív musí být potvrzený termín.' }
-  }
-
-  const isFullPayment = !isModelB && item?.deposit_type === 'plna_platba'
-  // U výrobku je částka za CELOU objednávku (n kusů). orderProduct ji ukládá
-  // rovnou správně do deposit_amount; fallbacky níž ale nesou cenu ZA KUS,
-  // takže se musí vynásobit — jinak by zákazník za 2 ks zaplatil cenu jednoho.
-  const amount = isModelB
-    ? Number(item?.quote_fee ?? svc?.quote_fee ?? 0)
-    : isFullPayment
-      ? Number(order.deposit_amount ?? (Number(item?.price ?? 0) * pocetKusu))
-      : Number(order.deposit_amount ?? (Number(item?.deposit_amount ?? svc?.deposit_amount ?? 0) * (jeVyrobek ? pocetKusu : 1)))
-
-  if (!amount || amount <= 0) {
-    return { success: false, error: 'Pro tuto objednávku není nastavena žádná platba předem.' }
-  }
-
-  if (amount < MIN_AMOUNT_CZK) {
-    return { success: false, error: `Minimální částka platby je ${MIN_AMOUNT_CZK} Kč.` }
-  }
-
-  // ── NEPROBĚHL UŽ TERMÍN? ────────────────────────────────────
-  // Záloha se platí PŘED službou. Objednávka ale zůstává ve stavu 'prijato',
-  // dokud ji někdo neuzavře — takže bez téhle kontroly šlo zaplatit i měsíc
-  // po termínu, což nedává smysl ani zákazníkovi, ani poskytovateli.
-  if (!isModelB && !jeVyrobek && order.scheduled_at) {
-    const konecTerminu = new Date(order.scheduled_end ?? order.scheduled_at).getTime()
-    if (konecTerminu < Date.now()) {
-      return {
-        success: false,
-        error: 'Tento termín už proběhl. Domluvte se prosím s poskytovatelem na novém termínu — platbu pak spustíme znovu.',
-      }
-    }
-  }
-
-  // ── JE TERMÍN JEŠTĚ VOLNÝ? ──────────────────────────────────
-  // Rezervace drží termín 10 minut (reserve-time.ts), ale checkout běží 30.
-  // Když zákazník otevře platbu později, mohl termín mezitím zabrat někdo jiný
-  // — a bez téhle kontroly by zaplatil na obsazený čas. Kontrolujeme až tady,
-  // těsně před platbou, ať to sedí na stav v tu chvíli.
-  if (!isModelB && !jeVyrobek && order.scheduled_at) {
-    const admin = createAdminClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    )
-    const konec = order.scheduled_end ?? order.scheduled_at
-    const { data: kolize } = await admin
-      .from('orders')
-      .select('id, deposit_status, hold_expires_at')
-      .eq('provider_id', order.provider_id)
-      .neq('status', 'zruseno')
-      .neq('id', orderId)
-      .lt('scheduled_at', konec)
-      .gt('scheduled_end', order.scheduled_at) as {
-        data: Array<{ id: string; deposit_status: string | null; hold_expires_at: string | null }> | null
-      }
-
-    const ted = Date.now()
-    const zive = (kolize ?? []).filter((o) => {
-      // Cizí rezervace s prošlým zámkem termín nedrží.
-      if (o.deposit_status === 'pending' && o.hold_expires_at) {
-        return new Date(o.hold_expires_at).getTime() > ted
-      }
-      return true
-    })
-
-    if (zive.length > 0) {
-      return {
-        success: false,
-        error: 'Tento termín byl mezitím zabraný. Vyberte prosím jiný — nic jsme vám neúčtovali.',
-      }
-    }
-  }
-
-  // Když už existuje předchozí checkout, nejdřív zjistíme, jestli náhodou nebyl
-  // zaplacený a jen ještě nedorazil webhook. Nechceme vytvořit druhou platbu.
-  let previousSessionId: string | null = order.stripe_checkout_session_id ?? null
+  // ── Předchozí checkout ──────────────────────────────────────
+  // Když byl dokončený a jen ještě nedorazil webhook, druhou platbu nezakládáme.
+  const previousSessionId = order.stripe_checkout_session_id
+  const previousAccountId = order.stripe_account_id
   if (previousSessionId) {
     try {
-      const previous = await stripe.checkout.sessions.retrieve(previousSessionId)
-      if (previous.payment_status === 'paid') {
+      const previous = await stripe.checkout.sessions.retrieve(
+        previousSessionId,
+        undefined,
+        previousAccountId ? { stripeAccount: previousAccountId } : undefined,
+      )
+      if (previous.status === 'complete') {
         return {
           success: false,
-          error: 'Platba už byla odeslána. Chvíli počkejte a obnovte stránku — potvrzení se právě zpracovává.',
+          error: 'Platba už byla odeslána. Chvíli počkejte a obnovte stránku – potvrzení se právě zpracovává.',
         }
       }
     } catch (err) {
-      // Starou session nemusíme umět načíst (už mohla být odstraněná/expirnutá).
-      // Nový pokus tím neblokujeme.
       console.warn('[deposit] předchozí checkout nelze načíst:', err)
-      previousSessionId = null
     }
   }
 
-  const nazev = item?.name || svc?.title || 'služba'
-  const nazevSPoctem = jeVyrobek && pocetKusu > 1 ? `${pocetKusu}× ${nazev}` : nazev
-  const popis = isModelB
-    ? `Poplatek za nacenění – ${nazev}`
-    : isFullPayment
-      ? `Platba předem – ${nazevSPoctem}`
-      : `Záloha – ${nazevSPoctem}`
+  const nazev = item.name || order.services?.title || 'služba'
+  const { version, snapshot } = policySnapshot()
 
   try {
-    const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
-      line_items: [{
-        price_data: {
-          currency: 'czk',
-          product_data: { name: popis },
-          unit_amount: Math.round(amount * 100),
-        },
-        quantity: 1,
-      }],
-      payment_intent_data: {
-        metadata: { order_id: orderId, kind: 'deposit' },
-      },
-      expires_at: Math.floor(Date.now() / 1000) + CHECKOUT_MINUTES * 60,
-      success_url: `${APP_URL}/dashboard/objednavky/${orderId}?platba=uspech`,
-      // Návrat sem znamená jen „checkout nebyl dokončen", ne zrušení objednávky.
-      cancel_url: `${APP_URL}/dashboard/objednavky/${orderId}?platba=zruseno`,
-      locale: 'cs',
-      metadata: { order_id: orderId, kind: 'deposit' },
+    const { session, holdUntil } = await createBookingCheckoutSession({
+      orderId,
+      accountId: check.accountId,
+      offerKind: check.offerKind,
+      itemName: nazev,
+      commission: check.commission,
     })
-
     if (!session.url) return { success: false, error: 'Nepodařilo se vytvořit platbu.' }
 
-    // Nejdřív označíme NOVOU session jako aktuální. Když pak expirujeme starou,
-    // její webhook objednávku neukončí, protože kontroluje stripe_checkout_session_id.
-    const holdExpiresAt = new Date(Date.now() + HOLD_MINUTES * 60_000).toISOString()
-    const { error: updateError } = await (supabase.from('orders') as any)
-      .update({
+    // Nejdřív označíme NOVOU session jako aktuální. Webhook staré session pak objednávku neukončí.
+    const c = check.commission
+    const started = await applyTransition(db, order, 'checkout_started', { type: 'customer', id: user.id }, {
+      holdUntil,
+      extra: {
+        offer_kind: check.offerKind,
+        stripe_account_id: check.accountId,
         stripe_checkout_session_id: session.id,
-        deposit_amount: amount,
-        deposit_status: 'pending',
-        hold_expires_at: holdExpiresAt,
-      })
-      .eq('id', orderId)
-      .eq('customer_id', user.id)
-      .eq('status', 'prijato')
+        stripe_payment_intent_id: null,
+        charge_halere: c.chargeHalere,
+        application_fee_halere: c.applicationFeeHalere,
+        commission_base_halere: c.baseHalere,
+        commission_vat_halere: c.vatHalere,
+        vat_rate_bps: c.vatRateBps,
+        policy_version: version,
+        policy_snapshot: snapshot,
+        // Legacy sloupec pro staré obrazovky (v Kč)
+        deposit_amount: c.chargeHalere / 100,
+      },
+      payload: { session: session.id, charge_halere: c.chargeHalere },
+    })
 
-    if (updateError) {
-      try { await stripe.checkout.sessions.expire(session.id) } catch {}
-      console.error('[deposit] nepodařilo se uložit novou session:', updateError)
-      return { success: false, error: 'Platbu se nepodařilo připravit. Zkuste to znovu.' }
+    if (!started.ok) {
+      await expireCheckoutIfOpen(check.accountId, session.id)
+      return { success: false, error: 'Platbu se nepodařilo připravit. Obnovte stránku a zkuste to znovu.' }
     }
 
-    // Starý otevřený checkout zneplatníme, aby zákazník nemohl omylem zaplatit
-    // dvě různé session za stejnou objednávku.
+    // Starý otevřený checkout zneplatníme, aby nešlo zaplatit dvakrát.
     if (previousSessionId && previousSessionId !== session.id) {
-      try {
-        const previous = await stripe.checkout.sessions.retrieve(previousSessionId)
-        if (previous.status === 'open') await stripe.checkout.sessions.expire(previousSessionId)
-      } catch (err) {
-        console.warn('[deposit] starý checkout se nepodařilo ukončit:', err)
-      }
+      await expireCheckoutIfOpen(previousAccountId, previousSessionId)
     }
 
     return { success: true, url: session.url }

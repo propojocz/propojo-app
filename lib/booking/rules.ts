@@ -8,7 +8,56 @@
 // - Stav refundu se vždy bere ze Stripe, ne z vlastního předpokladu.
 
 import { BOOKING_POLICY, type BookingPolicy, type OfferKind } from './policy'
-import { noShowReportWindow, type BookingEvent, type BookingState } from './state'
+import { earliestBookableStart, noShowReportWindow, type BookingEvent, type BookingState } from './state'
+
+// ─── Okno rezervace ───────────────────────────────────────────────────────
+
+export type BookingWindowIssue = 'no_window' | 'invalid_window' | 'too_soon'
+
+/**
+ * Každá rezervace má začátek i konec okna (no-show i check-in počítají s koncem)
+ * a začíná aspoň minLeadMinutes od teď – jinak by preautorizace mohla dorazit až po začátku.
+ */
+export function bookingWindowIssue(
+  start: Date | null,
+  end: Date | null,
+  now: Date,
+  policy: BookingPolicy = BOOKING_POLICY,
+): BookingWindowIssue | null {
+  if (start === null || end === null) return 'no_window'
+  if (end.getTime() <= start.getTime()) return 'invalid_window'
+  if (start.getTime() < earliestBookableStart(now, policy).getTime()) return 'too_soon'
+  return null
+}
+
+export function bookingWindowMessage(issue: BookingWindowIssue, policy: BookingPolicy = BOOKING_POLICY): string {
+  switch (issue) {
+    case 'no_window':
+      return 'Nejdřív musí být domluvený termín (začátek i konec).'
+    case 'invalid_window':
+      return 'Termín má neplatný konec.'
+    case 'too_soon':
+      return `Termín musí začínat nejdříve za ${policy.minLeadMinutes} minut. Vyberte prosím pozdější čas.`
+  }
+}
+
+// ─── Obsazenost kalendáře ─────────────────────────────────────────────────
+
+/**
+ * Nová rezervace ukládá do scheduled_end konec rezervovaného okna (bez pauzy).
+ * Kalendář ale za ní musí držet i pauzu úkonu, proto se u nového toku přičítá.
+ * U staré objednávky už scheduled_end pauzu obsahuje nebo se počítá postaru.
+ */
+export function bookingBufferMs(order: {
+  booking_state?: string | null
+  offer_kind?: string | null
+  service_items?: { buffer_minutes?: number | null } | null
+}): number {
+  // Nová rezervace má offer_kind od založení, booking_state až od otevření platby.
+  if (!order.booking_state && !order.offer_kind) return 0
+  const buf = Number(order.service_items?.buffer_minutes ?? 0)
+  return buf > 0 ? buf * 60_000 : 0
+}
 
 // ─── Automatické refundy a pokyn providera ────────────────────────────────
 

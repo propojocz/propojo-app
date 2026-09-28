@@ -20,6 +20,8 @@ import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { createDepositCheckout } from '@/lib/actions/deposit'
 import { rozsahCasu, cas, denVTydnuPraha, minutyOdPulnociPraha, casNaMinuty } from '@/lib/format'
+import { bookingBufferMs } from '@/lib/booking/rules'
+import { checkNewBooking, logOrderEvent } from '@/lib/booking/payments'
 
 type Result = { success: true; id?: string; payUrl?: string } | { success: false; error: string }
 
@@ -271,85 +273,10 @@ export async function reserveSlot(values: {
   location_city?: string
   service_location?: string
 }): Promise<Result> {
-  const supabase = createClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) return { success: false, error: 'Nejste přihlášeni.' }
-
-  const admin = getAdminClient()
-
-  const { data: slot } = await admin
-    .from('availability_slots')
-    .select('id, provider_id, starts_at, ends_at, status')
-    .eq('id', values.slot_id)
-    .single() as { data: { id: string; provider_id: string; starts_at: string; ends_at: string; status: string } | null }
-
-  if (!slot) return { success: false, error: 'Termín nenalezen.' }
-  if (slot.status !== 'volno') return { success: false, error: 'Tento termín byl právě zabrán. Vyberte prosím jiný.' }
-  if (new Date(slot.starts_at) < new Date()) return { success: false, error: 'Tento termín už proběhl.' }
-  if (slot.provider_id === user.id) return { success: false, error: 'Vlastní termín si rezervovat nemůžete.' }
-
-  const { data: link } = await admin
-    .from('slot_services')
-    .select('service_id')
-    .eq('slot_id', slot.id)
-    .eq('service_id', values.service_id)
-    .single()
-  if (!link) return { success: false, error: 'Tato služba se do vybraného termínu nenabízí.' }
-
-  const { data: service } = await admin
-    .from('services')
-    .select('id, provider_id, deposit_amount')
-    .eq('id', values.service_id)
-    .single() as { data: { id: string; provider_id: string; deposit_amount: number | null } | null }
-  if (!service || service.provider_id !== slot.provider_id) {
-    return { success: false, error: 'Služba nepatří k tomuto poskytovateli.' }
-  }
-
-  const { data: order, error: orderErr } = await (admin.from('orders') as any)
-    .insert({
-      customer_id: user.id,
-      provider_id: slot.provider_id,
-      service_id: values.service_id,
-      status: 'prijato',
-      description: values.message?.trim() || null,
-      deposit_amount: service.deposit_amount ?? null,
-      deposit_status: 'none',
-      location_city: values.location_city?.trim() || null,
-      service_location: values.service_location ?? null,
-      scheduled_at: slot.starts_at,
-      slot_id: slot.id,
-    })
-    .select('id')
-    .single()
-  if (orderErr || !order) {
-    console.error('[reserveSlot order]', orderErr)
-    return { success: false, error: 'Rezervaci se nepodařilo vytvořit.' }
-  }
-
-  const { data: taken, error: takeErr } = await (admin.from('availability_slots') as any)
-    .update({ status: 'zabrano', order_id: order.id })
-    .eq('id', slot.id)
-    .eq('status', 'volno')
-    .select('id')
-  if (takeErr || !taken || taken.length === 0) {
-    await admin.from('orders').delete().eq('id', order.id)
-    return { success: false, error: 'Tento termín byl právě zabrán. Vyberte prosím jiný.' }
-  }
-
-  try {
-    await (admin.from('notifications') as any).insert({
-      user_id: slot.provider_id,
-      type: 'status_change',
-      order_id: order.id,
-      actor_id: user.id,
-      title: 'Nová rezervace termínu (potvrzeno)',
-      preview: null,
-    })
-  } catch {}
-
-  revalidatePath('/dashboard/objednavky')
-  revalidatePath('/dashboard/terminy')
-  return { success: true, id: order.id }
+  // Model v2: rezervace bez konkrétní položky nemá typ nabídky, částku ani konec okna,
+  // takže nejde předautorizovat. Rezervuje se jen přes reserveSlotForItem.
+  void values
+  return { success: false, error: 'Vyberte prosím konkrétní úkon z ceníku, rezervace bez něj už není možná.' }
 }
 
 // ── Rezervace KONKRÉTNÍHO ČASU pro úkon z ceníku ──────────────
@@ -399,9 +326,9 @@ export async function reserveSlotForItem(values: {
 
   const { data: item } = await admin
     .from('service_items')
-    .select('id, service_id, name, duration_minutes, deposit_amount, deposit_type, price, payment_model, is_active')
+    .select('id, service_id, name, duration_minutes, deposit_amount, deposit_type, price, payment_model, is_active, offer_kind, quote_fee')
     .eq('id', values.service_item_id)
-    .single() as { data: { id: string; service_id: string; name: string; duration_minutes: number | null; deposit_amount: number | null; deposit_type: string | null; price: number | null; payment_model: string; is_active: boolean } | null }
+    .single() as { data: { id: string; service_id: string; name: string; duration_minutes: number | null; deposit_amount: number | null; deposit_type: string | null; price: number | null; payment_model: string; is_active: boolean; offer_kind: string | null; quote_fee: number | null } | null }
 
   if (!item || item.service_id !== values.service_id) {
     return { success: false, error: 'Vybraný úkon nepatří k této kartě.' }
@@ -445,6 +372,16 @@ export async function reserveSlotForItem(values: {
   // Skutečný konec služby si držíme zvlášť. bookedEnd se níž může roztáhnout o
   // nepoužitelný zbytek fyzického okna, ale kolize objednávek se řeší podle služby.
   const serviceEnd = bookedEnd
+
+  // Model v2: typ nabídky, částka (min. 200 Kč), předstih a funkční Stripe účet providera.
+  // scheduled_end = serviceEnd = konec rezervovaného okna.
+  const check = await checkNewBooking(admin, {
+    item,
+    providerId: slot.provider_id,
+    start: new Date(zacatekUkonu),
+    end: new Date(serviceEnd),
+  })
+  if (!check.ok) return { success: false, error: check.error }
 
   // Které služby okno nabízelo — potřebujeme je na dvě věci: dopočítat
   // nejkratší možný zbytek a předat je zbytku za rezervací.
@@ -538,7 +475,7 @@ export async function reserveSlotForItem(values: {
   // jeho zabráním kontrolujeme i existující objednávky poskytovatele.
   const { data: orderClashes } = await admin
     .from('orders')
-    .select('id, scheduled_at, scheduled_end, deposit_status, hold_expires_at, service_items(duration_minutes)')
+    .select('id, booking_state, offer_kind, scheduled_at, scheduled_end, deposit_status, hold_expires_at, service_items(duration_minutes, buffer_minutes)')
     .eq('provider_id', slot.provider_id)
     .neq('status', 'zruseno')
     .not('scheduled_at', 'is', null)
@@ -550,9 +487,9 @@ export async function reserveSlotForItem(values: {
     }
     const startMs = new Date(o.scheduled_at).getTime()
     const fallbackDur = Number(o.service_items?.duration_minutes ?? 60) || 60
-    const endMs = o.scheduled_end
+    const endMs = (o.scheduled_end
       ? new Date(o.scheduled_end).getTime()
-      : startMs + fallbackDur * 60_000
+      : startMs + fallbackDur * 60_000) + bookingBufferMs(o)
     return new Date(zacatekUkonu).getTime() < endMs && new Date(serviceEnd).getTime() > startMs
   })
 
@@ -560,16 +497,9 @@ export async function reserveSlotForItem(values: {
     return { success: false, error: 'Tento čas mezitím obsadila jiná objednávka. Vyberte prosím jiný termín.' }
   }
 
-  const depositType = item.deposit_type ?? 'zaloha'
-  const isFullPayment = item.payment_model !== 'B' && depositType === 'plna_platba'
-  const depositForOrder = item.payment_model === 'B'
-    ? null
-    : depositType === 'bez_platby'
-      ? null
-      : isFullPayment
-        ? (item.price != null && Number(item.price) > 0 ? Number(item.price) : null)
-        : (item.deposit_amount != null && Number(item.deposit_amount) > 0 ? Number(item.deposit_amount) : null)
-  const platiSeHned = !!depositForOrder && depositForOrder > 0
+  // Model v2: každá rezervace se platí (preautorizace Rezervačního poplatku / Ceny výjezdu).
+  const depositForOrder = check.commission.chargeHalere / 100
+  const platiSeHned = true
 
   // ── ZABRÁNÍ TERMÍNU ──────────────────────────────────────────
   // Souběh dvou zákazníků hlídá podmínka na původním okně: musí být pořád
@@ -666,6 +596,7 @@ export async function reserveSlotForItem(values: {
       scheduled_at: zacatekUkonu,
       scheduled_end: serviceEnd,
       slot_id: bookedSlotId,
+      offer_kind: check.offerKind,
     })
     .select('id')
     .single()
@@ -704,20 +635,8 @@ export async function reserveSlotForItem(values: {
     }
   }
 
-  // Notifikace poskytovateli
-  try {
-    const cas = new Intl.DateTimeFormat('cs-CZ', {
-      day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit',
-    }).format(new Date(zacatekUkonu))
-    await (admin.from('notifications') as any).insert({
-      user_id: slot.provider_id,
-      type: 'status_change',
-      order_id: order.id,
-      actor_id: user.id,
-      title: platiSeHned ? 'Nová rezervace — čeká na zaplacení' : 'Nová rezervace ✓',
-      preview: `${item.name} · ${cas}`,
-    })
-  } catch {}
+  // Oznámení poskytovateli pošle webhook až po preautorizaci (ne o nezaplacených rezervacích).
+  await logOrderEvent(admin, order.id, 'booking_created', { type: 'customer', id: user.id }, { direct: true })
 
   const payUrl = platiSeHned ? await zaridPlatbu(order.id) : undefined
 

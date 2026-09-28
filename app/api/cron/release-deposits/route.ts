@@ -19,27 +19,29 @@ import {
   autoReleaseUnpaidReservations,
 } from '@/lib/actions/payout'
 import { autoDeclineExpiredConfirmations } from '@/lib/actions/product-order'
+import { adminDb, rescueBookings } from '@/lib/booking/payments'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 export async function GET(request: Request) {
+  // Bez nastaveného CRON_SECRET by endpoint mohl spustit kdokoli → odmítnout.
   const secret = process.env.CRON_SECRET
-  if (secret) {
-    const auth = request.headers.get('authorization')
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: 'Neautorizováno.' }, { status: 401 })
-    }
+  if (!secret || request.headers.get('authorization') !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: 'Neautorizováno.' }, { status: 401 })
   }
 
   try {
     // Běží nezávisle na sobě — chyba v jednom nesmí shodit ostatní.
-    const [deposits, noShows, storna, nezaplacene, nepotvrzene] = await Promise.allSettled([
+    // Body 1–5 se týkají jen starých objednávek (bez booking_state).
+    const [deposits, noShows, storna, nezaplacene, nepotvrzene, rezervaceV2] = await Promise.allSettled([
       autoReleaseStaleDeposits(),
       autoResolveNoShows(),
       autoResolveStorno(),
       autoReleaseUnpaidReservations(),
       autoDeclineExpiredConfirmations(),
+      // Model v2: záchrana, když nedorazil webhook (stav vždy ověří ve Stripe).
+      rescueBookings(adminDb()),
     ])
 
     return NextResponse.json({
@@ -49,6 +51,7 @@ export async function GET(request: Request) {
       storna: storna.status === 'fulfilled' ? storna.value : { chyba: true },
       nezaplacene_rezervace: nezaplacene.status === 'fulfilled' ? nezaplacene.value : { chyba: true },
       nepotvrzene_vyrobky: nepotvrzene.status === 'fulfilled' ? nepotvrzene.value : { chyba: true },
+      rezervace_v2: rezervaceV2.status === 'fulfilled' ? rezervaceV2.value : { chyba: true },
     })
   } catch (err) {
     console.error('[cron/release-deposits]', err)

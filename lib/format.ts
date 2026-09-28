@@ -152,6 +152,14 @@ export function minutyOdPulnociPraha(iso: string | Date): number {
   return posunuty.getUTCHours() * 60 + posunuty.getUTCMinutes()
 }
 
+/** První den pražského kalendářního měsíce jako 'YYYY-MM-01' (pro sloupec typu date). */
+export function prazskyMesic(iso: string | Date): string {
+  const d = bezpecne(iso) ?? new Date()
+  const posunuty = new Date(d.getTime() + posunPrahy(d) * 60000)
+  const mesic = String(posunuty.getUTCMonth() + 1).padStart(2, '0')
+  return `${posunuty.getUTCFullYear()}-${mesic}-01`
+}
+
 /** 'HH:MM' nebo 'HH:MM:SS' → minuty od půlnoci. */
 export function casNaMinuty(t: string): number {
   const [h, m] = t.slice(0, 5).split(':').map(Number)

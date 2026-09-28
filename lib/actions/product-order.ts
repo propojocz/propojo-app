@@ -577,6 +577,8 @@ export async function autoDeclineExpiredConfirmations(): Promise<{ cancelled: nu
     .from('orders')
     .select('id, customer_id, provider_id, service_items(name)')
     .eq('status', 'cekajici')
+    // Model v2: jen objednávky bez živé platby (předautorizaci řeší lib/booking).
+    .or('booking_state.is.null,booking_state.eq.payment_expired')
     .not('confirmation_deadline', 'is', null)
     .lt('confirmation_deadline', new Date().toISOString()) as { data: any[] | null }
 

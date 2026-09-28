@@ -180,8 +180,9 @@ export default function OrderItemModal({
 
   const q = item as ServiceItem & QuoteTerms
   const quoteFee = Number(q.quote_fee ?? 0)
-  const perKm = Number(q.price_per_km ?? 0)
-  const freeKm = Number(q.free_km ?? 0)
+  // Model v2: Cena výjezdu obsahuje dopravu, příplatek za km se neplatí ani nezobrazuje
+  // (price_per_km / free_km zůstávají v DB jen jako legacy).
+  const isV2 = !!(item as any).offer_kind
   const quoteDays = Number(q.quote_days ?? 0)
 
   // Vhodná okna: budoucí a dost dlouhá na délku úkonu.
@@ -594,25 +595,23 @@ export default function OrderItemModal({
                   </p>
                 )}
 
-                {isModelB && (quoteFee > 0 || perKm > 0 || quoteDays > 0) && (
+                {isModelB && (quoteFee > 0 || quoteDays > 0) && (
                   <div className="mt-2 space-y-1 border-t border-slate-200 pt-2 text-xs leading-relaxed text-slate-600">
                     {quoteFee > 0 && (
                       <p className="flex items-start gap-1.5">
                         <Wallet className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
-                        <span>
-                          Nacenění stojí <strong className="text-slate-900">{quoteFee.toLocaleString('cs-CZ')} Kč</strong>.
-                          Přijmete-li nabídku, započítá se do celkové ceny.
-                        </span>
-                      </p>
-                    )}
-                    {perKm > 0 && (
-                      <p className="flex items-start gap-1.5">
-                        <Truck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
-                        <span>
-                          {freeKm > 0
-                            ? <>Doprava zdarma do <strong className="text-slate-900">{freeKm} km</strong>, nad rámec <strong className="text-slate-900">{perKm.toLocaleString('cs-CZ')} Kč/km</strong>.</>
-                            : <>Doprava <strong className="text-slate-900">{perKm.toLocaleString('cs-CZ')} Kč/km</strong>.</>}
-                        </span>
+                        {isV2 ? (
+                          // Model v2: Cena výjezdu je samostatná placená služba včetně dopravy, ne záloha.
+                          <span>
+                            Cena výjezdu <strong className="text-slate-900">{quoteFee.toLocaleString('cs-CZ')} Kč</strong> zahrnuje
+                            cestu, prohlídku na místě a nacenění.
+                          </span>
+                        ) : (
+                          <span>
+                            Nacenění stojí <strong className="text-slate-900">{quoteFee.toLocaleString('cs-CZ')} Kč</strong>.
+                            Přijmete-li nabídku, započítá se do celkové ceny.
+                          </span>
+                        )}
                       </p>
                     )}
                     {quoteDays > 0 && (
@@ -624,7 +623,7 @@ export default function OrderItemModal({
                   </div>
                 )}
 
-                {isModelB && quoteFee <= 0 && perKm <= 0 && (
+                {isModelB && quoteFee <= 0 && (
                   <p className="mt-1.5 flex items-center gap-1.5 text-xs text-emerald-700">
                     <Truck className="h-3.5 w-3.5" />
                     Výjezd a nacenění zdarma.

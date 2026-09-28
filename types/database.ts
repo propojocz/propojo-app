@@ -160,6 +160,29 @@ export type Database = {
           total_price: number | null
           unit_price: number | null
           updated_at: string
+          // Model v2 (docs/sql/rezervace-vrstva1.sql)
+          offer_kind: string | null
+          booking_state: string | null
+          cancel_reason: string | null
+          state_changed_at: string | null
+          policy_version: string | null
+          policy_snapshot: Json | null
+          stripe_account_id: string | null
+          stripe_payment_intent_id: string | null
+          stripe_charge_id: string | null
+          charge_halere: number | null
+          application_fee_halere: number | null
+          commission_base_halere: number | null
+          commission_vat_halere: number | null
+          vat_rate_bps: number | null
+          refunded_halere: number
+          stripe_dispute_status: string | null
+          authorized_at: string | null
+          confirm_deadline_at: string | null
+          confirmed_at: string | null
+          cancelled_at: string | null
+          offer_due_at: string | null
+          offer_delivered_at: string | null
         }
         Insert: {
           created_at?: string
@@ -202,6 +225,29 @@ export type Database = {
           total_price?: number | null
           unit_price?: number | null
           updated_at?: string
+          // Model v2
+          offer_kind?: string | null
+          booking_state?: string | null
+          cancel_reason?: string | null
+          state_changed_at?: string | null
+          policy_version?: string | null
+          policy_snapshot?: Json | null
+          stripe_account_id?: string | null
+          stripe_payment_intent_id?: string | null
+          stripe_charge_id?: string | null
+          charge_halere?: number | null
+          application_fee_halere?: number | null
+          commission_base_halere?: number | null
+          commission_vat_halere?: number | null
+          vat_rate_bps?: number | null
+          refunded_halere?: number
+          stripe_dispute_status?: string | null
+          authorized_at?: string | null
+          confirm_deadline_at?: string | null
+          confirmed_at?: string | null
+          cancelled_at?: string | null
+          offer_due_at?: string | null
+          offer_delivered_at?: string | null
         }
         Update: {
           created_at?: string
@@ -244,6 +290,29 @@ export type Database = {
           total_price?: number | null
           unit_price?: number | null
           updated_at?: string
+          // Model v2
+          offer_kind?: string | null
+          booking_state?: string | null
+          cancel_reason?: string | null
+          state_changed_at?: string | null
+          policy_version?: string | null
+          policy_snapshot?: Json | null
+          stripe_account_id?: string | null
+          stripe_payment_intent_id?: string | null
+          stripe_charge_id?: string | null
+          charge_halere?: number | null
+          application_fee_halere?: number | null
+          commission_base_halere?: number | null
+          commission_vat_halere?: number | null
+          vat_rate_bps?: number | null
+          refunded_halere?: number
+          stripe_dispute_status?: string | null
+          authorized_at?: string | null
+          confirm_deadline_at?: string | null
+          confirmed_at?: string | null
+          cancelled_at?: string | null
+          offer_due_at?: string | null
+          offer_delivered_at?: string | null
         }
         Relationships: []
       }

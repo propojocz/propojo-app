@@ -16,9 +16,18 @@ import { createNotification } from '@/lib/actions/notifications'
 import { getFreeTimes } from '@/lib/actions/free-times'
 import { releaseSlotAndMerge } from '@/lib/slot-merge'
 import { claimMatchingAvailabilitySlot } from '@/lib/slot-claim'
+import { BOOKING_POLICY } from '@/lib/booking/policy'
+import { bookingBufferMs } from '@/lib/booking/rules'
+import { adminDb, checkNewBooking } from '@/lib/booking/payments'
 
 // Stripe checkout běží 30 minut. Držíme o 5 minut déle kvůli zpoždění webhooku.
 const HOLD_MINUTES = 35
+
+// Model v2: termín jde měnit touto cestou jen před vznikem rezervace (nebo po vypršení platby).
+// Změna potvrzené rezervace má vlastní pravidla (model v2 §10) a přijde samostatně.
+function v2Locked(order: any): boolean {
+  return order.booking_state != null && order.booking_state !== 'payment_expired'
+}
 const MAX_PROPOSALS = 6
 
 export type Proposal = { id: string; starts_at: string; ends_at: string }
@@ -44,7 +53,7 @@ async function loadOrder(orderId: string) {
   const admin = getAdminClient()
   const { data } = await admin
     .from('orders')
-    .select('id, customer_id, provider_id, service_id, service_item_id, status, scheduled_at, scheduled_end, slot_id, deposit_status, deposit_amount, hold_expires_at, pref_date_from, pref_date_to, pref_time, service_items(name, duration_minutes, buffer_minutes, deposit_amount, payment_model)')
+    .select('id, customer_id, provider_id, service_id, service_item_id, status, booking_state, offer_kind, scheduled_at, scheduled_end, slot_id, deposit_status, deposit_amount, hold_expires_at, pref_date_from, pref_date_to, pref_time, service_items(name, duration_minutes, buffer_minutes, deposit_amount, payment_model, offer_kind, quote_fee, deposit_type)')
     .eq('id', orderId)
     .single() as { data: any }
   return data
@@ -141,8 +150,11 @@ export async function proposeTimes(orderId: string, starts: string[]): Promise<R
   if (order.status === 'zruseno' || order.status === 'dokonceno' || order.status === 'ceka_potvrzeni') {
     return { success: false, error: 'U uzavřené objednávky termín navrhnout nelze.' }
   }
-  if (order.deposit_status === 'pending') {
+  if (order.deposit_status === 'pending' && order.booking_state == null) {
     return { success: false, error: 'Zákazník právě dokončuje platbu. Nejdřív musí platbu dokončit nebo zrušit.' }
+  }
+  if (v2Locked(order)) {
+    return { success: false, error: 'Termín rezervace s platbou nelze touto cestou měnit.' }
   }
   if (order.scheduled_at && new Date(order.scheduled_at).getTime() <= Date.now()) {
     return { success: false, error: 'Probíhající nebo už proběhlý termín nelze tímto způsobem měnit.' }
@@ -162,6 +174,9 @@ export async function proposeTimes(orderId: string, starts: string[]): Promise<R
     const d = new Date(s)
     if (isNaN(d.getTime())) return { success: false, error: 'Neplatný termín.' }
     if (d.getTime() < Date.now()) return { success: false, error: 'Termín nemůže být v minulosti.' }
+    if (d.getTime() < Date.now() + BOOKING_POLICY.minLeadMinutes * 60000) {
+      return { success: false, error: `Termín musí začínat nejdříve za ${BOOKING_POLICY.minLeadMinutes} minut.` }
+    }
     rows.push({
       order_id: orderId,
       starts_at: d.toISOString(),
@@ -239,8 +254,11 @@ export async function acceptProposal(orderId: string, start: string): Promise<Ac
   if (isReschedule && new Date(order.scheduled_at).getTime() <= Date.now()) {
     return { success: false, error: 'Probíhající nebo už proběhlý termín nelze změnit.' }
   }
-  if (isReschedule && order.deposit_status === 'pending') {
+  if (isReschedule && order.deposit_status === 'pending' && order.booking_state == null) {
     return { success: false, error: 'Nejdřív dokončete nebo zrušte probíhající platbu.' }
+  }
+  if (v2Locked(order)) {
+    return { success: false, error: 'Termín rezervace s platbou nelze touto cestou měnit.' }
   }
 
   const admin = getAdminClient()
@@ -257,29 +275,49 @@ export async function acceptProposal(orderId: string, start: string): Promise<Ac
   if (new Date(proposal.starts_at).getTime() < Date.now()) {
     return { success: false, error: 'Tento termín už proběhl. Požádejte o nový.' }
   }
+  // Konec okna potřebuje no-show i check-in; bez něj rezervace nevznikne.
+  if (!proposal.ends_at || new Date(proposal.ends_at).getTime() <= new Date(proposal.starts_at).getTime()) {
+    return { success: false, error: 'Návrh termínu nemá platný konec. Požádejte poskytovatele o nový.' }
+  }
+
+  // Stará už zaplacená objednávka (přeplánování) se neplatí znovu. Jinak model v2:
+  // každá rezervace se předautorizuje – i Cena výjezdu u Modelu B.
+  const alreadyPaid = order.booking_state == null && (order.deposit_status === 'paid' || order.deposit_status === 'released')
+  let v2Charge: { offerKind: string; chargeKc: number } | null = null
+  if (!alreadyPaid) {
+    const check = await checkNewBooking(adminDb(), {
+      item: order.service_items ?? { offer_kind: null, deposit_amount: null, quote_fee: null },
+      providerId: order.provider_id,
+      start: new Date(proposal.starts_at),
+      end: new Date(proposal.ends_at),
+    })
+    if (!check.ok) return { success: false, error: check.error }
+    v2Charge = { offerKind: check.offerKind, chargeKc: check.commission.chargeHalere / 100 }
+  }
+  const ownBufferMs = v2Charge ? Math.max(0, Number(order.service_items?.buffer_minutes ?? 0)) * 60_000 : 0
 
   // Nekoliduje termín s něčím, co poskytovatel mezitím dostal? Některé starší
   // objednávky nemají scheduled_end, proto konec dopočítáme z délky úkonu.
   const { data: clashRows } = await admin
     .from('orders')
-    .select('id, scheduled_at, scheduled_end, deposit_status, hold_expires_at, service_items(duration_minutes)')
+    .select('id, booking_state, offer_kind, scheduled_at, scheduled_end, deposit_status, hold_expires_at, service_items(duration_minutes, buffer_minutes)')
     .eq('provider_id', order.provider_id)
     .neq('status', 'zruseno')
     .neq('id', orderId)
     .not('scheduled_at', 'is', null)
-    .lt('scheduled_at', proposal.ends_at) as { data: any[] | null }
+    .lt('scheduled_at', new Date(new Date(proposal.ends_at).getTime() + ownBufferMs).toISOString()) as { data: any[] | null }
 
   const proposalStartMs = new Date(proposal.starts_at).getTime()
-  const proposalEndMs = new Date(proposal.ends_at).getTime()
+  const proposalEndMs = new Date(proposal.ends_at).getTime() + ownBufferMs
   const liveClash = (clashRows ?? []).some((c) => {
     if (c.deposit_status === 'pending' && c.hold_expires_at) {
       if (new Date(c.hold_expires_at).getTime() <= Date.now()) return false
     }
     const startMs = new Date(c.scheduled_at).getTime()
     const fallbackDur = Number(c.service_items?.duration_minutes ?? 60) || 60
-    const endMs = c.scheduled_end
+    const endMs = (c.scheduled_end
       ? new Date(c.scheduled_end).getTime()
-      : startMs + fallbackDur * 60_000
+      : startMs + fallbackDur * 60_000) + bookingBufferMs(c)
     return proposalStartMs < endMs && proposalEndMs > startMs
   })
 
@@ -287,10 +325,7 @@ export async function acceptProposal(orderId: string, start: string): Promise<Ac
     return { success: false, error: 'Tento termín mezitím obsadil někdo jiný. Požádejte poskytovatele o nový.' }
   }
 
-  const deposit = Number(order.deposit_amount ?? order.service_items?.deposit_amount ?? 0)
-  const isModelB = order.service_items?.payment_model === 'B'
-  const alreadyPaid = order.deposit_status === 'paid' || order.deposit_status === 'released'
-  const needsPayment = !isModelB && deposit > 0 && !alreadyPaid
+  const needsPayment = v2Charge !== null
   const oldScheduledAt = order.scheduled_at as string | null
   const oldSlotId = order.slot_id as string | null
 
@@ -312,7 +347,8 @@ export async function acceptProposal(orderId: string, start: string): Promise<Ac
     scheduled_at: proposal.starts_at,
     scheduled_end: proposal.ends_at,
     slot_id: claimedNewSlotId ?? (isReschedule ? null : (order.slot_id ?? null)),
-    deposit_amount: needsPayment ? deposit : order.deposit_amount ?? null,
+    deposit_amount: v2Charge ? v2Charge.chargeKc : order.deposit_amount ?? null,
+    ...(v2Charge ? { offer_kind: v2Charge.offerKind } : {}),
     deposit_status: needsPayment
       ? 'pending'
       : alreadyPaid

@@ -19,6 +19,21 @@ function getAdminClient() {
 
 type Result = { success: true } | { success: false; error: string }
 
+// ── MODEL V2: sem nepatří ─────────────────────────────────────
+// Objednávky nového modelu (orders.booking_state) mají platbu na Stripe účtu providera.
+// Tady se posílají transfery a refundy z účtu Propojo – u nich by to znamenalo
+// peníze, které na Propoju nikdy nebyly. Všechny cesty je proto vynechávají.
+const V2_ERROR = 'Tuto rezervaci nelze vyřídit touto cestou (nový rezervační model).'
+
+async function isV2Order(orderId: string): Promise<boolean> {
+  const { data } = await getAdminClient()
+    .from('orders')
+    .select('booking_state')
+    .eq('id', orderId)
+    .maybeSingle() as { data: { booking_state: string | null } | null }
+  return data?.booking_state != null
+}
+
 // Čistá částka (po Stripe poplatku) v haléřích z payment intentu
 async function getNetAmount(paymentIntentId: string): Promise<number | null> {
   try {
@@ -106,6 +121,7 @@ export async function releaseDeposit(orderId: string): Promise<Result> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+  if (await isV2Order(orderId)) return { success: false, error: V2_ERROR }
 
   const { data: order } = await supabase
     .from('orders')
@@ -171,6 +187,7 @@ export async function releaseDeposit(orderId: string): Promise<Result> {
 
 // ── VRATKA ZÁKAZNÍKOVI (zrušení) ──────────────────────────
 export async function refundDeposit(orderId: string, byUserId: string): Promise<Result> {
+  if (await isV2Order(orderId)) return { success: false, error: V2_ERROR }
   const admin = getAdminClient()
 
   const { data: order } = await admin
@@ -275,6 +292,7 @@ export async function waiveStornoFee(orderId: string, novaCastka = 0): Promise<R
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+  if (await isV2Order(orderId)) return { success: false, error: V2_ERROR }
 
   const admin = getAdminClient()
   const { data: order } = await admin
@@ -309,6 +327,7 @@ export async function waiveStornoFee(orderId: string, novaCastka = 0): Promise<R
 
 // ── VYPOŘÁDÁNÍ STORNA (společné pro ruční i automatické) ───────
 async function vyporadejStorno(orderId: string): Promise<Result> {
+  if (await isV2Order(orderId)) return { success: false, error: V2_ERROR }
   const admin = getAdminClient()
   const { data: o } = await admin
     .from('orders')
@@ -388,6 +407,7 @@ export async function autoResolveStorno(): Promise<{ resolved: number; failed: n
   const { data: rows } = await admin
     .from('orders')
     .select('id')
+    .is('booking_state', null)
     .not('storno_marked_at', 'is', null)
     .eq('deposit_status', 'paid')
     .lt('storno_marked_at', cutoff) as { data: { id: string }[] | null }
@@ -415,6 +435,8 @@ export async function reportDispute(
 
   const trimmed = reason.trim()
   if (!trimmed) return { success: false, error: 'Napište prosím, v čem je problém.' }
+  // Model v2: Propojo spory nerozhoduje (žádné 50:50, žádné držení peněz).
+  if (await isV2Order(orderId)) return { success: false, error: V2_ERROR }
 
   const { data: order } = await supabase
     .from('orders')
@@ -475,6 +497,7 @@ export async function resolveDispute(orderId: string, decision: 'provider' | 'cu
   if (me?.is_admin !== true) {
     return { success: false, error: 'Tuto akci může provést jen administrátor.' }
   }
+  if (await isV2Order(orderId)) return { success: false, error: V2_ERROR }
 
   const admin = getAdminClient()
   const { data: order } = await admin
@@ -652,6 +675,7 @@ export async function autoReleaseStaleDeposits(): Promise<{ released: number; fa
   const { data: stale } = await admin
     .from('orders')
     .select('id, provider_id, customer_id, deposit_status, deposit_amount, stripe_payment_intent_id, completed_at, updated_at, profiles!orders_provider_id_fkey(stripe_account_id)')
+    .is('booking_state', null)
     .eq('status', 'ceka_potvrzeni')
     .eq('deposit_status', 'paid')
     .lt('completed_at', cutoff) as { data: any[] | null }
@@ -711,6 +735,7 @@ export async function autoResolveNoShows(): Promise<{ resolved: number; failed: 
   const { data: rows } = await admin
     .from('orders')
     .select('id, provider_id, customer_id, deposit_amount, no_show_fee_amount, stripe_payment_intent_id, status, profiles!orders_provider_id_fkey(stripe_account_id)')
+    .is('booking_state', null)
     .eq('attendance', 'nedorazil')
     .eq('deposit_status', 'paid')
     .neq('status', 'spor')
@@ -805,6 +830,10 @@ export async function autoReleaseUnpaidReservations(): Promise<{ released: numbe
   const { data: rows } = await admin
     .from('orders')
     .select('id, provider_id, customer_id, slot_id, scheduled_at, deposit_amount, service_items(name), services(title)')
+    // Model v2 (korekce 7): jen staré objednávky bez platby. Nové rozpracované platby
+    // hlídá checkout.session.expired a záchrana v lib/booking/payments.ts (rescueBookings),
+    // která nejdřív ověří stav ve Stripe – předautorizovanou rezervaci nikdy nezruší.
+    .is('booking_state', null)
     .eq('status', 'prijato')
     .eq('deposit_status', 'pending')
     .not('slot_id', 'is', null)
@@ -827,6 +856,7 @@ export async function autoReleaseUnpaidReservations(): Promise<{ released: numbe
       const { error: orderErr } = await (admin.from('orders') as any)
         .update({ status: 'zruseno' })
         .eq('id', o.id)
+        .is('booking_state', null)
         .eq('status', 'prijato')
         .eq('deposit_status', 'pending')
       if (orderErr) { failed++; continue }

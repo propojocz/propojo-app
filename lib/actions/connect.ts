@@ -1,41 +1,26 @@
 'use server'
 // lib/actions/connect.ts
-// Stripe Connect (Express) – napojení poskytovatele, aby mohl dostávat peníze ze záloh.
+// Model v2: napojení poskytovatele přes Stripe Connect STANDARD. Platby rezervací vznikají
+// přímo na jeho účtu (Direct Charges), Propojo si bere jen provizi (application fee).
 //
-// PROČ SE PŘEDVYPLŇUJE business_profile:
-// Stripe v onboardingu jinak chce „Váš web". Většina řemeslníků web nemá,
-// zástupné stránky Stripe neuznává a pro Propojo ten údaj stejně k ničemu
-// není. Posíláme proto rovnou odkaz na jeho VEŘEJNOU KARTU na Propoju —
-// je to přesně to, co Stripe chce vidět (stránka se službami a cenami) —
-// plus popis činnosti. Když jsou obě pole vyplněná z naší strany, Stripe
-// se na ně poskytovatele už neptá.
+// Starý Express účet (profiles.stripe_account_id) zůstává jen pro staré objednávky.
+// Kdo ho má, dostane při napojení nový Standard účet – Express s novým tokem nefunguje.
+// Stav účtu se ukládá do stripe_accounts (plní webhook i obnova po návratu z onboardingu).
+
 import { createClient } from '@/lib/supabase/server'
-import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { stripe } from '@/lib/stripe'
-
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-
-function getAdminClient() {
-  return createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
-}
-
-// Odkaz na veřejný profil poskytovatele. Na localhostu ho Stripe nevezme
-// (nesmí to být neveřejná adresa), takže tam raději neposíláme nic a
-// necháme jen popis činnosti.
-function profilUrl(userId: string): string | undefined {
-  if (!APP_URL.startsWith('https://')) return undefined
-  return `${APP_URL}/profil/${userId}`
-}
-
-const POPIS_CINNOSTI =
-  'Řemeslné a osobní služby na objednávku. Zákazníci si rezervují termín a platí zálohu přes Propojo.cz.'
+import {
+  adminDb,
+  createOnboardingLink,
+  ensureStandardAccount,
+  getProviderAccount,
+  syncStripeAccount,
+} from '@/lib/booking/payments'
+import type { AccountBlock } from '@/lib/booking/rules'
 
 type LinkResult = { success: true; url: string } | { success: false; error: string }
 
-// Vytvoří (nebo najde) Express účet poskytovatele a vrátí odkaz na onboarding.
+// Vytvoří (nebo najde) Standard účet poskytovatele a vrátí odkaz na onboarding u Stripe.
 export async function createConnectOnboardingLink(): Promise<LinkResult> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -43,113 +28,57 @@ export async function createConnectOnboardingLink(): Promise<LinkResult> {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('is_provider, stripe_account_id, full_name, ico')
+    .select('is_provider, full_name, company_name')
     .eq('id', user.id)
-    .single() as { data: { is_provider: boolean; stripe_account_id: string | null; full_name: string | null; ico: string | null } | null }
+    .single() as { data: { is_provider: boolean; full_name: string | null; company_name: string | null } | null }
 
   if (profile?.is_provider !== true) {
     return { success: false, error: 'Napojení účtu je určeno pro poskytovatele.' }
   }
 
-  let accountId = profile.stripe_account_id ?? undefined
-
-  // Když ještě nemá Connect účet, vytvoříme Express účet pro Česko
-  if (!accountId) {
-    try {
-      const account = await stripe.accounts.create({
-        type: 'express',
-        country: 'CZ',
-        email: user.email ?? undefined,
-        business_type: 'individual',
-        capabilities: {
-          transfers: { requested: true }, // chceme mu posílat peníze (transfery)
-        },
-        business_profile: {
-          name: profile.full_name ?? undefined,
-          url: profilUrl(user.id),
-          product_description: POPIS_CINNOSTI,
-        },
-        metadata: { supabase_user_id: user.id },
-      })
-      accountId = account.id
-
-      // Uložíme account ID (přes admin klienta, ať to projde RLS)
-      const admin = getAdminClient()
-      await (admin.from('profiles') as any)
-        .update({ stripe_account_id: accountId })
-        .eq('id', user.id)
-    } catch (err) {
-      console.error('[connect] accounts.create error:', err)
-      return { success: false, error: 'Nepodařilo se založit účet pro výplaty.' }
-    }
-  } else {
-    // Účet už existuje — může být založený ještě před tímhle předvyplněním
-    // a Stripe by se na web ptal znovu. Doplníme, co chybí. Co si poskytovatel
-    // vyplnil sám, nepřepisujeme. Selhání tady napojení neblokuje.
-    try {
-      const account = await stripe.accounts.retrieve(accountId)
-      const chybiUrl = !account.business_profile?.url
-      const chybiPopis = !account.business_profile?.product_description
-
-      if (chybiUrl || chybiPopis) {
-        await stripe.accounts.update(accountId, {
-          business_profile: {
-            ...(chybiUrl ? { url: profilUrl(user.id) } : {}),
-            ...(chybiPopis ? { product_description: POPIS_CINNOSTI } : {}),
-          },
-        })
-      }
-    } catch (err) {
-      console.warn('[connect] doplnění business_profile přeskočeno:', err)
-    }
+  const db = adminDb()
+  let accountId: string
+  try {
+    accountId = await ensureStandardAccount(db, { id: user.id, email: user.email }, profile.company_name || profile.full_name)
+  } catch (err) {
+    console.error('[connect] založení Standard účtu:', err)
+    return { success: false, error: 'Nepodařilo se založit účet pro platby.' }
   }
 
-  // Vygenerujeme onboarding odkaz (account link)
   try {
-    const link = await stripe.accountLinks.create({
-      account: accountId,
-      refresh_url: `${APP_URL}/dashboard/vyplaty?stav=obnova`,
-      return_url: `${APP_URL}/dashboard/vyplaty?stav=hotovo`,
-      type: 'account_onboarding',
-    })
-    return { success: true, url: link.url }
+    return { success: true, url: await createOnboardingLink(accountId) }
   } catch (err) {
     console.error('[connect] accountLinks.create error:', err)
     return { success: false, error: 'Nepodařilo se otevřít napojení účtu. Zkuste to znovu.' }
   }
 }
 
-// Vrátí aktuální stav Connect účtu (zavolá Stripe a zaktualizuje DB).
-// Voláme po návratu z onboardingu, ať máme čerstvý stav i bez čekání na webhook.
-export async function refreshConnectStatus(): Promise<{ payoutsEnabled: boolean; onboardingDone: boolean }> {
+export type ConnectStatus = {
+  hasAccount: boolean
+  /** Může přijímat nové rezervace (žádná blokace) */
+  ready: boolean
+  blocks: AccountBlock[]
+}
+
+// Aktuální stav účtu. S refresh=true se nejdřív načte ze Stripe (po návratu z onboardingu,
+// ať se nečeká na webhook).
+export async function refreshConnectStatus(refresh = true): Promise<ConnectStatus> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { payoutsEnabled: false, onboardingDone: false }
+  if (!user) return { hasAccount: false, ready: false, blocks: ['not_connected'] }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('stripe_account_id')
-    .eq('id', user.id)
-    .single() as { data: { stripe_account_id: string | null } | null }
+  const db = adminDb()
+  const current = await getProviderAccount(db, user.id)
 
-  if (!profile?.stripe_account_id) return { payoutsEnabled: false, onboardingDone: false }
-
-  try {
-    const account = await stripe.accounts.retrieve(profile.stripe_account_id)
-    const payoutsEnabled = account.payouts_enabled === true
-    const onboardingDone = account.details_submitted === true
-
-    const admin = getAdminClient()
-    await (admin.from('profiles') as any)
-      .update({
-        stripe_payouts_enabled: payoutsEnabled,
-        stripe_onboarding_done: onboardingDone,
-      })
-      .eq('id', user.id)
-
-    return { payoutsEnabled, onboardingDone }
-  } catch (err) {
-    console.error('[connect] retrieve error:', err)
-    return { payoutsEnabled: false, onboardingDone: false }
+  if (refresh && current.accountId) {
+    try {
+      const account = await stripe.accounts.retrieve(current.accountId)
+      await syncStripeAccount(db, account, user.id)
+    } catch (err) {
+      console.error('[connect] retrieve error:', err)
+    }
   }
+
+  const fresh = refresh ? await getProviderAccount(db, user.id) : current
+  return { hasAccount: !!fresh.accountId, ready: fresh.blocks.length === 0, blocks: fresh.blocks }
 }

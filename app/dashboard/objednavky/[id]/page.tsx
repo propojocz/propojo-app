@@ -4,6 +4,7 @@ import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import OrderDetailClient from './OrderDetailClient'
+import BookingStateBadge from '@/components/ui/BookingStateBadge'
 import ReviewForm from '@/components/ui/ReviewForm'
 import TimeProposalPanel from '@/components/ui/TimeProposalPanel'
 import { getProposals } from '@/lib/actions/time-proposals'
@@ -203,6 +204,12 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
       <Link href="/dashboard/objednavky" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
         <ArrowLeft className="h-4 w-4" /> Zpět na objednávky
       </Link>
+
+      <BookingStateBadge
+        state={(order as any).booking_state ?? null}
+        isProvider={isProvider}
+        confirmDeadlineAt={(order as any).confirm_deadline_at ?? null}
+      />
 
       {canReview && <ReviewForm orderId={order.id} />}
 

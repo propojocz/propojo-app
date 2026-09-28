@@ -20,6 +20,7 @@ type Krok = {
 const fmt = (iso?: string | null) => (iso ? datumCas(iso) : null)
 
 export default function OrderTimeline({
+  bookingState = null,
   status,
   depositStatus,
   createdAt,
@@ -38,6 +39,8 @@ export default function OrderTimeline({
   readyAt = null,
   handedOverAt = null,
 }: {
+  /** Model v2: stav rezervace s platbou. Když je vyplněný, osa se řídí jím, ne starými sloupci. */
+  bookingState?: string | null
   status: string
   depositStatus: string | null
   createdAt: string
@@ -80,6 +83,12 @@ export default function OrderTimeline({
         </div>
       </div>
     )
+  }
+
+  // ── MODEL V2: rezervace s předautorizací ─────────────────────────
+  // „Potvrzeno“ až po úspěšném stržení platby (capture), nikdy dřív.
+  if (bookingState && bookingState !== 'payment_expired') {
+    return <Osa kroky={v2Kroky(bookingState, createdAt, scheduledAt, isCustomer)} tema={V2_UKONCENE.includes(bookingState) ? 'zruseno' : 'normal'} />
   }
 
   const zaplaceno = depositStatus === 'paid' || depositStatus === 'released'
@@ -297,6 +306,55 @@ export default function OrderTimeline({
   })
 
   return <Osa kroky={kroky} tema={spor ? 'spor' : 'normal'} />
+}
+
+const V2_UKONCENE = ['declined', 'expired', 'capture_failed', 'cancelled']
+
+function v2Kroky(state: string, createdAt: string, scheduledAt: string | null, isCustomer: boolean): Krok[] {
+  const predautorizovano = state !== 'pending_payment'
+  const potvrzeno = state === 'confirmed' || state === 'no_show_reported' || state === 'no_show_disputed' || state === 'cancelled'
+  const kroky: Krok[] = [
+    { nadpis: 'Objednávka vytvořena', cas: fmt(createdAt), stav: 'hotovo' },
+    { nadpis: 'Termín vybrán', cas: fmt(scheduledAt), stav: 'hotovo' },
+    predautorizovano
+      ? { nadpis: 'Platba předautorizována', popis: 'Částka je na kartě zablokovaná, strhne se až po potvrzení.', stav: 'hotovo' }
+      : {
+          nadpis: 'Čeká se na platbu',
+          popis: isCustomer ? 'Dokončete platbu, aby poskytovatel mohl rezervaci potvrdit.' : 'Čeká se, až zákazník dokončí platbu.',
+          stav: 'ted',
+        },
+  ]
+
+  if (state === 'declined' || state === 'expired' || state === 'capture_failed') {
+    kroky.push({
+      nadpis: state === 'capture_failed' ? 'Platbu se nepodařilo strhnout' : 'Rezervace nebyla potvrzena',
+      popis: state === 'capture_failed' ? null : 'Platba byla uvolněna, nic nebylo strženo.',
+      stav: 'hotovo',
+    })
+    return kroky
+  }
+
+  kroky.push({
+    nadpis: potvrzeno ? 'Rezervace potvrzena' : 'Potvrzení poskytovatelem',
+    popis: potvrzeno
+      ? 'Platba byla stržena.'
+      : predautorizovano
+        ? (isCustomer ? 'Čeká se, až poskytovatel rezervaci potvrdí.' : 'Potvrďte nebo odmítněte rezervaci.')
+        : null,
+    stav: potvrzeno ? 'hotovo' : (predautorizovano ? 'ted' : 'ceka'),
+  })
+
+  if (state === 'cancelled') {
+    kroky.push({ nadpis: 'Rezervace zrušena', stav: 'hotovo' })
+    return kroky
+  }
+
+  kroky.push({
+    nadpis: 'Termín služby',
+    popis: potvrzeno ? (isCustomer ? 'Dostavte se v potvrzený termín.' : 'Proveďte službu v potvrzeném termínu.') : null,
+    stav: potvrzeno ? 'ted' : 'ceka',
+  })
+  return kroky
 }
 
 function Osa({ kroky, tema }: { kroky: Krok[]; tema: 'normal' | 'zruseno' | 'spor' }) {

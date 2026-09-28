@@ -306,11 +306,18 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   // vázaná na položku; jinak fallback na kartu (services) — starý tok.
   const { data: ordCheck } = await supabase
     .from('orders')
-    .select('customer_id, provider_id, attendance, deposit_status, slot_id, service_item_id, scheduled_at, services(payment_model, deposit_amount, quote_fee), service_items(payment_model, deposit_amount, quote_fee, deposit_type, price, item_type)')
+    .select('customer_id, provider_id, attendance, deposit_status, booking_state, slot_id, service_item_id, scheduled_at, services(payment_model, deposit_amount, quote_fee), service_items(payment_model, deposit_amount, quote_fee, deposit_type, price, item_type)')
     .eq('id', orderId)
     .single() as { data: any }
 
   if (!ordCheck) return { success: false, error: 'Objednávka nenalezena.' }
+
+  // Model v2: rezervace s platbou se řídí booking_state (lib/booking). Staré přepínání
+  // stavů by obešlo preautorizaci, capture i refundy – u takové objednávky nesmí běžet.
+  // Výjimka: domluva po vypršení platby (payment_expired) je zase obyčejná objednávka.
+  if (ordCheck.booking_state != null && ordCheck.booking_state !== 'payment_expired') {
+    return { success: false, error: 'Tuto rezervaci nelze měnit touto cestou (nový rezervační model).' }
+  }
 
   const isProvider = ordCheck.provider_id === user.id
   const isCustomer = ordCheck.customer_id === user.id

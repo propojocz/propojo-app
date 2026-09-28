@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { CheckCircle2, AlertTriangle, Landmark, ShieldCheck, ArrowLeft, Clock, Eye, ArrowRight, Package } from 'lucide-react'
 import ConnectButton from '@/components/ui/ConnectButton'
 import { refreshConnectStatus } from '@/lib/actions/connect'
+import { ACCOUNT_BLOCK_TEXT } from '@/lib/booking/payments'
 
 export const metadata = { title: 'Výplaty | Propojo' }
 
@@ -17,9 +18,9 @@ export default async function VyplatyPage({ searchParams }: Props) {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('is_provider, stripe_account_id, stripe_onboarding_done, stripe_payouts_enabled')
+    .select('is_provider')
     .eq('id', user.id)
-    .single() as { data: { is_provider: boolean; stripe_account_id: string | null; stripe_onboarding_done: boolean; stripe_payouts_enabled: boolean } | null }
+    .single() as { data: { is_provider: boolean } | null }
 
   // Výplaty jsou jen pro poskytovatele
   if (profile?.is_provider !== true) {
@@ -31,17 +32,12 @@ export default async function VyplatyPage({ searchParams }: Props) {
     )
   }
 
-  // Po návratu z onboardingu obnovíme stav přímo ze Stripe (ať nečekáme na webhook)
-  let payoutsEnabled = profile.stripe_payouts_enabled
-  let onboardingDone = profile.stripe_onboarding_done
-  if (searchParams.stav === 'hotovo' && profile.stripe_account_id) {
-    const fresh = await refreshConnectStatus()
-    payoutsEnabled = fresh.payoutsEnabled
-    onboardingDone = fresh.onboardingDone
-  }
-
-  const hasAccount = !!profile.stripe_account_id
-  const fullyReady = payoutsEnabled && onboardingDone
+  // Model v2: stav Standard účtu ze stripe_accounts. Po návratu z onboardingu se
+  // obnoví přímo ze Stripe (ať se nečeká na webhook). Starý Express účet se nepočítá.
+  const status = await refreshConnectStatus(searchParams.stav === 'hotovo')
+  const hasAccount = status.hasAccount
+  const fullyReady = status.ready
+  const duvody = status.blocks.filter((b) => b !== 'not_connected').map((b) => ACCOUNT_BLOCK_TEXT[b])
 
   // Má aktivní předplatné? Bez něj jsou nabídky neviditelné — a když sem přišel
   // rovnou napojit účet (Krok 2), Stripe ho vrátí sem a Krok 1 by mu utekl.
@@ -66,7 +62,7 @@ export default async function VyplatyPage({ searchParams }: Props) {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-black text-slate-900">Výplaty</h1>
-        <p className="mt-0.5 text-sm text-slate-500">Napojení bankovního účtu pro příjem záloh od zákazníků.</p>
+        <p className="mt-0.5 text-sm text-slate-500">Napojení Stripe účtu pro příjem Rezervačních poplatků a Cen výjezdu od zákazníků.</p>
       </div>
 
       {fullyReady ? (
@@ -78,7 +74,7 @@ export default async function VyplatyPage({ searchParams }: Props) {
             </div>
             <div>
               <p className="text-lg font-black text-slate-900">Účet je napojen</p>
-              <p className="text-sm text-slate-500">Můžete přijímat zálohy od zákazníků. Peníze chodí na váš bankovní účet.</p>
+              <p className="text-sm text-slate-500">Můžete přijímat rezervace s platbou. Peníze chodí přímo na váš Stripe účet.</p>
             </div>
           </div>
           <div className="mt-4 flex items-start gap-2 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
@@ -98,6 +94,11 @@ export default async function VyplatyPage({ searchParams }: Props) {
               <p className="text-sm text-slate-500">Dokončete prosím vyplnění údajů u Stripe, abyste mohli přijímat platby.</p>
             </div>
           </div>
+          {duvody.length > 0 && (
+            <ul className="mb-4 space-y-1 text-sm text-slate-600">
+              {duvody.map((d) => <li key={d}>· {d}</li>)}
+            </ul>
+          )}
           <ConnectButton label="Dokončit napojení" />
         </div>
       ) : (
@@ -108,13 +109,13 @@ export default async function VyplatyPage({ searchParams }: Props) {
             <h2 className="text-lg font-black text-slate-900">Napojte bankovní účet</h2>
           </div>
           <p className="mb-5 text-sm text-slate-500">
-            Abyste mohli přijímat rezervační zálohy od zákazníků, napojte svůj bankovní účet přes Stripe.
+            Abyste mohli přijímat rezervace s platbou, napojte svůj účet u Stripe.
             Vyplnění zabere pár minut – proběhne přímo u Stripe v češtině.
           </p>
 
           <ul className="mb-6 space-y-3 text-sm text-slate-700">
             <li className="flex gap-2.5"><ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600" /> Bezpečné ověření přes Stripe (IČO, bankovní účet)</li>
-            <li className="flex gap-2.5"><CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" /> Zálohy chodí přímo na váš účet</li>
+            <li className="flex gap-2.5"><CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" /> Platby rezervací chodí přímo na váš Stripe účet</li>
             <li className="flex gap-2.5"><AlertTriangle className="h-4 w-4 shrink-0 text-emerald-600" /> Propojo nemá přístup k vašim bankovním údajům</li>
           </ul>
 

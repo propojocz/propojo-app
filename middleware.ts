@@ -27,8 +27,13 @@ const COOKIE = 'propojo_pass'         // jméno cookie, co tě pustí
 //    nebo anonymní okno). Když ho middleware odmítne, potvrzení e-mailu vůbec
 //    neproběhne: nepotvrdí se účet, nepošle se uvítací mail a člověk skončí na
 //    stránce údržby. Callback je bezpečný — bez platného kódu z e-mailu nic neudělá.
+//  • /api/stripe/connect-webhook — události z účtů providerů (model v2), volá Stripe.
+//
+//  • /api/cron/ — volá Vercel Cron. Chráněno CRON_SECRET přímo v endpointu.
 const ALWAYS_ALLOW = [
   '/api/stripe/webhook',
+  '/api/stripe/connect-webhook',
+  '/api/cron/',
   '/auth/callback',
 ]
 

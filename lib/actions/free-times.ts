@@ -24,10 +24,13 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { BOOKING_POLICY } from '@/lib/booking/policy'
+import { bookingBufferMs } from '@/lib/booking/rules'
 
 const ZONE = 'Europe/Prague'
 const STEP_MIN = 15          // granularita nabízených časů (v1 po čtvrthodinách)
-const MIN_LEAD_MIN = 30      // nejbližší možný termín — ne „za pět minut"
+// Nejbližší možný termín: preautorizace musí dorazit dřív, než termín začne (model v2).
+const MIN_LEAD_MIN = BOOKING_POLICY.minLeadMinutes
 const DEFAULT_DAYS = 14
 const FALLBACK_DURATION = 60 // když u staré objednávky neznáme délku
 
@@ -188,7 +191,7 @@ async function loadCardContext(serviceId: string, daysAhead: number): Promise<Ca
   // aby si jeden člověk nemohl být zarezervovaný dvakrát naráz.
   let ordersQuery = admin
     .from('orders')
-    .select('id, service_id, scheduled_at, scheduled_end, status, deposit_status, hold_expires_at, service_items(duration_minutes, buffer_minutes)')
+    .select('id, service_id, scheduled_at, scheduled_end, status, booking_state, offer_kind, deposit_status, hold_expires_at, service_items(duration_minutes, buffer_minutes)')
     .eq('provider_id', providerId)
     .neq('status', 'zruseno')
     .not('scheduled_at', 'is', null)
@@ -209,8 +212,9 @@ async function loadCardContext(serviceId: string, daysAhead: number): Promise<Ca
     const start = new Date(o.scheduled_at).getTime()
     const dur = Number(o.service_items?.duration_minutes ?? 0)
     const buf = Number(o.service_items?.buffer_minutes ?? 0)
+    // Nová rezervace má v scheduled_end konec okna bez pauzy – pauza se přičítá tady.
     const end = o.scheduled_end
-      ? new Date(o.scheduled_end).getTime()
+      ? new Date(o.scheduled_end).getTime() + bookingBufferMs(o)
       : start + ((dur > 0 ? dur : FALLBACK_DURATION) + buf) * 60000
 
     busy.push({

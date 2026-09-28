@@ -16,9 +16,12 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
-import { createNotification } from '@/lib/actions/notifications'
 import { getFreeTimes } from '@/lib/actions/free-times'
+import { bookingBufferMs } from '@/lib/booking/rules'
+import { adminDb, checkNewBooking, logOrderEvent } from '@/lib/booking/payments'
 
+// Model v2: každá rezervace je placená (min. 200 Kč) a začíná preautorizací.
+// Zámek drží čas jen do otevření platby; pak ho prodlouží checkout (deposit.ts).
 const HOLD_MINUTES = 10
 
 type Result =
@@ -68,7 +71,7 @@ export async function reserveTime(values: {
   // ── Úkon ───────────────────────────────────────────────────
   const { data: item } = await admin
     .from('service_items')
-    .select('id, service_id, name, duration_minutes, buffer_minutes, deposit_amount, payment_model, is_active, price')
+    .select('id, service_id, name, duration_minutes, buffer_minutes, deposit_amount, payment_model, is_active, price, offer_kind, quote_fee, deposit_type')
     .eq('id', values.service_item_id)
     .single() as { data: any }
 
@@ -105,6 +108,16 @@ export async function reserveTime(values: {
   if (isNaN(start.getTime())) return { success: false, error: 'Neplatný termín.' }
   if (start.getTime() < Date.now()) return { success: false, error: 'Tento termín už proběhl.' }
 
+  // scheduled_end = konec rezervovaného okna (bez pauzy); pauza se drží jen v kalendáři.
+  const windowEnd = new Date(start.getTime() + duration * 60000)
+  const check = await checkNewBooking(adminDb(), {
+    item,
+    providerId: card.provider_id,
+    start,
+    end: windowEnd,
+  })
+  if (!check.ok) return { success: false, error: check.error }
+
   // ── Je ten čas opravdu volný? ──────────────────────────────
   // Ptáme se stejného generátoru, který časy nabídl — klientovi se věřit nedá.
   const days = await getFreeTimes(values.service_id, values.service_item_id)
@@ -140,11 +153,11 @@ export async function reserveTime(values: {
   }
 
   // ── Založení objednávky ────────────────────────────────────
-  // scheduled_end obsahuje i pauzu — podle něj se počítá obsazenost kalendáře.
+  // scheduled_end = konec okna. Obsazenost kalendáře (endMs) zahrnuje i pauzu.
   const buffer = Number(item.buffer_minutes ?? 0)
-  const endMs = start.getTime() + (duration + buffer) * 60000
-  const deposit = Number(item.deposit_amount ?? 0)
-  const needsPayment = deposit > 0
+  const endMs = windowEnd.getTime() + Math.max(0, buffer) * 60000
+  const deposit = check.commission.chargeHalere / 100
+  const needsPayment = true
 
   const { data: order, error: orderErr } = await (admin.from('orders') as any)
     .insert({
@@ -170,7 +183,8 @@ export async function reserveTime(values: {
       billing_dic: values.billing?.dic?.trim() || null,
       billing_address: values.billing?.address?.trim() || null,
       scheduled_at: start.toISOString(),
-      scheduled_end: new Date(endMs).toISOString(),
+      scheduled_end: windowEnd.toISOString(),
+      offer_kind: check.offerKind,
     })
     .select('id')
     .single()
@@ -185,19 +199,20 @@ export async function reserveTime(values: {
   // se nám s někým nepřekrývá termín — kdo byl dřív, ten platí.
   const { data: clash } = await admin
     .from('orders')
-    .select('id, created_at, deposit_status, hold_expires_at')
+    .select('id, created_at, booking_state, offer_kind, scheduled_end, deposit_status, hold_expires_at, service_items(buffer_minutes)')
     .eq('provider_id', card.provider_id)
     .neq('status', 'zruseno')
     .neq('id', order.id)
     .lt('scheduled_at', new Date(endMs).toISOString())
-    .gt('scheduled_end', start.toISOString()) as { data: any[] | null }
+    .gt('scheduled_end', new Date(start.getTime() - 24 * 3600_000).toISOString()) as { data: any[] | null }
 
   const live = (clash ?? []).filter((c) => {
     // Cizí rezervace s prošlým zámkem už termín nedrží.
     if (c.deposit_status === 'pending' && c.hold_expires_at) {
-      return new Date(c.hold_expires_at).getTime() > Date.now()
+      if (new Date(c.hold_expires_at).getTime() <= Date.now()) return false
     }
-    return true
+    // U nové rezervace se k oknu přičítá pauza úkonu.
+    return new Date(c.scheduled_end).getTime() + bookingBufferMs(c) > start.getTime()
   })
 
   if (live.length > 0) {
@@ -205,23 +220,11 @@ export async function reserveTime(values: {
     return { success: false, error: 'Tento termín byl právě zabrán. Vyberte prosím jiný.' }
   }
 
-  // ── Oznámení poskytovateli ─────────────────────────────────
-  // U placené rezervace čekáme s oznámením na zaplacení (řeší webhook),
-  // ať poskytovateli nechodí zprávy o rezervacích, které nikdo nedoplatí.
-  if (!needsPayment) {
-    try {
-      await createNotification({
-        userId: card.provider_id,
-        type: 'status_change',
-        orderId: order.id,
-        actorId: user.id,
-        title: 'Nová rezervace termínu',
-        preview: item.name,
-      })
-    } catch (err) {
-      console.error('[reserveTime] notifikace:', err)
-    }
-  }
+  // Přímá rezervace času: po vypršení platby se ruší (nevrací se do domluvy).
+  await logOrderEvent(admin as any, order.id, 'booking_created', { type: 'customer', id: user.id }, { direct: true })
+
+  // Oznámení poskytovateli pošle webhook až po preautorizaci – ať mu nechodí
+  // zprávy o rezervacích, které nikdo nezaplatí.
 
   revalidatePath(`/sluzby/${values.service_id}`)
   revalidatePath('/dashboard/objednavky')
