@@ -214,3 +214,40 @@ Nerozbíjet současnou aplikaci najednou. U každé významné změny nejdřív 
 8. Do rozsahu pokynu z bodu 7 patří i automatický refund při zrušení zákazníkem z bodu 8 – jinak ho engine nesmí spustit.
 
 Parametry k potvrzení (v `lib/booking/policy.ts`): předstih rezervace 60 min, max. nepřesnost polohy 200 m, připomínka 24 h před koncem lhůty, DPH 0, dokud se neuplatní.
+
+## 20. Stav právního potvrzení (k 30. 9. 2026)
+Podklad se 14 body byl odeslán právničce, odpověď zatím nepřišla.
+Pravidlo pro vývoj:
+- CONFIRMED = implementovat natvrdo.
+- OPEN – LEGAL = implementovat, ale lhůty, částky a hranice držet jako parametry (`lib/booking/policy.ts`) a automatické pohyby peněz nechat vypínatelné. Po odpovědi právničky se mění parametry, ne architektura.
+- Ostrý provoz je stejně blokován sekcí „Před ostrým spuštěním“ v CLAUDE.md (finální VOP a Privacy Policy).
+
+### CONFIRMED (konstrukční principy)
+- Propojo je zprostředkovatel, není stranou Hlavní smlouvy, nedrží peníze zákazníků, nerozhoduje spory.
+- Hlavní smlouva vzniká mimo Propojo; v aplikaci žádné „Přijmout nabídku“.
+- Tři typy nabídky A / B / C; Model B je samostatná placená služba, ne záloha.
+- Předautorizace → potvrzení poskytovatelem → capture; bez potvrzení release.
+- Přesná adresa a okno termínu před platbou (Model B).
+- Upload Závazné nabídky jen jako doklad, nehýbe penězi.
+- Model C bez skladového zboží a bez checkoutu celé ceny.
+- Doplatek není v MVP.
+
+### OPEN – LEGAL (čeká na právničku, čísla podle odeslaného podkladu)
+1. Provize 10 % / min 29 / max 89 Kč, nevracení při refundu, minimum 200 Kč, měsíční doklad, application fee a PSD2.
+2. Potvrzení / odmítnutí rezervace úkonem ve Stripe Dashboardu; povinnost udržovat Stripe účet funkční.
+3. Vznik Rezervační smlouvy až úspěšným capture; předstih 60 min (VOP, nebo jen technický parametr).
+4. Předem udělený pokyn poskytovatele k automatickým refundům (forma souhlasu, PSD2).
+5. Zrušení zákazníkem – hranice automatického refundu, vztah ke 14dennímu odstoupení.
+6. No-show poskytovatele – 48 h / 72 h, refund při nečinnosti.
+7. Změna termínu – expirace 24 h / začátek původního termínu.
+8. Model B – check-in parametry (30 min / 500 m / 200 m), marný výjezd, geolokace a GDPR.
+9. Model C – lhůta pro předání Závazné nabídky, GPSR.
+10. Hodnocení – štítek „Ověřená rezervace přes Propojo“, hodnocení no-show.
+11. Kontakty v rekapitulaci, anti-bypass formulace.
+12. Trust Ramp, parametry řazení, sankční stupně (P2B).
+13. GDPR – účely, tituly a doby uchování evidovaných údajů.
+
+### ROZHODNUTO MATEJEM, ALE LIŠÍ SE OD ODESLANÉHO PODKLADU / VOP 4.x
+- Cena výjezdu se do následné zakázky NIKDY nezapočítává, poskytovatel nemá volbu (28. 9. 2026). Odeslaný podklad (bod 8) a VOP 11.6 / 12.7 zatím počítají s volbou poskytovatele. Implementovat „nikdy“, právničku o změně informovat.
+- Zákazník nezastižen: jen po validním check-inu, alespoň jeden pokus o kontakt, jednotná čekací doba 15 min; Cena výjezdu včetně dopravy se pak nevrací (28. 9. 2026). V odeslaném podkladu není – doplnit právničce.
+- Doprava u Modelu B: zahrnutá v ceně, nebo připočtená podle km (28. 9. 2026). Nutné promítnout do informací před objednáním.

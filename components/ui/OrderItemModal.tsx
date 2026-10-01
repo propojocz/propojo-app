@@ -444,19 +444,25 @@ export default function OrderItemModal({
                   <p className="text-lg font-black text-emerald-800">
                     {bookedIso
                       ? (goingToPay ? 'Termín pro vás držíme' : 'Termín je váš! 🎉')
-                      : jeVyrobek ? 'Objednávka vytvořena' : 'Objednávka odeslána'}
+                      : jeVyrobek ? 'Objednávka vytvořena' : isModelB && isV2 ? 'Poptávka výjezdu odeslána' : 'Objednávka odeslána'}
                   </p>
                   {bookedIso ? (
                     <>
                       <p className="text-sm leading-relaxed text-emerald-700">
                         <strong>{item.name}</strong>{bookedWhen ? <>, {bookedWhen}</> : null}.
                       </p>
-                      {deposit > 0 && hasFixedPrice && !isFullPayment && (
+                      {!isV2 && deposit > 0 && hasFixedPrice && !isFullPayment && (
                         <p className="text-xs text-emerald-600">
                           Zaplatíte zálohu {deposit.toLocaleString('cs-CZ')} Kč, na místě doplatíte {Math.max(0, Number(item.price) - deposit).toLocaleString('cs-CZ')} Kč.
                         </p>
                       )}
-                      {goingToPay ? (
+                      {goingToPay && isV2 ? (
+                        // Model v2: platba je jen předautorizace, rezervaci potvrzuje poskytovatel.
+                        <p className="text-xs font-semibold text-emerald-700">
+                          Teď vás přesměrujeme na platbu. Rezervační poplatek se na kartě jen zablokuje,
+                          strhne se až po potvrzení poskytovatelem. Termín držíme 30 minut.
+                        </p>
+                      ) : goingToPay ? (
                         <p className="text-xs font-semibold text-emerald-700">
                           Otevírám platbu… termín držíme 30 minut, potvrdí ho zaplacení.
                         </p>
@@ -470,9 +476,11 @@ export default function OrderItemModal({
                         ? 'Přesměrovávám na detail objednávky, kde dokončíte případnou platbu.'
                         : skipSlot
                           ? 'Teď se můžete s poskytovatelem domluvit v chatu. Až navrhne konkrétní časy, vyberete si jeden.'
-                          : isModelB
-                            ? 'Poskytovatel se vám ozve a domluvíte se na termínu prohlídky.'
-                            : 'Poskytovatel ji potvrdí a ozve se vám.'}
+                          : isModelB && isV2
+                            ? `Zatím jste nic neplatili. Poskytovatel vám navrhne termín výjezdu, vy ho potvrdíte spolu s adresou a pak zaplatíte Cenu výjezdu ${quoteFee.toLocaleString('cs-CZ')} Kč (na kartě se jen zablokuje, strhne se až po potvrzení poskytovatelem).`
+                            : isModelB
+                              ? 'Poskytovatel se vám ozve a domluvíte se na termínu prohlídky.'
+                              : 'Poskytovatel ji potvrdí a ozve se vám.'}
                     </p>
                   )}
                   {!bookedIso && (

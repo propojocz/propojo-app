@@ -23,6 +23,8 @@ export interface LegacyContext {
   directBooking: boolean
   /** Do kdy drží rozpracovaný checkout termín (jen pro pending_payment) */
   holdUntil?: Date | null
+  /** Platba byla opravdu stržena (capture proběhl, orders.confirmed_at) */
+  captured?: boolean
 }
 
 export function legacyMirror(state: BookingState, ctx: LegacyContext): LegacyMirror {
@@ -53,7 +55,14 @@ export function legacyMirror(state: BookingState, ctx: LegacyContext): LegacyMir
     case 'capture_failed':
       return { status: 'zruseno', deposit_status: 'none', hold_expires_at: null, releasesSlot: true, clearsSchedule: false }
     case 'cancelled':
-      // Peníze mohly být strženy; stav refundu se sleduje v order_refunds, ne tady.
-      return { status: 'zruseno', deposit_status: 'paid', hold_expires_at: null, releasesSlot: true, clearsSchedule: false }
+      // Zrušit jde před platbou, před potvrzením i po něm. „paid“ jen když se opravdu strhlo;
+      // stav vrácení peněz se sleduje v order_refunds, ne tady.
+      return {
+        status: 'zruseno',
+        deposit_status: ctx.captured ? 'paid' : 'none',
+        hold_expires_at: null,
+        releasesSlot: true,
+        clearsSchedule: false,
+      }
   }
 }

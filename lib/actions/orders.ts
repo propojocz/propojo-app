@@ -306,7 +306,7 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   // vázaná na položku; jinak fallback na kartu (services) — starý tok.
   const { data: ordCheck } = await supabase
     .from('orders')
-    .select('customer_id, provider_id, attendance, deposit_status, booking_state, slot_id, service_item_id, scheduled_at, services(payment_model, deposit_amount, quote_fee), service_items(payment_model, deposit_amount, quote_fee, deposit_type, price, item_type)')
+    .select('customer_id, provider_id, attendance, deposit_status, booking_state, slot_id, service_item_id, scheduled_at, services(payment_model, deposit_amount, quote_fee), service_items(payment_model, deposit_amount, quote_fee, deposit_type, price, item_type, offer_kind)')
     .eq('id', orderId)
     .single() as { data: any }
 
@@ -340,7 +340,8 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
     // Přijmout (a spustit platbu) jde jen s domluveným termínem. Bez něj by
     // vznikla zaplacená objednávka bez času → spory. Poskytovatel musí nejdřív
     // navrhnout termín (panel návrhu), zákazník ho přijme a tím vznikne scheduled_at.
-    if (!ordCheck.scheduled_at && modelX !== 'B') {
+    // Model v2: i výjezd (B) s typem nabídky potřebuje okno termínu před platbou (korekce 4).
+    if (!ordCheck.scheduled_at && (modelX !== 'B' || !!itX?.offer_kind)) {
       return { success: false, error: 'Nejdřív zákazníkovi navrhněte termín — bez domluveného času nejde objednávku přijmout ani platit.' }
     }
     if (ocekavanaCastka > 0) extraUpdate = { deposit_status: 'pending', deposit_amount: ocekavanaCastka }
@@ -568,13 +569,17 @@ export async function setOrderAddress(
 
   const { data: order } = await supabase
     .from('orders')
-    .select('customer_id, status')
+    .select('customer_id, status, booking_state')
     .eq('id', orderId)
-    .single() as { data: { customer_id: string; status: string } | null }
+    .single() as { data: { customer_id: string; status: string; booking_state: string | null } | null }
 
   if (!order) return { success: false, error: 'Objednávka nenalezena.' }
   if (order.customer_id !== user.id) {
     return { success: false, error: 'Adresu může doplnit jen zákazník objednávky.' }
+  }
+  // Model v2: po zahájení platby se adresa nemění (předautorizace i check-in se k ní vážou).
+  if (order.booking_state != null && order.booking_state !== 'payment_expired') {
+    return { success: false, error: 'Adresu už nelze změnit. Pokud je potřeba jiná, objednávku zrušte a objednejte znovu.' }
   }
 
   const { error } = await (supabase.from('orders') as any)

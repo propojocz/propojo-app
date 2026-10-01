@@ -111,7 +111,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
 
   const { data: order, error } = await supabase
     .from('orders')
-    .select('*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee, location_type, address, address_lat, address_lng, address_public, phone), service_items(name, price, price_unit, deposit_amount, deposit_type, payment_model, duration_minutes, quote_fee, fee_mode, item_type, stock_mode, lead_time_days, pickup_mode, pickup_timing)')
+    .select('*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee, location_type, address, address_lat, address_lng, address_public, phone), service_items(name, price, price_unit, deposit_amount, deposit_type, payment_model, duration_minutes, quote_fee, fee_mode, item_type, stock_mode, lead_time_days, pickup_mode, pickup_timing, offer_kind)')
     .eq('id', params.id)
     .single() as { data: OrderRow | null; error: any }
 
@@ -139,12 +139,14 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
   )
 
   const proposalModel = order.service_items?.payment_model ?? order.services?.payment_model
+  // Model v2: položka s typem nabídky. I výjezd (B) potřebuje termín = okno příjezdu (korekce 4).
+  const v2OfferKind = ((order.service_items as any)?.offer_kind ?? null) as string | null
   const futureConfirmedTerm = !!order.scheduled_at && new Date(order.scheduled_at).getTime() > Date.now()
   const proposalFlowOpen =
     order.status !== 'zruseno' &&
     order.status !== 'dokonceno' &&
     order.status !== 'ceka_potvrzeni' &&
-    proposalModel !== 'B'
+    (proposalModel !== 'B' || v2OfferKind === 'B')
 
   // Bez termínu: provider panel vidí vždy, zákazník až když má co vybírat.
   // S potvrzeným budoucím termínem: provider má kompaktní „Navrhnout změnu",
@@ -226,6 +228,8 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
           prefFrom={(order as any).pref_date_from ?? null}
           prefTo={(order as any).pref_date_to ?? null}
           prefTime={(order as any).pref_time ?? null}
+          arrivalWindow={v2OfferKind === 'B'}
+          paymentLabel={v2OfferKind ? (v2OfferKind === 'B' ? 'Cenu výjezdu' : 'Rezervační poplatek') : null}
         />
       )}
 

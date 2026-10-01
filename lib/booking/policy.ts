@@ -61,6 +61,11 @@ export interface BookingPolicy {
     maxAccuracyM: number
   }
   customerCancellation: Record<OfferKind, CustomerCancellationRule>
+  /** Model B: termín výjezdu je okno příjezdu (začátek–konec), ne délka prohlídky */
+  arrivalWindow: {
+    optionsMinutes: readonly number[]
+    defaultMinutes: number
+  }
 }
 
 export const BOOKING_POLICY: BookingPolicy = {
@@ -93,6 +98,10 @@ export const BOOKING_POLICY: BookingPolicy = {
     A: { beforeOfferDelivered: true, beforeWindowStart: true, requireNoValidCheckIn: false },
     B: { beforeOfferDelivered: false, beforeWindowStart: true, requireNoValidCheckIn: true },
     C: { beforeOfferDelivered: true, beforeWindowStart: true, requireNoValidCheckIn: false },
+  },
+  arrivalWindow: {
+    optionsMinutes: [30, 60, 90, 120],
+    defaultMinutes: 60,
   },
 }
 

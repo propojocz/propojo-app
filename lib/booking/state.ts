@@ -83,6 +83,10 @@ const TRANSITIONS: TransitionTable = {
     checkout_started: 'pending_payment',
     checkout_expired: 'payment_expired',
     authorized: 'awaiting_confirmation',
+    // Zrušení před platbou: nic nebylo předautorizováno, jen se ukončí checkout a uvolní termín.
+    // Když zákazník v tu chvíli přesto zaplatí, preautorizace se hned uvolní (handleAuthorized).
+    customer_cancelled: 'cancelled',
+    provider_declined: 'declined',
   },
   // Jen domluvený termín se po vypršení vrací do domluvy a jde zaplatit znovu.
   payment_expired: {

@@ -7,12 +7,13 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CalendarDays, Loader2, Plus, Send, Clock, CalendarRange, RefreshCw, X } from 'lucide-react'
+import { CalendarDays, Loader2, Plus, Send, Clock, CalendarRange, RefreshCw, X, MessageCircle } from 'lucide-react'
 import {
   proposeTimes, acceptProposal, declineProposals, type Proposal,
 } from '@/lib/actions/time-proposals'
 import { createDepositCheckout } from '@/lib/actions/deposit'
 import { releaseUnpaidReservation } from '@/lib/actions/reservation-release'
+import { BOOKING_POLICY } from '@/lib/booking/policy'
 
 interface Props {
   orderId: string
@@ -30,12 +31,19 @@ interface Props {
   prefFrom?: string | null
   prefTo?: string | null
   prefTime?: string | null
+  /** Model B: termín je okno příjezdu, poskytovatel volí jeho délku. */
+  arrivalWindow?: boolean
+  /** Model v2: „Rezervační poplatek“ / „Cena výjezdu“. Prázdné = starý text se zálohou. */
+  paymentLabel?: string | null
 }
 
 const fmtLong = (iso: string) =>
   new Intl.DateTimeFormat('cs-CZ', {
     weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit',
   }).format(new Date(iso))
+
+const fmtTime = (iso: string) =>
+  new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
 
 const fmtDay = (iso: string) =>
   new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'numeric' }).format(new Date(iso))
@@ -61,6 +69,7 @@ function combineLocalDateTime(date: string, time: string): string | null {
 export default function TimeProposalPanel({
   orderId, isProvider, proposals, depositAmount, scheduledAt = null, depositStatus = null,
   itemName, customerName, prefFrom, prefTo, prefTime,
+  arrivalWindow = false, paymentLabel = null,
 }: Props) {
   const router = useRouter()
   const isReschedule = !!scheduledAt
@@ -74,6 +83,17 @@ export default function TimeProposalPanel({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [editMode, setEditMode] = useState(false)
+  // Termín domluvený v chatu: poskytovatel zadá jen ten jeden, zákazník ho potvrdí a zaplatí.
+  const [agreedMode, setAgreedMode] = useState(false)
+  const [windowMinutes, setWindowMinutes] = useState<number>(BOOKING_POLICY.arrivalWindow.defaultMinutes)
+
+  // U výjezdu je termín okno příjezdu: „út 6. 10. 14:00–15:00“.
+  const fmtProposal = (p: Proposal) =>
+    arrivalWindow ? `${fmtLong(p.starts_at)}–${fmtTime(p.ends_at)}` : fmtLong(p.starts_at)
+  const fmtDraft = (iso: string) =>
+    arrivalWindow
+      ? `${fmtLong(iso)}–${fmtTime(new Date(new Date(iso).getTime() + windowMinutes * 60000).toISOString())}`
+      : fmtLong(iso)
 
   // ── POSKYTOVATEL ─────────────────────────────────────────
   if (isProvider) {
@@ -85,6 +105,16 @@ export default function TimeProposalPanel({
       setNewClock('')
       setError('')
       setEditMode(false)
+      setAgreedMode(false)
+    }
+
+    const openAgreedEditor = () => {
+      setDraft([])
+      setNewDate('')
+      setNewClock('')
+      setError('')
+      setAgreedMode(true)
+      setEditMode(true)
     }
 
     const openEmptyEditor = () => {
@@ -92,6 +122,7 @@ export default function TimeProposalPanel({
       setNewDate('')
       setNewClock('')
       setError('')
+      setAgreedMode(false)
       setEditMode(true)
     }
 
@@ -151,7 +182,7 @@ export default function TimeProposalPanel({
         return
       }
       setBusy(true); setError('')
-      const res = await proposeTimes(orderId, allSelected)
+      const res = await proposeTimes(orderId, allSelected, arrivalWindow ? windowMinutes : undefined)
       setBusy(false)
       if (!res.success) { setError(res.error); return }
       setEditMode(false)
@@ -225,13 +256,20 @@ export default function TimeProposalPanel({
                 </p>
               )}
 
-              <div className="mt-3">
+              <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={openEmptyEditor}
                   className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-3.5 py-2.5 text-sm font-bold text-white transition hover:bg-amber-600"
                 >
                   <CalendarDays className="h-4 w-4" /> Navrhnout termín
+                </button>
+                <button
+                  type="button"
+                  onClick={openAgreedEditor}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3.5 py-2.5 text-sm font-bold text-amber-700 transition hover:bg-amber-50"
+                >
+                  <MessageCircle className="h-4 w-4" /> Termín už máme domluvený v chatu
                 </button>
               </div>
             </div>
@@ -247,7 +285,7 @@ export default function TimeProposalPanel({
           <h2 className="font-black text-slate-900">
             {isReschedule
               ? (proposals.length > 0 && !editMode ? 'Navržená změna termínu' : 'Navrhněte nový termín')
-              : (proposals.length > 0 && !editMode ? 'Navržené termíny' : 'Navrhněte termín')}
+              : (proposals.length > 0 && !editMode ? 'Navržené termíny' : agreedMode ? 'Zadejte domluvený termín' : 'Navrhněte termín')}
           </h2>
         </div>
 
@@ -284,7 +322,7 @@ export default function TimeProposalPanel({
             <div className="flex flex-wrap gap-2">
               {proposals.map((p) => (
                 <span key={p.id} className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-slate-800">
-                  {fmtLong(p.starts_at)}
+                  {fmtProposal(p)}
                 </span>
               ))}
             </div>
@@ -300,12 +338,22 @@ export default function TimeProposalPanel({
           <>
             <p className="mb-3 text-sm leading-relaxed text-slate-600">
               {itemName ? <><strong>{itemName}</strong> — </> : null}
-              Zadejte konkrétní datum a čas. Pokud chcete, můžete zákazníkovi nabídnout více možností.
-              {isReschedule
+              {agreedMode
+                ? (arrivalWindow
+                    ? 'Zadejte den, začátek a délku okna příjezdu, na kterých jste se se zákazníkem domluvili.'
+                    : 'Zadejte datum a čas, na kterých jste se se zákazníkem domluvili.')
+                : arrivalWindow
+                  ? 'Zadejte den, začátek a délku okna, ve kterém k zákazníkovi přijedete. Můžete nabídnout více možností.'
+                  : 'Zadejte konkrétní datum a čas. Pokud chcete, můžete zákazníkovi nabídnout více možností.'}
+              {agreedMode && paymentLabel
+                ? ` Zákazníkovi ho pošleme k potvrzení, jedním kliknutím ho potvrdí a zaplatí ${paymentLabel}.`
+                : isReschedule
                 ? ' Původní termín zatím zůstává platný.'
                 : alreadyPaid
                   ? ' Zákazník jeden z termínů potvrdí.'
-                  : ' Zákazník si jeden vybere a případnou zálohou ho potvrdí.'}
+                  : paymentLabel
+                    ? ` Zákazník si jeden vybere a zaplatí ${paymentLabel}.`
+                    : ' Zákazník si jeden vybere a případnou zálohou ho potvrdí.'}
             </p>
 
             {draft.length > 0 && (
@@ -313,7 +361,7 @@ export default function TimeProposalPanel({
                 <p className="text-xs font-semibold text-slate-500">Přidané možnosti</p>
                 {draft.map((iso, index) => (
                   <div key={iso} className="flex items-center justify-between gap-3 rounded-xl border border-amber-300 bg-white px-3 py-2.5">
-                    <span className="text-sm font-bold text-slate-800">{index + 1}. {fmtLong(iso)}</span>
+                    <span className="text-sm font-bold text-slate-800">{index + 1}. {fmtDraft(iso)}</span>
                     <button
                       type="button"
                       onClick={() => removeTime(iso)}
@@ -330,6 +378,30 @@ export default function TimeProposalPanel({
             )}
 
             <div className="rounded-xl border border-amber-200 bg-white p-3">
+              {arrivalWindow && (
+                <div className="mb-3">
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Okno příjezdu</label>
+                  <div className="flex flex-wrap gap-2">
+                    {BOOKING_POLICY.arrivalWindow.optionsMinutes.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setWindowMinutes(m)}
+                        className={`rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                          windowMinutes === m
+                            ? 'border-amber-500 bg-amber-100 text-amber-800'
+                            : 'border-slate-200 text-slate-600 hover:border-amber-300'
+                        }`}
+                      >
+                        {m} min
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                    Časové rozmezí, ve kterém k zákazníkovi dorazíte. Platí pro všechny termíny v tomto návrhu.
+                  </p>
+                </div>
+              )}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-600">Datum</label>
@@ -342,7 +414,7 @@ export default function TimeProposalPanel({
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-600">Čas</label>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">{arrivalWindow ? 'Začátek okna' : 'Čas'}</label>
                   <input
                     type="time"
                     value={newClock}
@@ -355,18 +427,21 @@ export default function TimeProposalPanel({
 
               {newDate && newClock && currentIso && (
                 <p className={`mt-2 text-xs ${currentIsValid ? 'text-slate-500' : 'text-red-600'}`}>
-                  {currentIsValid ? <>Aktuálně zadáno: <strong>{fmtLong(currentIso)}</strong></> : 'Tento čas už je v minulosti.'}
+                  {currentIsValid ? <>Aktuálně zadáno: <strong>{fmtDraft(currentIso)}</strong></> : 'Tento čas už je v minulosti.'}
                 </p>
               )}
 
-              <button
-                type="button"
-                onClick={addCurrentAsAnother}
-                disabled={!newDate || !newClock || !currentIsValid || allSelected.length >= 6}
-                className="mt-3 inline-flex items-center gap-1.5 rounded-xl border border-dashed border-amber-400 px-3 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-50 disabled:opacity-50"
-              >
-                <Plus className="h-4 w-4" /> Přidat další možnost
-              </button>
+              {/* Domluvený termín je jen jeden – další možnosti nedávají smysl. */}
+              {!agreedMode && (
+                <button
+                  type="button"
+                  onClick={addCurrentAsAnother}
+                  disabled={!newDate || !newClock || !currentIsValid || allSelected.length >= 6}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-xl border border-dashed border-amber-400 px-3 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-50 disabled:opacity-50"
+                >
+                  <Plus className="h-4 w-4" /> Přidat další možnost
+                </button>
+              )}
             </div>
 
             <p className="mt-2 text-xs leading-relaxed text-slate-500">
@@ -392,7 +467,9 @@ export default function TimeProposalPanel({
               >
                 {busy
                   ? <><Loader2 className="h-4 w-4 animate-spin" /> Odesílám…</>
-                  : <><Send className="h-4 w-4" /> {isReschedule ? 'Odeslat návrh změny' : 'Odeslat'} ({allSelected.length === 1 ? '1 termín' : allSelected.length < 5 ? `${allSelected.length} termíny` : `${allSelected.length} termínů`})</>}
+                  : agreedMode
+                    ? <><Send className="h-4 w-4" /> Odeslat zákazníkovi k potvrzení</>
+                    : <><Send className="h-4 w-4" /> {isReschedule ? 'Odeslat návrh změny' : 'Odeslat'} ({allSelected.length === 1 ? '1 termín' : allSelected.length < 5 ? `${allSelected.length} termíny` : `${allSelected.length} termínů`})</>}
               </button>
             </div>
           </>
@@ -441,12 +518,19 @@ export default function TimeProposalPanel({
     router.refresh()
   }
 
+  // Jediný návrh (typicky termín domluvený v chatu): jen potvrdit a zaplatit.
+  const singleOffer = !isReschedule && proposals.length === 1
+
   return (
     <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50/70 p-5">
       <div className="mb-1 flex items-center gap-2">
         <CalendarDays className="h-5 w-5 text-emerald-600" />
         <h2 className="font-black text-slate-900">
-          {isReschedule ? 'Poskytovatel navrhuje změnu termínu' : 'Vyberte si termín'}
+          {isReschedule
+            ? 'Poskytovatel navrhuje změnu termínu'
+            : singleOffer
+              ? (arrivalWindow ? 'Potvrďte termín výjezdu' : 'Potvrďte termín')
+              : 'Vyberte si termín'}
         </h2>
       </div>
 
@@ -457,12 +541,20 @@ export default function TimeProposalPanel({
       )}
 
       <p className="mb-3 text-sm leading-relaxed text-slate-600">
-        Poskytovatel vám nabídl tyhle časy.
+        {singleOffer
+          ? (arrivalWindow
+              ? 'Poskytovatel vám poslal termín výjezdu, třeba ten, na kterém jste se domluvili ve zprávách. Čas znamená okno, ve kterém k vám přijede.'
+              : 'Poskytovatel vám poslal termín, třeba ten, na kterém jste se domluvili ve zprávách.')
+          : arrivalWindow
+            ? 'Poskytovatel vám nabídl tyto termíny výjezdu. Čas znamená okno, ve kterém k vám přijede.'
+            : 'Poskytovatel vám nabídl tyhle časy.'}
         {isReschedule
           ? ' Přijetím jednoho z nich se původní termín nahradí.'
-          : depositAmount > 0
-            ? ` Kliknutím termín potvrdíte a zaplatíte zálohu ${depositAmount.toLocaleString('cs-CZ')} Kč — ta se započítá do konečné ceny.`
-            : ' Kliknutím termín rovnou potvrdíte.'}
+          : paymentLabel && depositAmount > 0
+            ? ` Kliknutím termín vyberete a na kartě se předautorizuje ${paymentLabel} ${depositAmount.toLocaleString('cs-CZ')} Kč. Strhne se až poté, co poskytovatel rezervaci potvrdí.`
+            : depositAmount > 0
+              ? ` Kliknutím termín potvrdíte a zaplatíte zálohu ${depositAmount.toLocaleString('cs-CZ')} Kč — ta se započítá do konečné ceny.`
+              : ' Kliknutím termín rovnou potvrdíte.'}
       </p>
 
       <div className="space-y-2">
@@ -476,13 +568,15 @@ export default function TimeProposalPanel({
           >
             <span className="flex items-center gap-2 font-bold text-slate-900">
               <Clock className="h-4 w-4 text-emerald-600" />
-              {fmtLong(p.starts_at)}
+              {fmtProposal(p)}
             </span>
             <span className="shrink-0 rounded-lg bg-emerald-500 px-3 py-1.5 text-sm font-bold text-white">
               {isReschedule || alreadyPaid
                 ? 'Přijmout změnu'
                 : depositAmount > 0
-                  ? `Zaplatit ${depositAmount.toLocaleString('cs-CZ')} Kč`
+                  ? (singleOffer
+                      ? `Potvrdit a zaplatit ${depositAmount.toLocaleString('cs-CZ')} Kč`
+                      : `Zaplatit ${depositAmount.toLocaleString('cs-CZ')} Kč`)
                   : 'Potvrdit'}
             </span>
           </button>

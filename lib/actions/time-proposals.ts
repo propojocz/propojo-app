@@ -17,6 +17,7 @@ import { getFreeTimes } from '@/lib/actions/free-times'
 import { releaseSlotAndMerge } from '@/lib/slot-merge'
 import { claimMatchingAvailabilitySlot } from '@/lib/slot-claim'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
+import { cas } from '@/lib/format'
 import { bookingBufferMs } from '@/lib/booking/rules'
 import { adminDb, checkNewBooking } from '@/lib/booking/payments'
 
@@ -53,7 +54,7 @@ async function loadOrder(orderId: string) {
   const admin = getAdminClient()
   const { data } = await admin
     .from('orders')
-    .select('id, customer_id, provider_id, service_id, service_item_id, status, booking_state, offer_kind, scheduled_at, scheduled_end, slot_id, deposit_status, deposit_amount, hold_expires_at, pref_date_from, pref_date_to, pref_time, service_items(name, duration_minutes, buffer_minutes, deposit_amount, payment_model, offer_kind, quote_fee, deposit_type)')
+    .select('id, customer_id, provider_id, service_id, service_item_id, status, booking_state, offer_kind, location_lat, location_lng, scheduled_at, scheduled_end, slot_id, deposit_status, deposit_amount, hold_expires_at, pref_date_from, pref_date_to, pref_time, service_items(name, duration_minutes, buffer_minutes, deposit_amount, payment_model, offer_kind, quote_fee, deposit_type)')
     .eq('id', orderId)
     .single() as { data: any }
   return data
@@ -137,7 +138,12 @@ export async function getProposals(orderId: string): Promise<Proposal[]> {
 }
 
 /** Poskytovatel odešle návrhy. Staré nahradí novými. */
-export async function proposeTimes(orderId: string, starts: string[]): Promise<Result> {
+export async function proposeTimes(
+  orderId: string,
+  starts: string[],
+  /** Model B: délka okna příjezdu v minutách (jen hodnoty z policy) */
+  arrivalWindowMinutes?: number,
+): Promise<Result> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Nejste přihlášeni.' }
@@ -166,8 +172,16 @@ export async function proposeTimes(orderId: string, starts: string[]): Promise<R
     return { success: false, error: 'Nový návrh je stejný jako současný termín.' }
   }
 
-  // Délku bereme z úkonu; když ji nemá, počítáme hodinu, ať má termín konec.
-  const duration = Number(order.service_items?.duration_minutes ?? 0) || 60
+  // Model B (výjezd): termín je okno příjezdu, které zvolí poskytovatel (korekce 4).
+  // Ostatní: délka z úkonu; když ji nemá, počítáme hodinu, ať má termín konec.
+  const isArrivalWindow = order.service_items?.offer_kind === 'B'
+  const windowOptions = BOOKING_POLICY.arrivalWindow.optionsMinutes
+  if (isArrivalWindow && arrivalWindowMinutes != null && !windowOptions.includes(arrivalWindowMinutes)) {
+    return { success: false, error: 'Neplatná délka okna příjezdu.' }
+  }
+  const duration = isArrivalWindow
+    ? (arrivalWindowMinutes ?? BOOKING_POLICY.arrivalWindow.defaultMinutes)
+    : Number(order.service_items?.duration_minutes ?? 0) || 60
 
   const rows: { order_id: string; starts_at: string; ends_at: string }[] = []
   for (const s of clean) {
@@ -194,7 +208,10 @@ export async function proposeTimes(orderId: string, starts: string[]): Promise<R
   }
 
   const isReschedule = !!order.scheduled_at
-  const navrhyText = rows.map((r) => fmtWhen(r.starts_at)).join(', ')
+  // U výjezdu je termín okno příjezdu – ukázat i jeho konec.
+  const navrhyText = rows
+    .map((r) => (isArrivalWindow ? `${fmtWhen(r.starts_at)}–${cas(r.ends_at)}` : fmtWhen(r.starts_at)))
+    .join(', ')
 
   // Zákazník dostane oznámení do zvonečku i push do telefonu.
   try {
@@ -284,6 +301,13 @@ export async function acceptProposal(orderId: string, start: string): Promise<Ac
   // každá rezervace se předautorizuje – i Cena výjezdu u Modelu B.
   const alreadyPaid = order.booking_state == null && (order.deposit_status === 'paid' || order.deposit_status === 'released')
   let v2Charge: { offerKind: string; chargeKc: number } | null = null
+  // Výjezd (B): přesná adresa se souřadnicemi musí být před potvrzením termínu a platbou (korekce 5).
+  if (!alreadyPaid && order.service_items?.offer_kind === 'B' && (order.location_lat == null || order.location_lng == null)) {
+    return {
+      success: false,
+      error: 'Nejdřív prosím doplňte přesnou adresu výjezdu níže (vyberte ji ze seznamu). Pak můžete termín potvrdit.',
+    }
+  }
   if (!alreadyPaid) {
     const check = await checkNewBooking(adminDb(), {
       item: order.service_items ?? { offer_kind: null, deposit_amount: null, quote_fee: null },

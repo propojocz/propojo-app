@@ -7,6 +7,7 @@ import OrderStatusButton from '../OrderStatusButton'
 import { sendOrderMessage, updateOrderStatus, setOrderAddress } from '@/lib/actions/orders'
 import { createDepositCheckout } from '@/lib/actions/deposit'
 import { releaseUnpaidReservation } from '@/lib/actions/reservation-release'
+import { cancelBeforePayment } from '@/lib/actions/booking'
 import ConfirmCompletionButton from '@/components/ui/ConfirmCompletionButton'
 import ChatThread from '@/components/ui/ChatThread'
 import Avatar from '@/components/ui/Avatar'
@@ -168,6 +169,8 @@ export default function OrderDetailClient({
   const [switchErr, setSwitchErr] = useState('')
   const [cancelBusy, setCancelBusy] = useState(false)
   const [cancelErr, setCancelErr] = useState('')
+  const [providerCancelBusy, setProviderCancelBusy] = useState(false)
+  const [providerCancelErr, setProviderCancelErr] = useState('')
   const [changeBusy, setChangeBusy] = useState(false)
   const [changeSent, setChangeSent] = useState(false)
   const [changeErr, setChangeErr] = useState('')
@@ -261,7 +264,8 @@ export default function OrderDetailClient({
   const v2Rezervace = bookingState !== null && bookingState !== 'payment_expired' && bookingState !== 'pending_payment'
   const v2Aktivni = bookingState !== null && bookingState !== 'payment_expired'
   // Objednávka položky nového modelu (má typ nabídky) – platí se Rezervační poplatek / Cena výjezdu
-  const jeV2Polozka = !!(order as any).offer_kind || bookingState !== null
+  // Typ se na objednávku zapíše až při platbě – do té doby rozhoduje typ položky.
+  const jeV2Polozka = !!(order as any).offer_kind || !!(order as any).service_items?.offer_kind || bookingState !== null
 
   const cekaNaUzavreniPoskytovatelem = isCustomer
     && bookingState === null
@@ -386,11 +390,24 @@ export default function OrderDetailClient({
     if (!confirm(zprava)) return
     setCancelBusy(true)
     setCancelErr('')
-    const res = await updateOrderStatus(order.id, 'zruseno' as any)
+    // Model v2: před předautorizací se ruší bez peněz (ukončí se i rozpracovaná platba).
+    const res = jeV2Polozka
+      ? await cancelBeforePayment(order.id)
+      : await updateOrderStatus(order.id, 'zruseno' as any)
     if (!res.success) {
       setCancelErr(res.error ?? 'Nepodařilo se zrušit.')
       setCancelBusy(false)
     }
+  }
+
+  // Poskytovatel ruší objednávku nového modelu, dokud ještě nic nebylo předautorizováno.
+  const handleProviderCancel = async () => {
+    if (!confirm('Opravdu objednávku zrušit? Zákazníkovi dáme vědět, nic mu nebylo strženo.')) return
+    setProviderCancelBusy(true)
+    setProviderCancelErr('')
+    const res = await cancelBeforePayment(order.id)
+    if (!res.success) setProviderCancelErr(res.error)
+    setProviderCancelBusy(false)
   }
 
   const handleRequestTimeChange = async () => {
@@ -419,7 +436,13 @@ export default function OrderDetailClient({
     </div>
   )
 
-  const canCustomerCancel = isCustomer && !v2Aktivni && ['cekajici', 'prijato', 'v_procesu'].includes(order.status)
+  // Nový model: zákazník ruší bez peněz až do předautorizace (i během rozpracované platby).
+  // Po předautorizaci se ruší jinak (uvolnění / refund) – vrstvy 3 a 4.
+  const canCustomerCancel = isCustomer
+    && (jeV2Polozka ? v2Platba : !v2Aktivni)
+    && ['cekajici', 'prijato', 'v_procesu'].includes(order.status)
+  // Totéž pro poskytovatele ve fázi „termín přijat, čeká na platbu“ (dřív tam neměl žádnou akci).
+  const canProviderCancelBeforePayment = isProvider && jeV2Polozka && v2Platba && order.status === 'prijato'
   const canRequestTimeChange = isCustomer
     && !v2Aktivni
     && order.status === 'prijato'
@@ -674,8 +697,29 @@ export default function OrderDetailClient({
             </div>
           )}
 
+          {/* Nový model, termín přijatý, čeká se na platbu zákazníka: poskytovatel může jen zrušit. */}
+          {canProviderCancelBeforePayment && (
+            <div className="mt-5 border-t border-slate-100 pt-5">
+              <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
+                {order.scheduled_at
+                  ? 'Zákazník termín přijal a teď dokončuje platbu. Rezervaci potvrdíte, až bude platba předautorizovaná.'
+                  : 'Termín zatím není domluvený. Navrhněte ho zákazníkovi výše.'}
+              </p>
+              <button
+                type="button"
+                onClick={handleProviderCancel}
+                disabled={providerCancelBusy}
+                className="mt-2 flex items-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-60"
+              >
+                {providerCancelBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                Zrušit objednávku
+              </button>
+              {providerCancelErr && <p className="mt-2 text-sm text-red-600">{providerCancelErr}</p>}
+            </div>
+          )}
+
           {/* Akce poskytovatele (u rezervace nového modelu přijdou ve vrstvě 3) */}
-          {isProvider && !v2Aktivni && (
+          {isProvider && !v2Aktivni && !canProviderCancelBeforePayment && (
             <div className="mt-5 border-t border-slate-100 pt-5">
               <OrderStatusButton
                 orderId={order.id}
@@ -683,7 +727,9 @@ export default function OrderDetailClient({
                 depositStatus={order.deposit_status}
                 scheduledAt={order.scheduled_at}
                 durationMinutes={(order as any).service_items?.duration_minutes ?? null}
-                canAcceptWithoutTime={isModelB}
+                // Model v2: i výjezd (B) potřebuje okno termínu před platbou (korekce 4),
+                // takže „Přijmout bez termínu“ jen u starých položek bez typu nabídky.
+                canAcceptWithoutTime={isModelB && !jeV2Polozka}
                 isProduct={jeVyrobek}
                 productQuantity={order.quantity}
                 productName={item?.name ?? null}
@@ -757,16 +803,24 @@ export default function OrderDetailClient({
         )}
 
         {/* ── PŘESNÁ ADRESA (jen zákazník, jen když se koná U ZÁKAZNÍKA, po přijetí, před zaplacením) ── */}
-        {isCustomer && atCustomer && (order.status === 'prijato' || order.status === 'v_procesu') && !isPaid && (
+        {/* Výjezd (B) nového modelu: přesná adresa se souřadnicemi už před přijetím termínu
+            a platbou (korekce 5). Po zahájení platby se adresa nemění. */}
+        {isCustomer && atCustomer && !isPaid && !v2Aktivni && (
+          order.status === 'prijato' || order.status === 'v_procesu' || (jeV2Polozka && isModelB && order.status === 'cekajici')
+        ) && (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-1 flex items-center gap-2">
               <MapPin className="h-5 w-5 text-emerald-600" />
               <h2 className="font-black text-slate-900">Přesná adresa{hasAddress ? '' : ' *'}</h2>
             </div>
             <p className="mb-3 text-sm text-slate-500">
-              {hasAddress
-                ? 'Adresa je vyplněná. Můžete ji ještě upravit, dokud nezaplatíte.'
-                : `Objednávka byla přijata. Doplňte přesnou adresu${hasDeposit ? ', kam má řemeslník dorazit — pak budete moci zaplatit.' : ', kam má řemeslník dorazit.'}`}
+              {jeV2Polozka && isModelB
+                ? (hasAddress
+                    ? 'Adresa výjezdu je vyplněná. Můžete ji ještě upravit, dokud nepotvrdíte termín a nezaplatíte.'
+                    : 'Kam má poskytovatel přijet? Začněte psát adresu a vyberte ji ze seznamu. Bez přesné adresy nejde termín výjezdu potvrdit.')
+                : hasAddress
+                  ? 'Adresa je vyplněná. Můžete ji ještě upravit, dokud nezaplatíte.'
+                  : `Objednávka byla přijata. Doplňte přesnou adresu${hasDeposit ? ', kam má řemeslník dorazit — pak budete moci zaplatit.' : ', kam má řemeslník dorazit.'}`}
             </p>
             <div className="space-y-2">
               <AddressInput
@@ -803,7 +857,8 @@ export default function OrderDetailClient({
         {/* ── PLATBA ZÁLOHY (jen zákazník, po přijetí) ───────── */}
         {/* isRefunded: u vrácené platby nemá smysl nabízet zaplacení — dřív se
             tenhle blok ukázal současně s hláškou „peníze jsme vrátili". */}
-        {isCustomer && hasDeposit && !isRefunded && !v2Rezervace && (order.status === 'prijato' || order.status === 'v_procesu') && (
+        {/* Nový model platí jen s domluveným termínem (začátek i konec okna) – bez něj se nabízí domluva. */}
+        {isCustomer && hasDeposit && !isRefunded && !v2Rezervace && (!jeV2Polozka || !!order.scheduled_at) && (order.status === 'prijato' || order.status === 'v_procesu') && (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             {platbaStav === 'uspech' && (
               <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">

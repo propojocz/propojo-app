@@ -70,6 +70,15 @@ Právní a produktová rozhodnutí se dělají mimo repo (claude.ai projekt Prop
     - délka navrženého termínu se řídí položkou, ne pevnými 60 minutami; když položka délku nemá, navrhnout řešení v plánu vrstvy 3,
   - kratší Stripe onboarding: při zakládání Standard účtu předvyplnit e-mail, telefon, IČO, název a adresu z ARES, odvětví (MCC) podle kategorie nabídky, web = veřejný profil na Propojo, popis podnikání z nabídky. Nejdřív ověřit v dokumentaci Stripe, co jde u Standard účtu předvyplnit.
 - Pořadí vrstev, technické korekce a parametry k potvrzení: konec `docs/model-v2.md`.
+- Co je právně potvrzené a co čeká na právničku: `docs/model-v2.md` §20. U OPEN – LEGAL držet hodnoty jako parametry v `lib/booking/policy.ts`.
+
+## Poznámky pro další vrstvy
+- Vrstva 6 (Model B), editor položky:
+  - u položky B nenabízet Rezervační zálohu; jediná platba je Cena výjezdu (`quote_fee`), a ta má být v editoru první a jasně pojmenovaná,
+  - lhůta „Nabídku dodám do“ musí mít i volbu „ihned na místě“,
+  - Doprava (rozhodnuto 28. 9. 2026, obě varianty v MVP): buď zahrnutá v Ceně výjezdu, nebo připočtená podle silniční vzdálenosti z adresy nabídky k zákazníkovi (Mapy.cz). Provider zadá „zdarma do X km, pak Y Kč za každý další km“. Výpočet na serveru z přesné adresy (korekce 5), zahrnutý do předautorizované Ceny výjezdu; zákazník před platbou vidí rozpad Cena výjezdu + doprava = celkem. Po předautorizaci se výpočet nemění. Ve vrstvě 2 jsou Kč/km jen skryté – nemazat.
+  - Cena výjezdu se do následné zakázky nikdy nezapočítává, provider nemá volbu (model §20).
+  - Stav „Zákazník nezastižen“: jen po validním check-inu, alespoň jeden pokus o kontakt, jednotná čekací doba 15 min (nenastavitelná providerem); Cena výjezdu včetně dopravy se pak nevrací (model §20).
 
 ## Před ostrým spuštěním (vypnutím údržby)
 - Hotové vrstvy 4 a 5 (refundy, no-show).

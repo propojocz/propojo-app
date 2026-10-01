@@ -52,7 +52,7 @@ export const BOOKING_ORDER_COLUMNS =
   'id, booking_state, customer_id, provider_id, slot_id, service_id, service_item_id, status, ' +
   'scheduled_at, scheduled_end, offer_kind, stripe_account_id, stripe_payment_intent_id, ' +
   'stripe_checkout_session_id, stripe_charge_id, charge_halere, application_fee_halere, ' +
-  'commission_base_halere, commission_vat_halere, vat_rate_bps, policy_snapshot, authorized_at, ' +
+  'commission_base_halere, commission_vat_halere, vat_rate_bps, policy_snapshot, authorized_at, confirmed_at, ' +
   'refunded_halere, hold_expires_at, state_changed_at, ' +
   'service_items(name, duration_minutes, buffer_minutes), services(title)'
 
@@ -79,6 +79,7 @@ export interface BookingOrder {
   vat_rate_bps: number | null
   policy_snapshot: unknown
   authorized_at: string | null
+  confirmed_at: string | null
   refunded_halere: number | null
   hold_expires_at: string | null
   state_changed_at: string | null
@@ -143,7 +144,8 @@ export async function applyTransition(
   if (!t.ok) return { ok: false }
 
   const directBooking = await isDirectBooking(db, order)
-  const mirror = legacyMirror(t.next, { directBooking, holdUntil: opts.holdUntil ?? null })
+  const captured = !!(opts.extra?.confirmed_at ?? order.confirmed_at)
+  const mirror = legacyMirror(t.next, { directBooking, holdUntil: opts.holdUntil ?? null, captured })
   const now = new Date().toISOString()
 
   const update: Record<string, unknown> = {
@@ -770,6 +772,32 @@ export async function releaseAuthorization(
     if (!released) return false
   }
   const r = await applyTransition(db, order, event, actor)
+  return r.ok
+}
+
+/**
+ * Zrušení rozpracované platby (zákazník ruší / poskytovatel odmítá) – nic nebylo předautorizováno.
+ * Ukončí checkout na účtu providera a uvolní termín. Když platba mezitím doběhne,
+ * handleAuthorized najde jiný stav a preautorizaci hned uvolní.
+ */
+export async function cancelPendingPayment(
+  db: Db,
+  order: BookingOrder,
+  by: 'customer' | 'provider',
+  actorId: string,
+): Promise<boolean> {
+  if (order.booking_state !== 'pending_payment') return false
+  // Nejdřív zavřít platební stránku, ať už nejde zaplatit (applyTransition ID session vynuluje).
+  if (order.stripe_checkout_session_id) {
+    await expireCheckoutIfOpen(order.stripe_account_id, order.stripe_checkout_session_id)
+  }
+  const r = await applyTransition(
+    db,
+    order,
+    by === 'customer' ? 'customer_cancelled' : 'provider_declined',
+    { type: by, id: actorId },
+    { payload: { phase: 'before_payment' } },
+  )
   return r.ok
 }
 

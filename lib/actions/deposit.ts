@@ -60,6 +60,15 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
   }
   if (!item) return { success: false, error: 'Tuto objednávku nelze v novém modelu rezervovat.' }
 
+  // Výjezd (B): bez přesné adresy se souřadnicemi nejde ověřit check-in (korekce 5).
+  if (item.offer_kind === 'B') {
+    const { data: addr } = await db.from('orders').select('location_lat, location_lng').eq('id', orderId).maybeSingle()
+    const a = addr as { location_lat: number | null; location_lng: number | null } | null
+    if (a?.location_lat == null || a?.location_lng == null) {
+      return { success: false, error: 'Nejdřív prosím doplňte přesnou adresu výjezdu (vyberte ji ze seznamu).' }
+    }
+  }
+
   const start = order.scheduled_at ? new Date(order.scheduled_at) : null
   const end = order.scheduled_end ? new Date(order.scheduled_end) : null
   const check = await checkNewBooking(db, { item, providerId: order.provider_id, start, end })
