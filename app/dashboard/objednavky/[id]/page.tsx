@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import OrderDetailClient from './OrderDetailClient'
 import BookingStateBadge from '@/components/ui/BookingStateBadge'
+import BookingProviderActions from '@/components/ui/BookingProviderActions'
+import { adminDb, syncCheckoutOnReturn } from '@/lib/booking/payments'
 import ReviewForm from '@/components/ui/ReviewForm'
 import TimeProposalPanel from '@/components/ui/TimeProposalPanel'
 import { getProposals } from '@/lib/actions/time-proposals'
@@ -109,14 +111,24 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
   // Návrat ze Stripe přes „zpět" nic automaticky neruší.
   // Zákazník může platbu zkusit znovu; jiný termín uvolní až explicitním tlačítkem.
 
+  const ORDER_SELECT = '*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee, location_type, address, address_lat, address_lng, address_public, phone), service_items(name, price, price_unit, deposit_amount, deposit_type, payment_model, duration_minutes, quote_fee, fee_mode, item_type, stock_mode, lead_time_days, pickup_mode, pickup_timing, offer_kind)'
+
   const { data: order, error } = await supabase
     .from('orders')
-    .select('*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee, location_type, address, address_lat, address_lng, address_public, phone), service_items(name, price, price_unit, deposit_amount, deposit_type, payment_model, duration_minutes, quote_fee, fee_mode, item_type, stock_mode, lead_time_days, pickup_mode, pickup_timing, offer_kind)')
+    .select(ORDER_SELECT)
     .eq('id', params.id)
     .single() as { data: OrderRow | null; error: any }
 
   if (error || !order) notFound()
   if (order.customer_id !== user.id && order.provider_id !== user.id) notFound()
+
+  // Model v2: po návratu ze Stripe se na stav platby zeptáme přímo Stripe – webhook mohl
+  // nedorazit nebo se zdržet. Rezervaci to posune jen podle skutečného stavu ve Stripe.
+  if (searchParams.platba === 'uspech' && (order as any).booking_state === 'pending_payment') {
+    await syncCheckoutOnReturn(adminDb(), order.id)
+    const { data: fresh } = await supabase.from('orders').select(ORDER_SELECT).eq('id', params.id).single()
+    if (fresh) Object.assign(order, fresh)
+  }
 
   const isProvider = order.provider_id === user.id
   const otherId = isProvider ? order.customer_id : order.provider_id
@@ -142,7 +154,12 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
   // Model v2: položka s typem nabídky. I výjezd (B) potřebuje termín = okno příjezdu (korekce 4).
   const v2OfferKind = ((order.service_items as any)?.offer_kind ?? null) as string | null
   const futureConfirmedTerm = !!order.scheduled_at && new Date(order.scheduled_at).getTime() > Date.now()
+  // Rezervace nového modelu s rozběhnutou nebo hotovou platbou: termín se tudy nemění
+  // (změna potvrzené rezervace má vlastní pravidla, model §10).
+  const v2BookingState = ((order as any).booking_state ?? null) as string | null
+  const v2PaymentStarted = v2BookingState !== null && v2BookingState !== 'payment_expired'
   const proposalFlowOpen =
+    !v2PaymentStarted &&
     order.status !== 'zruseno' &&
     order.status !== 'dokonceno' &&
     order.status !== 'ceka_potvrzeni' &&
@@ -211,7 +228,20 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
         state={(order as any).booking_state ?? null}
         isProvider={isProvider}
         confirmDeadlineAt={(order as any).confirm_deadline_at ?? null}
+        paymentReturned={searchParams.platba === 'uspech'}
+        authorizedAt={(order as any).authorized_at ?? null}
+        confirmedAt={(order as any).confirmed_at ?? null}
+        cancelReason={(order as any).cancel_reason ?? null}
       />
+
+      {isProvider && (order as any).booking_state === 'awaiting_confirmation' && (
+        <BookingProviderActions
+          orderId={order.id}
+          amountKc={Number((order as any).charge_halere ?? 0) / 100}
+          deadlineAt={(order as any).confirm_deadline_at ?? null}
+          paymentLabel={(order as any).offer_kind === 'B' ? 'Cena výjezdu' : 'Rezervační poplatek'}
+        />
+      )}
 
       {canReview && <ReviewForm orderId={order.id} />}
 

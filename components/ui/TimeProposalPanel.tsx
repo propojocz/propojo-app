@@ -558,7 +558,21 @@ export default function TimeProposalPanel({
       </p>
 
       <div className="space-y-2">
-        {proposals.map((p) => (
+        {proposals.map((p) => {
+          // Návrh, který už proběhl nebo začíná dřív než za minimální předstih, nejde přijmout ani zaplatit.
+          const prosly = new Date(p.starts_at).getTime() < Date.now() + BOOKING_POLICY.minLeadMinutes * 60_000
+          if (prosly) {
+            return (
+              <div key={p.id} className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left">
+                <span className="flex items-center gap-2 font-bold text-slate-400 line-through">
+                  <Clock className="h-4 w-4" />
+                  {fmtProposal(p)}
+                </span>
+                <span className="shrink-0 text-xs font-semibold text-slate-500">Už nejde vybrat</span>
+              </div>
+            )
+          }
+          return (
           <button
             key={p.id}
             type="button"
@@ -580,7 +594,8 @@ export default function TimeProposalPanel({
                   : 'Potvrdit'}
             </span>
           </button>
-        ))}
+          )
+        })}
       </div>
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}

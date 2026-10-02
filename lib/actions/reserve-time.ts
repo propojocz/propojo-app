@@ -197,14 +197,22 @@ export async function reserveTime(values: {
   // ── Souběh ─────────────────────────────────────────────────
   // Dva lidé mohli projít kontrolou ve stejnou vteřinu. Podíváme se, jestli
   // se nám s někým nepřekrývá termín — kdo byl dřív, ten platí.
-  const { data: clash } = await admin
+  // Nabídka se „samostatným kalendářem“ koliduje jen se svými termíny (stejně jako free-times).
+  let separateCalendar = false
+  try {
+    const { data: svc } = await admin.from('services').select('separate_calendar').eq('id', values.service_id).maybeSingle()
+    separateCalendar = (svc as { separate_calendar?: boolean } | null)?.separate_calendar === true
+  } catch { /* sloupec nemusí existovat */ }
+  let clashQuery = admin
     .from('orders')
     .select('id, created_at, booking_state, offer_kind, scheduled_end, deposit_status, hold_expires_at, service_items(buffer_minutes)')
     .eq('provider_id', card.provider_id)
     .neq('status', 'zruseno')
     .neq('id', order.id)
     .lt('scheduled_at', new Date(endMs).toISOString())
-    .gt('scheduled_end', new Date(start.getTime() - 24 * 3600_000).toISOString()) as { data: any[] | null }
+    .gt('scheduled_end', new Date(start.getTime() - 24 * 3600_000).toISOString())
+  if (separateCalendar) clashQuery = clashQuery.eq('service_id', values.service_id)
+  const { data: clash } = await clashQuery as { data: any[] | null }
 
   const live = (clash ?? []).filter((c) => {
     // Cizí rezervace s prošlým zámkem už termín nedrží.

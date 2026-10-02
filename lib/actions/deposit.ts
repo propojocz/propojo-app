@@ -77,7 +77,15 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
   // ── Je termín pořád volný? ──────────────────────────────────
   // Rezervace drží čas jen krátce; mezitím ho mohl zabrat někdo jiný.
   const ownEnd = end!.getTime() + Math.max(0, Number(item.buffer_minutes ?? 0)) * 60_000
-  const { data: kolize } = await db
+  // Nabídka se „samostatným kalendářem“ koliduje jen se svými termíny (stejně jako free-times).
+  let separateCalendar = false
+  if (order.service_id) {
+    try {
+      const { data: svc } = await db.from('services').select('separate_calendar').eq('id', order.service_id).maybeSingle()
+      separateCalendar = (svc as { separate_calendar?: boolean } | null)?.separate_calendar === true
+    } catch { /* sloupec nemusí existovat */ }
+  }
+  let kolizeQuery = db
     .from('orders')
     .select('id, booking_state, offer_kind, scheduled_at, scheduled_end, deposit_status, hold_expires_at, service_items(duration_minutes, buffer_minutes)')
     .eq('provider_id', order.provider_id)
@@ -85,6 +93,8 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
     .neq('id', orderId)
     .not('scheduled_at', 'is', null)
     .lt('scheduled_at', new Date(ownEnd).toISOString())
+  if (separateCalendar && order.service_id) kolizeQuery = kolizeQuery.eq('service_id', order.service_id)
+  const { data: kolize } = await kolizeQuery
   const ted = Date.now()
   const zive = ((kolize ?? []) as any[]).filter((o) => {
     // Cizí rozpracovaná platba s prošlým zámkem termín nedrží.

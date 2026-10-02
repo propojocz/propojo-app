@@ -1,6 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2, CreditCard, ShieldCheck, Clock, XCircle, Flag, AlertTriangle, ImagePlus, X, RotateCcw, Package } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import OrderStatusButton from '../OrderStatusButton'
@@ -8,6 +9,8 @@ import { sendOrderMessage, updateOrderStatus, setOrderAddress } from '@/lib/acti
 import { createDepositCheckout } from '@/lib/actions/deposit'
 import { releaseUnpaidReservation } from '@/lib/actions/reservation-release'
 import { cancelBeforePayment } from '@/lib/actions/booking'
+import ProviderCancelReason from '@/components/ui/ProviderCancelReason'
+import { BOOKING_POLICY } from '@/lib/booking/policy'
 import ConfirmCompletionButton from '@/components/ui/ConfirmCompletionButton'
 import ChatThread from '@/components/ui/ChatThread'
 import Avatar from '@/components/ui/Avatar'
@@ -17,6 +20,29 @@ import StornoPanel from '@/components/ui/StornoPanel'
 import { terminDlouze, datumCas } from '@/lib/format'
 import OrderTimeline from '@/components/ui/OrderTimeline'
 import { vyrobekStornoPodil } from '@/lib/product-storno'
+
+// Malé tlačítko „Kopírovat“ hned za adresou (do navigace, zprávy kolegovi…).
+function CopyAddressButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Prohlížeč schránku nepovolil – adresa jde označit ručně.
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      className="ml-2 inline-flex items-center rounded-lg border border-slate-200 bg-white px-2 py-0.5 align-middle text-xs font-semibold text-slate-600 transition hover:border-emerald-300 hover:text-emerald-700"
+    >
+      {copied ? 'Zkopírováno ✓' : 'Kopírovat'}
+    </button>
+  )
+}
 
 type ServiceLite = {
   id: string
@@ -157,6 +183,7 @@ export default function OrderDetailClient({
   platbaStav?: string | null
   hasTimeProposals?: boolean
 }) {
+  const router = useRouter()
   const [messages, setMessages] = useState<MessageRow[]>(initialMessages)
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
@@ -169,8 +196,6 @@ export default function OrderDetailClient({
   const [switchErr, setSwitchErr] = useState('')
   const [cancelBusy, setCancelBusy] = useState(false)
   const [cancelErr, setCancelErr] = useState('')
-  const [providerCancelBusy, setProviderCancelBusy] = useState(false)
-  const [providerCancelErr, setProviderCancelErr] = useState('')
   const [changeBusy, setChangeBusy] = useState(false)
   const [changeSent, setChangeSent] = useState(false)
   const [changeErr, setChangeErr] = useState('')
@@ -266,6 +291,9 @@ export default function OrderDetailClient({
   // Objednávka položky nového modelu (má typ nabídky) – platí se Rezervační poplatek / Cena výjezdu
   // Typ se na objednávku zapíše až při platbě – do té doby rozhoduje typ položky.
   const jeV2Polozka = !!(order as any).offer_kind || !!(order as any).service_items?.offer_kind || bookingState !== null
+  // Termín, který už proběhl nebo začíná dřív než za minimální předstih, se nedá zaplatit (korekce 3).
+  const terminNelzeZaplatit = jeV2Polozka && !!order.scheduled_at
+    && new Date(order.scheduled_at).getTime() < Date.now() + BOOKING_POLICY.minLeadMinutes * 60_000
 
   const cekaNaUzavreniPoskytovatelem = isCustomer
     && bookingState === null
@@ -310,6 +338,25 @@ export default function OrderDetailClient({
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages.length])
+
+  // Model v2: zákazník se vrátil ze Stripe, ale potvrzení platby (webhook) ještě nedorazilo.
+  // Místo nové výzvy k platbě čekáme a stránku obnovujeme, dokud stav nepřejde dál (max. cca 1 min).
+  const platbaSeZpracovava = isCustomer && jeV2Polozka && bookingState === 'pending_payment' && platbaStav === 'uspech'
+  const [zpracovaniDlouho, setZpracovaniDlouho] = useState(false)
+  useEffect(() => {
+    if (!platbaSeZpracovava) return
+    let pokusu = 0
+    const timer = setInterval(() => {
+      pokusu += 1
+      if (pokusu > 20) {
+        clearInterval(timer)
+        setZpracovaniDlouho(true)
+        return
+      }
+      router.refresh()
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [platbaSeZpracovava, router])
 
   const handleSend = async () => {
     const content = text.trim()
@@ -382,7 +429,11 @@ export default function OrderDetailClient({
   }
 
   const handleCustomerCancel = async () => {
-    const zprava = stornoRezim && stornoCastka > 0
+    const zprava = jeV2Polozka
+      ? (bookingState === 'awaiting_confirmation'
+          ? 'Opravdu rezervaci zrušit? Blokace na kartě se uvolní a nic se nestrhne.'
+          : 'Opravdu chcete objednávku zrušit? Nic vám nebylo strženo.')
+      : stornoRezim && stornoCastka > 0
       ? `Opravdu zrušit? Poskytovatel si nechá storno poplatek ${stornoCastka.toLocaleString('cs-CZ')} Kč.`
       : jeVyrobekNaObjednavku && vyrobekStornoCastka > 0
         ? `Opravdu zrušit? Blízko termínu dodání si poskytovatel nechá ${vyrobekStornoCastka.toLocaleString('cs-CZ')} Kč.`
@@ -401,13 +452,10 @@ export default function OrderDetailClient({
   }
 
   // Poskytovatel ruší objednávku nového modelu, dokud ještě nic nebylo předautorizováno.
-  const handleProviderCancel = async () => {
-    if (!confirm('Opravdu objednávku zrušit? Zákazníkovi dáme vědět, nic mu nebylo strženo.')) return
-    setProviderCancelBusy(true)
-    setProviderCancelErr('')
-    const res = await cancelBeforePayment(order.id)
-    if (!res.success) setProviderCancelErr(res.error)
-    setProviderCancelBusy(false)
+  const handleProviderCancel = async (reason: string) => {
+    const res = await cancelBeforePayment(order.id, reason)
+    if (res.success) router.refresh()
+    return res
   }
 
   const handleRequestTimeChange = async () => {
@@ -439,7 +487,7 @@ export default function OrderDetailClient({
   // Nový model: zákazník ruší bez peněz až do předautorizace (i během rozpracované platby).
   // Po předautorizaci se ruší jinak (uvolnění / refund) – vrstvy 3 a 4.
   const canCustomerCancel = isCustomer
-    && (jeV2Polozka ? v2Platba : !v2Aktivni)
+    && (jeV2Polozka ? (v2Platba || bookingState === 'awaiting_confirmation') : !v2Aktivni)
     && ['cekajici', 'prijato', 'v_procesu'].includes(order.status)
   // Totéž pro poskytovatele ve fázi „termín přijat, čeká na platbu“ (dřív tam neměl žádnou akci).
   const canProviderCancelBeforePayment = isProvider && jeV2Polozka && v2Platba && order.status === 'prijato'
@@ -656,7 +704,10 @@ export default function OrderDetailClient({
                     // (nebo když ji poskytovatel nezveřejnil) jen město.
                     <>
                       {service?.address && order.status !== 'cekajici' ? (
-                        <p className="font-medium text-slate-800">{service.address}</p>
+                        <p className="font-medium text-slate-800">
+                          {service.address}
+                          <CopyAddressButton text={service.address} />
+                        </p>
                       ) : (
                         <p className="font-medium text-slate-800">
                           {service?.city ?? '—'}
@@ -669,7 +720,12 @@ export default function OrderDetailClient({
                     </>
                   )
                   : order.location_address && order.status !== 'cekajici'
-                    ? <p className="font-medium text-slate-800">{order.location_address}</p>
+                    ? (
+                      <p className="font-medium text-slate-800">
+                        {order.location_address}
+                        <CopyAddressButton text={order.location_address} />
+                      </p>
+                    )
                     : <p className="font-medium text-slate-800">{order.location_city ?? '—'}{order.status === 'cekajici' ? '' : ' (přesná adresa se doplní)'}</p>}
               </div>
             </div>
@@ -705,16 +761,12 @@ export default function OrderDetailClient({
                   ? 'Zákazník termín přijal a teď dokončuje platbu. Rezervaci potvrdíte, až bude platba předautorizovaná.'
                   : 'Termín zatím není domluvený. Navrhněte ho zákazníkovi výše.'}
               </p>
-              <button
-                type="button"
-                onClick={handleProviderCancel}
-                disabled={providerCancelBusy}
-                className="mt-2 flex items-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-60"
-              >
-                {providerCancelBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
-                Zrušit objednávku
-              </button>
-              {providerCancelErr && <p className="mt-2 text-sm text-red-600">{providerCancelErr}</p>}
+              <ProviderCancelReason
+                buttonLabel="Zrušit objednávku"
+                submitLabel="Zrušit a dát vědět zákazníkovi"
+                intro="Zákazník zatím nic nezaplatil. Případná rozpracovaná platba se ukončí."
+                onSubmit={handleProviderCancel}
+              />
             </div>
           )}
 
@@ -858,7 +910,35 @@ export default function OrderDetailClient({
         {/* isRefunded: u vrácené platby nemá smysl nabízet zaplacení — dřív se
             tenhle blok ukázal současně s hláškou „peníze jsme vrátili". */}
         {/* Nový model platí jen s domluveným termínem (začátek i konec okna) – bez něj se nabízí domluva. */}
-        {isCustomer && hasDeposit && !isRefunded && !v2Rezervace && (!jeV2Polozka || !!order.scheduled_at) && (order.status === 'prijato' || order.status === 'v_procesu') && (
+        {platbaSeZpracovava && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
+            <div className="flex items-start gap-3">
+              <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-amber-600" />
+              <div>
+                <p className="font-bold text-slate-900">Platba se zpracovává</p>
+                <p className="mt-1 text-sm leading-relaxed text-slate-600">
+                  Čekáme, až nám Stripe platbu potvrdí. Obvykle to trvá pár sekund a stránka se obnoví sama.
+                  Nic dalšího neplaťte.
+                </p>
+                {zpracovaniDlouho && (
+                  <p className="mt-2 text-sm leading-relaxed text-amber-800">
+                    Potvrzení se zdržuje. Zkuste stránku obnovit za chvíli. Pokud jste platbu dokončili,
+                    peníze se vám dvakrát nestrhnou.
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => router.refresh()}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100"
+                >
+                  <RotateCcw className="h-4 w-4" /> Obnovit stav
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isCustomer && hasDeposit && !isRefunded && !v2Rezervace && !platbaSeZpracovava && (!jeV2Polozka || !!order.scheduled_at) && (order.status === 'prijato' || order.status === 'v_procesu') && (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             {platbaStav === 'uspech' && (
               <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
@@ -929,7 +1009,31 @@ export default function OrderDetailClient({
                   </>
                 )}
 
-                {atCustomer && !hasAddress ? (
+                {!jeV2Polozka ? (
+                  // Položka bez typu nabídky (starý model): nový platební tok ji nepřijme.
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-800">
+                    Tuto objednávku už nejde zaplatit přes Propojo, protože nabídka je ve starém formátu.
+                    Zrušte ji prosím níže a objednejte znovu, nebo se domluvte s poskytovatelem ve zprávách.
+                  </div>
+                ) : terminNelzeZaplatit ? (
+                  // Termín proběhl nebo začíná dřív než za minimální předstih – platba by nedoběhla včas.
+                  <div>
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-800">
+                      Tento termín už nejde zaplatit – {new Date(order.scheduled_at!).getTime() <= Date.now() ? 'už proběhl' : `začíná za méně než ${BOOKING_POLICY.minLeadMinutes} minut`}.
+                      Vyberte prosím jiný termín, nic vám nebylo strženo.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleChooseDifferentTerm}
+                      disabled={switchBusy}
+                      className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
+                    >
+                      {switchBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                      Vybrat jiný termín
+                    </button>
+                    {switchErr && <p className="mt-2 text-center text-sm text-red-600">{switchErr}</p>}
+                  </div>
+                ) : atCustomer && !hasAddress ? (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                     Nejdříve prosím vyplňte přesnou adresu výše — pak budete moci zaplatit.
                   </div>
@@ -979,9 +1083,14 @@ export default function OrderDetailClient({
               className="flex items-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition-all hover:bg-red-50 disabled:opacity-60"
             >
               {cancelBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
-              Zrušit objednávku
+              {bookingState === 'awaiting_confirmation' ? 'Zrušit rezervaci' : 'Zrušit objednávku'}
             </button>
-            {isPaid && (
+            {bookingState === 'awaiting_confirmation' && (
+              <p className="mt-2 text-xs text-slate-400">
+                Poskytovatel rezervaci ještě nepotvrdil. Při zrušení se blokace na kartě uvolní a nic se nestrhne.
+              </p>
+            )}
+            {isPaid && !jeV2Polozka && (
               stornoRezim && stornoCastka > 0 ? (
                 <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
                   <strong>Pozor na storno poplatek.</strong> Při zrušení si poskytovatel nechá{' '}

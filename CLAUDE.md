@@ -57,7 +57,8 @@ Právní a produktová rozhodnutí se dělají mimo repo (claude.ai projekt Prop
 
 ## Stav refaktoru
 - Vrstva 1: `lib/booking/` (policy, commission, state, rules) + `docs/sql/rezervace-vrstva1.sql` – hotové, SQL spuštěno v Supabase 25. 9. 2026. Kód zatím nepřipojený.
-- Vrstva 2 (rozpracovaná): Stripe Connect Standard + Direct Charges + manual capture, webhook z připojených účtů.
+- Vrstva 2: Stripe Connect Standard + Direct Charges + manual capture, webhook z připojených účtů, okno příjezdu u výjezdu, domluvený termín, zrušení před platbou, povinná adresa u výjezdu – hotové a ručně otestované 28. 9. – 1. 10. 2026 (Test mode). Potvrzení zatím jen ve Stripe Dashboardu.
+- Vrstva 3 (další): 3a tlačítka Potvrdit / Odmítnout pro providera + zrušení zákazníkem před potvrzením; 3b krokový průvodce před platbou (termín → adresa předvyplněná a potvrzená → rekapitulace s kontaktem a souhlasem → platba); 3g nadcházející potvrzené rezervace: provider výsuvný přehled + přidání do kalendáře, zákazník lišta „Dorazte …“ + přidání do kalendáře (jen `booking_state = confirmed`).
 - Do `main` až s hotovou vrstvou 3, která musí obsahovat:
   - UI potvrzení/odmítnutí providerem + hlídání 48h lhůty,
   - zákazník nikde (seznam objednávek, e-maily, notifikace) nevidí Přijato/Potvrzeno před úspěšným capture – vše se řídí `booking_state`,
@@ -73,6 +74,11 @@ Právní a produktová rozhodnutí se dělají mimo repo (claude.ai projekt Prop
 - Co je právně potvrzené a co čeká na právničku: `docs/model-v2.md` §20. U OPEN – LEGAL držet hodnoty jako parametry v `lib/booking/policy.ts`.
 
 ## Poznámky pro další vrstvy
+- Otevřené rozhodnutí (2. 10. 2026, mimo model v2 – nevymýšlet bez rozhodnutí Mateje a právničky):
+  - Tým / pracovníci: provider chce přijmout souběžnou zakázku, protože ji udělá kolega („mám na to pracovníka“). Dnes kolize hlídá společný kalendář, výjimkou je jen nastavení „samostatný kalendář“ u nabídky.
+  - Sdílení potvrzené zakázky s kolegou / známým: předání údajů zákazníka třetí osobě = GDPR (právní titul, Privacy Policy). Varianta od Mateje: provider pošle kolegovi odkaz na Propojo, kolega musí projít aspoň registrací e-mailem, teprve pak zakázku uvidí (růst platformy + kolega přijme podmínky Propoja). Ani registrace ale nenahrazuje právní titul k předání údajů.
+  - Pro kolegu na celou kartu už existuje přepínač „Tuto kartu obsluhuje někdo jiný“ (`services.separate_calendar`, stránka dostupnosti karty).
+- Drobnost: rezervace z vypsaného okna (`slots.ts`) kontroluje kolize přes celý kalendář providera, „samostatný kalendář“ nerespektuje.
 - Vrstva 6 (Model B), editor položky:
   - u položky B nenabízet Rezervační zálohu; jediná platba je Cena výjezdu (`quote_fee`), a ta má být v editoru první a jasně pojmenovaná,
   - lhůta „Nabídku dodám do“ musí mít i volbu „ihned na místě“,

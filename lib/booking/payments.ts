@@ -52,7 +52,7 @@ export const BOOKING_ORDER_COLUMNS =
   'id, booking_state, customer_id, provider_id, slot_id, service_id, service_item_id, status, ' +
   'scheduled_at, scheduled_end, offer_kind, stripe_account_id, stripe_payment_intent_id, ' +
   'stripe_checkout_session_id, stripe_charge_id, charge_halere, application_fee_halere, ' +
-  'commission_base_halere, commission_vat_halere, vat_rate_bps, policy_snapshot, authorized_at, confirmed_at, ' +
+  'commission_base_halere, commission_vat_halere, vat_rate_bps, policy_snapshot, authorized_at, confirmed_at, confirm_deadline_at, ' +
   'refunded_halere, hold_expires_at, state_changed_at, ' +
   'service_items(name, duration_minutes, buffer_minutes), services(title)'
 
@@ -80,6 +80,7 @@ export interface BookingOrder {
   policy_snapshot: unknown
   authorized_at: string | null
   confirmed_at: string | null
+  confirm_deadline_at: string | null
   refunded_halere: number | null
   hold_expires_at: string | null
   state_changed_at: string | null
@@ -884,6 +885,46 @@ export async function handleDispute(db: Db, dispute: Stripe.Dispute) {
  * Běží v denním cronu. Nikdy neruší objednávku, ke které existuje autorizace:
  * stav se vždy nejdřív ověří ve Stripe.
  */
+/**
+ * Dořeší rozpracovaný checkout podle skutečného stavu ve Stripe (webhook nemusel dorazit).
+ * Vrací true, když se stav objednávky posunul. Nikdy nic neruší bez potvrzení ze Stripe.
+ */
+async function syncCheckoutFromStripe(db: Db, order: BookingOrder): Promise<boolean> {
+  if (order.booking_state !== 'pending_payment') return false
+  if (!order.stripe_account_id || !order.stripe_checkout_session_id) return false
+  const opts = { stripeAccount: order.stripe_account_id }
+  const session = await stripe.checkout.sessions.retrieve(order.stripe_checkout_session_id, undefined, opts)
+  if (session.status === 'complete') {
+    const id = piId(session.payment_intent as string | Stripe.PaymentIntent | null)
+    if (!id) return false
+    const pi = await stripe.paymentIntents.retrieve(id, undefined, opts)
+    await handleAuthorized(db, order.stripe_account_id, pi, session.id)
+    return true
+  }
+  if (session.status === 'expired') {
+    await handleCheckoutExpired(db, session)
+    return true
+  }
+  if (session.status === 'open' && (session.expires_at ?? 0) * 1000 < Date.now()) {
+    await stripe.checkout.sessions.expire(session.id, undefined, opts)
+  }
+  return false
+}
+
+/**
+ * Zákazník se vrátil ze Stripe (?platba=uspech): zeptat se Stripe hned, nečekat jen na webhook.
+ * Stejná logika jako záchranný cron, opakované volání nic nezdvojí.
+ */
+export async function syncCheckoutOnReturn(db: Db, orderId: string): Promise<void> {
+  const order = await loadBookingOrder(db, orderId)
+  if (!order || order.booking_state !== 'pending_payment') return
+  try {
+    await syncCheckoutFromStripe(db, order)
+  } catch (err) {
+    console.error('[booking] ověření platby po návratu ze Stripe', orderId, err)
+  }
+}
+
 export async function rescueBookings(db: Db): Promise<{ checked: number; fixed: number; failed: number }> {
   const now = Date.now()
   let checked = 0
@@ -901,22 +942,7 @@ export async function rescueBookings(db: Db): Promise<{ checked: number; fixed: 
   for (const order of (pending ?? []) as unknown as BookingOrder[]) {
     checked++
     try {
-      if (!order.stripe_account_id || !order.stripe_checkout_session_id) continue
-      const opts = { stripeAccount: order.stripe_account_id }
-      const session = await stripe.checkout.sessions.retrieve(order.stripe_checkout_session_id, undefined, opts)
-      if (session.status === 'complete') {
-        const id = piId(session.payment_intent as string | Stripe.PaymentIntent | null)
-        if (id) {
-          const pi = await stripe.paymentIntents.retrieve(id, undefined, opts)
-          await handleAuthorized(db, order.stripe_account_id, pi, session.id)
-          fixed++
-        }
-      } else if (session.status === 'expired') {
-        await handleCheckoutExpired(db, session)
-        fixed++
-      } else if (session.status === 'open' && (session.expires_at ?? 0) * 1000 < now) {
-        await stripe.checkout.sessions.expire(session.id, undefined, opts)
-      }
+      if (await syncCheckoutFromStripe(db, order)) fixed++
     } catch (err) {
       console.error('[booking] záchrana checkoutu', order.id, err)
       failed++

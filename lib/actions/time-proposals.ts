@@ -50,6 +50,58 @@ function getAdminClient() {
   )
 }
 
+/**
+ * První objednávka poskytovatele, která se kryje s intervalem [startMs, endMs).
+ * Kalendář je společný pro všechny nabídky poskytovatele – jeden člověk nemůže být na dvou místech.
+ * Rozpracovaná platba s prošlým zámkem čas nedrží. Starší objednávky bez scheduled_end
+ * dopočítáme z délky úkonu; u nového modelu se přičítá pauza za úkonem.
+ */
+async function findProviderClash(
+  admin: ReturnType<typeof getAdminClient>,
+  providerId: string,
+  excludeOrderId: string,
+  startMs: number,
+  endMs: number,
+  /** Nabídka objednávky – když má „samostatný kalendář“, kolidují jen její vlastní termíny (jako ve free-times). */
+  serviceId?: string | null,
+): Promise<{ name: string; startIso: string; endIso: string } | null> {
+  let separateCalendar = false
+  if (serviceId) {
+    try {
+      const { data: svc } = await admin.from('services').select('separate_calendar').eq('id', serviceId).maybeSingle()
+      separateCalendar = (svc as { separate_calendar?: boolean } | null)?.separate_calendar === true
+    } catch {
+      // Sloupec nemusí existovat – pak platí společný kalendář.
+    }
+  }
+
+  let query = admin
+    .from('orders')
+    .select('id, booking_state, offer_kind, scheduled_at, scheduled_end, deposit_status, hold_expires_at, service_items(name, duration_minutes, buffer_minutes), services(title)')
+    .eq('provider_id', providerId)
+    .neq('status', 'zruseno')
+    .neq('id', excludeOrderId)
+    .not('scheduled_at', 'is', null)
+    .lt('scheduled_at', new Date(endMs).toISOString())
+  if (separateCalendar && serviceId) query = query.eq('service_id', serviceId)
+  const { data: rows } = await query as { data: any[] | null }
+
+  for (const c of rows ?? []) {
+    if (c.deposit_status === 'pending' && c.hold_expires_at && new Date(c.hold_expires_at).getTime() <= Date.now()) continue
+    const s = new Date(c.scheduled_at).getTime()
+    const fallbackDur = Number(c.service_items?.duration_minutes ?? 60) || 60
+    const e = (c.scheduled_end ? new Date(c.scheduled_end).getTime() : s + fallbackDur * 60_000) + bookingBufferMs(c)
+    if (startMs < e && endMs > s) {
+      return {
+        name: c.service_items?.name || c.services?.title || 'jiná rezervace',
+        startIso: new Date(s).toISOString(),
+        endIso: new Date(c.scheduled_end ? new Date(c.scheduled_end).getTime() : s + fallbackDur * 60_000).toISOString(),
+      }
+    }
+  }
+  return null
+}
+
 async function loadOrder(orderId: string) {
   const admin = getAdminClient()
   const { data } = await admin
@@ -199,6 +251,28 @@ export async function proposeTimes(
   }
 
   const admin = getAdminClient()
+
+  // Poskytovatel nesmí nabídnout čas, kdy už má jinou rezervaci (kontrola i při přijetí zákazníkem).
+  const ownBufferMs = order.service_items?.offer_kind
+    ? Math.max(0, Number(order.service_items?.buffer_minutes ?? 0)) * 60_000
+    : 0
+  for (const r of rows) {
+    const clash = await findProviderClash(
+      admin,
+      order.provider_id,
+      orderId,
+      new Date(r.starts_at).getTime(),
+      new Date(r.ends_at).getTime() + ownBufferMs,
+      order.service_id,
+    )
+    if (clash) {
+      return {
+        success: false,
+        error: `Termín ${fmtWhen(r.starts_at)} se kryje s vaší rezervací „${clash.name}“ (${fmtWhen(clash.startIso)}–${cas(clash.endIso)}). Vyberte prosím jiný čas.`,
+      }
+    }
+  }
+
   await admin.from('order_time_proposals').delete().eq('order_id', orderId)
 
   const { error } = await (admin.from('order_time_proposals') as any).insert(rows)
@@ -320,33 +394,17 @@ export async function acceptProposal(orderId: string, start: string): Promise<Ac
   }
   const ownBufferMs = v2Charge ? Math.max(0, Number(order.service_items?.buffer_minutes ?? 0)) * 60_000 : 0
 
-  // Nekoliduje termín s něčím, co poskytovatel mezitím dostal? Některé starší
-  // objednávky nemají scheduled_end, proto konec dopočítáme z délky úkonu.
-  const { data: clashRows } = await admin
-    .from('orders')
-    .select('id, booking_state, offer_kind, scheduled_at, scheduled_end, deposit_status, hold_expires_at, service_items(duration_minutes, buffer_minutes)')
-    .eq('provider_id', order.provider_id)
-    .neq('status', 'zruseno')
-    .neq('id', orderId)
-    .not('scheduled_at', 'is', null)
-    .lt('scheduled_at', new Date(new Date(proposal.ends_at).getTime() + ownBufferMs).toISOString()) as { data: any[] | null }
-
-  const proposalStartMs = new Date(proposal.starts_at).getTime()
-  const proposalEndMs = new Date(proposal.ends_at).getTime() + ownBufferMs
-  const liveClash = (clashRows ?? []).some((c) => {
-    if (c.deposit_status === 'pending' && c.hold_expires_at) {
-      if (new Date(c.hold_expires_at).getTime() <= Date.now()) return false
-    }
-    const startMs = new Date(c.scheduled_at).getTime()
-    const fallbackDur = Number(c.service_items?.duration_minutes ?? 60) || 60
-    const endMs = (c.scheduled_end
-      ? new Date(c.scheduled_end).getTime()
-      : startMs + fallbackDur * 60_000) + bookingBufferMs(c)
-    return proposalStartMs < endMs && proposalEndMs > startMs
-  })
-
-  if (liveClash) {
-    return { success: false, error: 'Tento termín mezitím obsadil někdo jiný. Požádejte poskytovatele o nový.' }
+  // Nekoliduje termín s jinou rezervací poskytovatele (sdílený kalendář všech jeho nabídek)?
+  const clash = await findProviderClash(
+    admin,
+    order.provider_id,
+    orderId,
+    new Date(proposal.starts_at).getTime(),
+    new Date(proposal.ends_at).getTime() + ownBufferMs,
+    order.service_id,
+  )
+  if (clash) {
+    return { success: false, error: 'Tento termín už není volný. Požádejte prosím poskytovatele o jiný.' }
   }
 
   const needsPayment = v2Charge !== null
