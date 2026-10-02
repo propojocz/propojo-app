@@ -246,8 +246,28 @@ Pravidlo pro vývoj:
 11. Kontakty v rekapitulaci, anti-bypass formulace.
 12. Trust Ramp, parametry řazení, sankční stupně (P2B).
 13. GDPR – účely, tituly a doby uchování evidovaných údajů.
+14. HANDOFF-LEGAL-001 – zákazníkem schválená změna poskytovatele (odesláno právničce 2. 10. 2026):
+    - GDPR právní titul pro zpřístupnění údajů novému providerovi,
+    - zda Privacy Policy uvádí schválené náhradní providery jako kategorii příjemců,
+    - jaké údaje smí navržený provider vidět před schválením zákazníkem,
+    - zda jde o ukončení původní + vznik nové Rezervační smlouvy (ne převod smlouvy),
+    - zda původnímu providerovi vzniká odpovědnost za doporučeného kolegu,
+    - platební / refundový režim, když původní rezervace už byla captured,
+    - zachování nebo odpuštění původní provize při schváleném handoffu.
 
 ### ROZHODNUTO MATEJEM, ALE LIŠÍ SE OD ODESLANÉHO PODKLADU / VOP 4.x
 - Cena výjezdu se do následné zakázky NIKDY nezapočítává, poskytovatel nemá volbu (28. 9. 2026). Odeslaný podklad (bod 8) a VOP 11.6 / 12.7 zatím počítají s volbou poskytovatele. Implementovat „nikdy“, právničku o změně informovat.
 - Zákazník nezastižen: jen po validním check-inu, alespoň jeden pokus o kontakt, jednotná čekací doba 15 min; Cena výjezdu včetně dopravy se pak nevrací (28. 9. 2026). V odeslaném podkladu není – doplnit právničce.
 - Doprava u Modelu B: zahrnutá v ceně, nebo připočtená podle km (28. 9. 2026). Nutné promítnout do informací před objednáním.
+
+### HANDOFF-001 – zákazníkem schválená změna poskytovatele (pracovní směr, LAWYER_PENDING, NE LOCKED)
+Rozhodnuto Matejem 2. 10. 2026, čeká na HANDOFF-LEGAL-001 (OPEN – LEGAL bod 14). Neimplementovat jako finální logiku.
+- Situace: původní provider má Rezervaci a zjistí, že ji nesplní. Místo zrušení může navrhnout jiného registrovaného providera. O změně vždy rozhoduje zákazník.
+- Pracovní směr: původní Rezervace skončí podle svého platebního stavu → zákazník výslovně schválí nového providera → vznikne nová Rezervace s novým platebním cyklem na Stripe účtu nového providera. Existující Rezervace ani platba se mezi providery NEPŘEVÁDÍ (Direct Charges, samostatné connected accounty).
+- Navržený provider musí být plně onboardovaný (vlastní Stripe Standard účet) a potvrzuje jen „Chci zakázku převzít“.
+- Před schválením zákazníkem dostane jen: typ práce, termín / okno, obec nebo přibližnou lokalitu, Rezervační poplatek / Cenu výjezdu. Nikdy jméno, telefon, e-mail ani přesnou adresu zákazníka.
+- Zákazník uvidí profil nového providera. CTA „Souhlasím se změnou poskytovatele“, text: „Potvrzením bude původní rezervace nahrazena novou rezervací u [jméno]. Novému poskytovateli budou po potvrzení zpřístupněny údaje potřebné k vyřízení rezervace.“ CTA „Souhlasím s předáním osobních údajů“ nepoužívat, dokud právnička nepotvrdí souhlas jako právní titul.
+- Zákazník odmítne → původní Rezervace beze změny (provider ji může zrušit standardním flow). Přijme → nová Rezervace s identitou providera, cenou a povinnou rekapitulací před platbou; přesnou adresu a kontakt nový provider uvidí až potom.
+- Otevřené: postup u již captured původní rezervace; druhá application fee vs. výjimka z pravidla, že provize původní Rezervace při provider cancellation zůstává.
+- Stará handoff logika v kódu se nepoužívá a neobnovuje.
+- Po odpovědi právničky: aktualizovat tento bod a bod 14 OPEN – LEGAL, doplnit stavový model, rozepsat scénáře HANDOFF-* (`docs/bulletproof/SCENARIOS.md`), teprve potom implementační plán.
