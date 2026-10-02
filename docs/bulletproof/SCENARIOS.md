@@ -9,8 +9,9 @@ se doplní v bulletproof kroku – včetně ručních testů vrstvy 2 a 3a (28. 
 
 ## HANDOFF – zákazníkem schválená změna poskytovatele
 
-Rezervovaná rodina. Celá je BLOCKED do odpovědi právničky (model §20, OPEN – LEGAL bod 14 a HANDOFF-001).
-Očekávané výsledky se doplní až po stanovisku; do té doby se nic neimplementuje ani netestuje.
+Rezervovaná rodina, MIMO MVP (stanovisko právničky 2. 10. 2026, model §20 HANDOFF-001 a OPEN – LEGAL bod 14).
+Celá zůstává BLOCKED, dokud se k funkci po stabilizaci základního transakčního modelu nevrátíme.
+Stav LAWYER_PENDING u řádků znamená: otázky se znovu otevřou až s návratem k funkci.
 
 | ID | scénář | očekávaný výsledek | stav | test | model § | priorita |
 |---|---|---|---|---|---|---|

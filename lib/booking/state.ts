@@ -24,7 +24,7 @@ export const BOOKING_STATES = [
 
 export type BookingState = (typeof BOOKING_STATES)[number]
 
-// HANDOFF-001 (LAWYER_PENDING, model §20): zákazníkem schválená změna poskytovatele.
+// HANDOFF-001 (MIMO MVP podle právničky 2. 10. 2026, model §20): zákazníkem schválená změna poskytovatele.
 // Pravděpodobně bude potřeba přechodné stavy, např. handoff_proposed,
 // replacement_provider_interested, customer_handoff_pending. Pracovní směr je ukončit
 // původní Rezervaci a založit novou (nic se mezi providery nepřevádí). Stavy ani přechody

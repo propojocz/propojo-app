@@ -246,7 +246,10 @@ Pravidlo pro vývoj:
 11. Kontakty v rekapitulaci, anti-bypass formulace.
 12. Trust Ramp, parametry řazení, sankční stupně (P2B).
 13. GDPR – účely, tituly a doby uchování evidovaných údajů.
-14. HANDOFF-LEGAL-001 – zákazníkem schválená změna poskytovatele (odesláno právničce 2. 10. 2026):
+14. HANDOFF-LEGAL-001 – zákazníkem schválená změna poskytovatele (odesláno právničce 2. 10. 2026).
+    UZAVŘENO PRO MVP (právnička, 2. 10. 2026): princip není nemožný, ale právně i technicky by vyžadoval
+    složitý proces, zejména u již zaplacených rezervací. Pro MVP se neimplementuje; otázky níže se otevřou
+    až po stabilizaci základního transakčního modelu.
     - GDPR právní titul pro zpřístupnění údajů novému providerovi,
     - zda Privacy Policy uvádí schválené náhradní providery jako kategorii příjemců,
     - jaké údaje smí navržený provider vidět před schválením zákazníkem,
@@ -260,8 +263,10 @@ Pravidlo pro vývoj:
 - Zákazník nezastižen: jen po validním check-inu, alespoň jeden pokus o kontakt, jednotná čekací doba 15 min; Cena výjezdu včetně dopravy se pak nevrací (28. 9. 2026). V odeslaném podkladu není – doplnit právničce.
 - Doprava u Modelu B: zahrnutá v ceně, nebo připočtená podle km (28. 9. 2026). Nutné promítnout do informací před objednáním.
 
-### HANDOFF-001 – zákazníkem schválená změna poskytovatele (pracovní směr, LAWYER_PENDING, NE LOCKED)
-Rozhodnuto Matejem 2. 10. 2026, čeká na HANDOFF-LEGAL-001 (OPEN – LEGAL bod 14). Neimplementovat jako finální logiku.
+### HANDOFF-001 – zákazníkem schválená změna poskytovatele (MIMO MVP, odloženo)
+Stanovisko právničky 2. 10. 2026: pro MVP se neimplementuje, vrátit se k tomu až po stabilizaci základního
+transakčního modelu (OPEN – LEGAL bod 14). Do té doby nic neimplementovat ani nepřipravovat v kódu.
+Pracovní směr níže zůstává jen jako výchozí bod pro budoucí návrh.
 - Situace: původní provider má Rezervaci a zjistí, že ji nesplní. Místo zrušení může navrhnout jiného registrovaného providera. O změně vždy rozhoduje zákazník.
 - Pracovní směr: původní Rezervace skončí podle svého platebního stavu → zákazník výslovně schválí nového providera → vznikne nová Rezervace s novým platebním cyklem na Stripe účtu nového providera. Existující Rezervace ani platba se mezi providery NEPŘEVÁDÍ (Direct Charges, samostatné connected accounty).
 - Navržený provider musí být plně onboardovaný (vlastní Stripe Standard účet) a potvrzuje jen „Chci zakázku převzít“.
