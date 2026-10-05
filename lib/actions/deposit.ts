@@ -10,6 +10,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { stripe } from '@/lib/stripe'
 import { policySnapshot } from '@/lib/booking/policy'
+import { RECAP_DOCUMENT_VERSION } from '@/lib/booking/texts'
 import { bookingBufferMs } from '@/lib/booking/rules'
 import {
   adminDb,
@@ -40,12 +41,13 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
 
   const { data: itemRow } = await db
     .from('service_items')
-    .select('name, item_type, offer_kind, deposit_amount, quote_fee, deposit_type, buffer_minutes')
+    .select('name, item_type, offer_kind, deposit_amount, quote_fee, deposit_type, buffer_minutes, quote_fee_deductible')
     .eq('id', order.service_item_id ?? '')
     .maybeSingle()
   const item = itemRow as {
     name: string | null; item_type: string | null; offer_kind: string | null
     deposit_amount: number | null; quote_fee: number | null; deposit_type: string | null; buffer_minutes: number | null
+    quote_fee_deductible: boolean | null
   } | null
 
   if (order.status !== 'prijato') {
@@ -60,18 +62,106 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
   }
   if (!item) return { success: false, error: 'Tuto objednávku nelze v novém modelu rezervovat.' }
 
-  // Výjezd (B): bez přesné adresy se souřadnicemi nejde ověřit check-in (korekce 5).
+  // Zákazník musel projít shrnutí v aktuálním znění (VOP 7.8) – eviduje ho krokový průvodce
+  // (startBookingPayment). U výjezdu navíc výslovná žádost o provedení před uplynutím lhůty
+  // pro odstoupení (model §17, VOP 9.6) v booking_consents.
+  const { data: recapRows } = await db
+    .from('order_events')
+    .select('id')
+    .eq('order_id', orderId)
+    .eq('type', 'recap_accepted')
+    .eq('payload->>document_version', RECAP_DOCUMENT_VERSION)
+    .limit(1)
+  if (!recapRows || recapRows.length === 0) {
+    return { success: false, error: 'Před platbou prosím projděte shrnutí objednávky a potvrďte ho.' }
+  }
   if (item.offer_kind === 'B') {
-    const { data: addr } = await db.from('orders').select('location_lat, location_lng').eq('id', orderId).maybeSingle()
-    const a = addr as { location_lat: number | null; location_lng: number | null } | null
-    if (a?.location_lat == null || a?.location_lng == null) {
+    const { data: consentRows } = await db
+      .from('booking_consents')
+      .select('id')
+      .eq('order_id', orderId)
+      .eq('user_id', order.customer_id)
+      .eq('kind', 'customer_early_performance_request')
+      .eq('document_version', RECAP_DOCUMENT_VERSION)
+      .limit(1)
+    if (!consentRows || consentRows.length === 0) {
+      return { success: false, error: 'Před platbou prosím ve shrnutí potvrďte žádost o provedení výjezdu.' }
+    }
+  }
+
+  // Přímá rezervace času drží termín jen krátce. Po vypršení se musí vybrat znovu
+  // (mezitím ho mohl dostat někdo jiný a stránka mohla zůstat otevřená).
+  if (state === null && order.hold_expires_at && new Date(order.hold_expires_at).getTime() <= Date.now()) {
+    const { data: created } = await db
+      .from('order_events')
+      .select('id')
+      .eq('order_id', orderId)
+      .eq('type', 'booking_created')
+      .limit(1)
+    if (order.slot_id || (created ?? []).length > 0) {
+      return { success: false, error: 'Čas na dokončení rezervace vypršel. Vyberte prosím termín znovu.' }
+    }
+  }
+
+  // Adresa: když se jede k zákazníkovi, musí být vyplněná – jinak by poskytovatel nevěděl kam.
+  // Výjezd (B) navíc se souřadnicemi, jinak nejde ověřit check-in (korekce 5).
+  {
+    const { data: addr } = await db
+      .from('orders')
+      .select('service_location, location_address, location_lat, location_lng, services(location_type, city_lat, city_lng, radius_km)')
+      .eq('id', orderId)
+      .maybeSingle()
+    const a = addr as {
+      service_location: string | null
+      location_address: string | null
+      location_lat: number | null
+      location_lng: number | null
+      services: { location_type: string | null; city_lat: number | null; city_lng: number | null; radius_km: number | null } | null
+    } | null
+    const atCustomer = a?.service_location
+      ? a.service_location === 'u_zakaznika'
+      : a?.services?.location_type !== 'u_poskytovatele'
+    if (item.offer_kind === 'B' && (a?.location_lat == null || a?.location_lng == null)) {
       return { success: false, error: 'Nejdřív prosím doplňte přesnou adresu výjezdu (vyberte ji ze seznamu).' }
+    }
+    if (atCustomer && !a?.location_address?.trim()) {
+      return { success: false, error: 'Nejdřív prosím doplňte adresu, kam má poskytovatel přijet.' }
+    }
+    // Dosah poskytovatele podle přesné adresy – jen u přímé rezervace času, kde poskytovatel nic
+    // nepotvrzoval. U domluveného termínu o vzdálenosti rozhodl poskytovatel sám (viděl ji v objednávce).
+    const card = a?.services
+    let primaRezervace = !!order.slot_id
+    if (!primaRezervace) {
+      const { data: created } = await db.from('order_events').select('id').eq('order_id', orderId).eq('type', 'booking_created').limit(1)
+      primaRezervace = (created ?? []).length > 0
+    }
+    if (primaRezervace && atCustomer && a?.location_lat != null && a?.location_lng != null && card?.radius_km && card.city_lat != null && card.city_lng != null) {
+      const R = 6371
+      const dLat = ((a.location_lat - card.city_lat) * Math.PI) / 180
+      const dLng = ((a.location_lng - card.city_lng) * Math.PI) / 180
+      const x = Math.sin(dLat / 2) ** 2
+        + Math.cos((card.city_lat * Math.PI) / 180) * Math.cos((a.location_lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2
+      const dist = R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x))
+      if (dist > card.radius_km) {
+        return {
+          success: false,
+          error: `Adresa je mimo dosah poskytovatele (jezdí do ${card.radius_km} km, tahle je asi ${Math.round(dist)} km daleko).`,
+        }
+      }
     }
   }
 
   const start = order.scheduled_at ? new Date(order.scheduled_at) : null
   const end = order.scheduled_end ? new Date(order.scheduled_end) : null
-  const check = await checkNewBooking(db, { item, providerId: order.provider_id, start, end })
+  // Cena, kterou poskytovatel u této objednávky upravil a zákazník přijal s termínem (jinak cena z nabídky).
+  const { data: agreedRow } = await db.from('orders').select('agreed_charge_halere').eq('id', orderId).maybeSingle()
+  const agreedChargeHalere = (agreedRow as { agreed_charge_halere: number | null } | null)?.agreed_charge_halere ?? null
+  const check = await checkNewBooking(db, {
+    item: { ...item, agreed_charge_halere: agreedChargeHalere },
+    providerId: order.provider_id,
+    start,
+    end,
+  })
   if (!check.ok) return { success: false, error: check.error }
 
   // ── Je termín pořád volný? ──────────────────────────────────
@@ -159,6 +249,8 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
         vat_rate_bps: c.vatRateBps,
         policy_version: version,
         policy_snapshot: snapshot,
+        // Výjezd: slib započtení Ceny výjezdu tak, jak ho zákazník viděl před platbou (VOP 11.6)
+        quote_fee_deductible: check.offerKind === 'B' ? item.quote_fee_deductible === true : null,
         // Legacy sloupec pro staré obrazovky (v Kč)
         deposit_amount: c.chargeHalere / 100,
       },

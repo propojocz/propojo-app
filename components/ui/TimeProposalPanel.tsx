@@ -14,6 +14,8 @@ import {
 import { createDepositCheckout } from '@/lib/actions/deposit'
 import { releaseUnpaidReservation } from '@/lib/actions/reservation-release'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
+import { computeCommission } from '@/lib/booking/commission'
+import BookingWizard from '@/components/ui/BookingWizard'
 
 interface Props {
   orderId: string
@@ -35,6 +37,18 @@ interface Props {
   arrivalWindow?: boolean
   /** Model v2: „Rezervační poplatek“ / „Cena výjezdu“. Prázdné = starý text se zálohou. */
   paymentLabel?: string | null
+  /** Model v2, poskytovatel: kde zákazník je (obec) a jak daleko, pokud je mimo obvyklý dosah. */
+  customerPlace?: string | null
+  outOfRange?: { distanceKm: number; radiusKm: number } | null
+}
+
+const kc = (n: number) => `${n.toLocaleString('cs-CZ')} Kč`
+
+/** Provize Propojo z dané částky (pro náhled poskytovateli); null = částka nejde zaplatit. */
+function feeKc(chargeKc: number): number | null {
+  if (!Number.isInteger(chargeKc) || chargeKc <= 0) return null
+  const r = computeCommission(chargeKc * 100)
+  return r.ok ? r.commission.applicationFeeHalere / 100 : null
 }
 
 const fmtLong = (iso: string) =>
@@ -69,7 +83,7 @@ function combineLocalDateTime(date: string, time: string): string | null {
 export default function TimeProposalPanel({
   orderId, isProvider, proposals, depositAmount, scheduledAt = null, depositStatus = null,
   itemName, customerName, prefFrom, prefTo, prefTime,
-  arrivalWindow = false, paymentLabel = null,
+  arrivalWindow = false, paymentLabel = null, customerPlace = null, outOfRange = null,
 }: Props) {
   const router = useRouter()
   const isReschedule = !!scheduledAt
@@ -85,7 +99,22 @@ export default function TimeProposalPanel({
   const [editMode, setEditMode] = useState(false)
   // Termín domluvený v chatu: poskytovatel zadá jen ten jeden, zákazník ho potvrdí a zaplatí.
   const [agreedMode, setAgreedMode] = useState(false)
+  // Zákazník: otevřený krokový průvodce pro vybraný návrh termínu.
+  const [wizardProposal, setWizardProposal] = useState<{ starts_at: string; ends_at: string } | null>(null)
   const [windowMinutes, setWindowMinutes] = useState<number>(BOOKING_POLICY.arrivalWindow.defaultMinutes)
+  // Cena upravená poskytovatelem pro tuto objednávku (např. delší cesta) – zákazník ji potvrdí s termínem.
+  const [priceEdit, setPriceEdit] = useState(false)
+  const [priceInput, setPriceInput] = useState('')
+  const [priceNote, setPriceNote] = useState('')
+
+  // Model v2: cenu jde upravit jen u prvního termínu před platbou.
+  const canAdjustPrice = !!paymentLabel && !isReschedule && !alreadyPaid && depositAmount > 0
+  // Cena, kterou nesou aktuální návrhy (všechny stejnou); null = cena z nabídky.
+  const proposalChargeHalere = proposals.find((p) => p.charge_halere != null)?.charge_halere
+  const proposalPriceKc = proposalChargeHalere != null ? proposalChargeHalere / 100 : null
+  const proposalPriceNote = proposals.find((p) => p.price_note)?.price_note ?? null
+  // Kolik zákazník zaplatí podle aktuálního návrhu
+  const effectiveAmount = proposalPriceKc ?? depositAmount
 
   // U výjezdu je termín okno příjezdu: „út 6. 10. 14:00–15:00“.
   const fmtProposal = (p: Proposal) =>
@@ -106,6 +135,7 @@ export default function TimeProposalPanel({
       setError('')
       setEditMode(false)
       setAgreedMode(false)
+      setPriceEdit(false)
     }
 
     const openAgreedEditor = () => {
@@ -127,6 +157,9 @@ export default function TimeProposalPanel({
     }
 
     const openExistingEditor = () => {
+      setPriceEdit(proposalPriceKc != null)
+      setPriceInput(proposalPriceKc != null ? String(proposalPriceKc) : '')
+      setPriceNote(proposalPriceNote ?? '')
       setDraft(proposals.map((p) => p.starts_at).sort())
       setNewDate('')
       setNewClock('')
@@ -181,16 +214,114 @@ export default function TimeProposalPanel({
         setError('Jednomu zákazníkovi můžete poslat maximálně 6 termínů.')
         return
       }
+      let price: { kc: number; note: string | null } | null = null
+      if (canAdjustPrice && priceEdit) {
+        const n = Number(priceInput.replace(/\s/g, '').replace(',', '.'))
+        if (!Number.isInteger(n) || n <= 0) {
+          setError('Zadejte cenu v celých korunách.')
+          return
+        }
+        if (feeKc(n) == null) {
+          setError(`Nejnižší cena je ${kc(BOOKING_POLICY.minChargeHalere / 100)}.`)
+          return
+        }
+        if (n !== depositAmount) price = { kc: n, note: priceNote.trim() || null }
+      }
       setBusy(true); setError('')
-      const res = await proposeTimes(orderId, allSelected, arrivalWindow ? windowMinutes : undefined)
+      const res = await proposeTimes(orderId, allSelected, arrivalWindow ? windowMinutes : undefined, price)
       setBusy(false)
       if (!res.success) { setError(res.error); return }
       setEditMode(false)
       setNewDate('')
       setNewClock('')
       setDraft([])
+      setPriceEdit(false)
       router.refresh()
     }
+
+    // Shrnutí poptávky s cenou: co zákazník zaplatí, provize, případně vzdálenost.
+    const summaryAmount = proposals.length > 0 && !editMode ? effectiveAmount : depositAmount
+    const summaryFee = feeKc(summaryAmount)
+    const priceSummary = canAdjustPrice ? (
+      <div className="mt-3 rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm text-slate-700">
+        <div className="flex items-baseline justify-between gap-3">
+          <span>
+            {itemName ? <strong>{itemName}</strong> : 'Objednávka'}
+            {customerPlace ? <span className="text-slate-500"> · {customerPlace}</span> : null}
+          </span>
+          <span className="shrink-0 font-black text-slate-900">{kc(summaryAmount)}</span>
+        </div>
+        <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
+          Zákazník zaplatí {paymentLabel} {kc(summaryAmount)}
+          {proposals.length > 0 && !editMode && proposalPriceKc != null ? ' (upravená cena)' : ''}.
+          {summaryFee != null ? ` Provize Propojo ${kc(summaryFee)}, poplatek za platbu si účtuje Stripe.` : ''}
+        </p>
+        {outOfRange && (
+          <p className="mt-1 text-xs leading-relaxed text-amber-800">
+            Zákazník je asi {outOfRange.distanceKm} km daleko (váš obvyklý dosah je {outOfRange.radiusKm} km). Pokud vám cena nestačí, upravte ji při návrhu termínu.
+          </p>
+        )}
+      </div>
+    ) : null
+
+    const typedPrice = Number(priceInput.replace(/\s/g, '').replace(',', '.'))
+    const typedFee = priceInput ? feeKc(typedPrice) : null
+    const priceEditor = canAdjustPrice ? (
+      <div className="mt-3 rounded-xl border border-amber-200 bg-white p-3">
+        {!priceEdit ? (
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="text-slate-600">Zákazník zaplatí {paymentLabel} <strong className="text-slate-900">{kc(depositAmount)}</strong></span>
+            <button
+              type="button"
+              onClick={() => { setPriceEdit(true); setPriceInput(String(depositAmount)); setError('') }}
+              className="shrink-0 text-xs font-semibold text-amber-700 underline hover:text-amber-800"
+            >
+              Upravit cenu
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[10rem_1fr]">
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Nová cena (Kč)</label>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={BOOKING_POLICY.minChargeHalere / 100}
+                  step={1}
+                  value={priceInput}
+                  onChange={(e) => { setPriceInput(e.target.value); setError('') }}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-amber-400"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Důvod pro zákazníka (nepovinné)</label>
+                <input
+                  type="text"
+                  maxLength={200}
+                  value={priceNote}
+                  placeholder="např. delší cesta"
+                  onChange={(e) => setPriceNote(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-amber-400"
+                />
+              </div>
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-slate-500">
+              Původně {kc(depositAmount)}.
+              {typedFee != null ? ` Provize Propojo ${kc(typedFee)}.` : priceInput ? ` Nejnižší cena je ${kc(BOOKING_POLICY.minChargeHalere / 100)}.` : ''}
+              {' '}Zákazník novou cenu uvidí a potvrdí spolu s termínem.
+            </p>
+            <button
+              type="button"
+              onClick={() => { setPriceEdit(false); setPriceInput(''); setPriceNote('') }}
+              className="mt-1 text-xs font-semibold text-slate-500 hover:text-slate-700"
+            >
+              Ponechat původní cenu
+            </button>
+          </>
+        )}
+      </div>
+    ) : null
 
     // Potvrzený termín bez aktivního návrhu: jen kompaktní možnost změny.
     if (isReschedule && proposals.length === 0 && !editMode) {
@@ -255,6 +386,8 @@ export default function TimeProposalPanel({
                   </span>
                 </p>
               )}
+
+              {priceSummary}
 
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
@@ -326,6 +459,7 @@ export default function TimeProposalPanel({
                 </span>
               ))}
             </div>
+            {priceSummary}
             <button
               type="button"
               onClick={openExistingEditor}
@@ -380,7 +514,7 @@ export default function TimeProposalPanel({
             <div className="rounded-xl border border-amber-200 bg-white p-3">
               {arrivalWindow && (
                 <div className="mb-3">
-                  <label className="mb-1 block text-xs font-semibold text-slate-600">Okno příjezdu</label>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Přijedu v rozmezí</label>
                   <div className="flex flex-wrap gap-2">
                     {BOOKING_POLICY.arrivalWindow.optionsMinutes.map((m) => (
                       <button
@@ -393,12 +527,13 @@ export default function TimeProposalPanel({
                             : 'border-slate-200 text-slate-600 hover:border-amber-300'
                         }`}
                       >
-                        {m} min
+                        {m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60} min`}
                       </button>
                     ))}
                   </div>
                   <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                    Časové rozmezí, ve kterém k zákazníkovi dorazíte. Platí pro všechny termíny v tomto návrhu.
+                    Jak dlouhé rozmezí si necháte na příjezd – zákazník uvidí třeba „přijede mezi 11:15 a 13:15“.
+                    Není to doba cesty ani délka prohlídky, jen čas, kdy u zákazníka nejpozději budete.
                   </p>
                 </div>
               )}
@@ -414,7 +549,7 @@ export default function TimeProposalPanel({
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-600">{arrivalWindow ? 'Začátek okna' : 'Čas'}</label>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">{arrivalWindow ? 'Nejdříve v' : 'Čas'}</label>
                   <input
                     type="time"
                     value={newClock}
@@ -443,6 +578,8 @@ export default function TimeProposalPanel({
                 </button>
               )}
             </div>
+
+            {priceEditor}
 
             <p className="mt-2 text-xs leading-relaxed text-slate-500">
               Otevírací doba slouží jen jako informace o vašem běžném provozu. Pro tohoto zákazníka posíláte jen termíny, které sami zadáte tady.
@@ -482,6 +619,11 @@ export default function TimeProposalPanel({
   if (proposals.length === 0) return null
 
   const accept = async (start: string) => {
+    // Model v2: termín se přijme až v posledním kroku průvodce (adresa, shrnutí, souhlas, platba).
+    if (paymentLabel && !isReschedule && !alreadyPaid) {
+      const p = proposals.find((x) => x.starts_at === start)
+      if (p) { setWizardProposal({ starts_at: p.starts_at, ends_at: p.ends_at }); return }
+    }
     setBusy(true); setError('')
     const res = await acceptProposal(orderId, start)
     if (!res.success) { setError(res.error); setBusy(false); router.refresh(); return }
@@ -520,9 +662,13 @@ export default function TimeProposalPanel({
 
   // Jediný návrh (typicky termín domluvený v chatu): jen potvrdit a zaplatit.
   const singleOffer = !isReschedule && proposals.length === 1
+  const priceChanged = proposalPriceKc != null && proposalPriceKc !== depositAmount
 
   return (
     <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50/70 p-5">
+      {wizardProposal && (
+        <BookingWizard orderId={orderId} proposal={wizardProposal} onClose={() => setWizardProposal(null)} />
+      )}
       <div className="mb-1 flex items-center gap-2">
         <CalendarDays className="h-5 w-5 text-emerald-600" />
         <h2 className="font-black text-slate-900">
@@ -533,6 +679,14 @@ export default function TimeProposalPanel({
               : 'Vyberte si termín'}
         </h2>
       </div>
+
+      {priceChanged && paymentLabel && (
+        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+          Poskytovatel upravil {paymentLabel}: <span className="text-amber-700 line-through">{kc(depositAmount)}</span>{' '}
+          <strong>{kc(proposalPriceKc!)}</strong>{proposalPriceNote ? <> – {proposalPriceNote}</> : null}.
+          {' '}Potvrzením termínu souhlasíte s touto cenou. Pokud vám nevyhovuje, napište mu ve zprávách.
+        </div>
+      )}
 
       {isReschedule && scheduledAt && (
         <div className="mb-3 rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-sm text-slate-700">
@@ -550,10 +704,10 @@ export default function TimeProposalPanel({
             : 'Poskytovatel vám nabídl tyhle časy.'}
         {isReschedule
           ? ' Přijetím jednoho z nich se původní termín nahradí.'
-          : paymentLabel && depositAmount > 0
-            ? ` Kliknutím termín vyberete a na kartě se předautorizuje ${paymentLabel} ${depositAmount.toLocaleString('cs-CZ')} Kč. Strhne se až poté, co poskytovatel rezervaci potvrdí.`
-            : depositAmount > 0
-              ? ` Kliknutím termín potvrdíte a zaplatíte zálohu ${depositAmount.toLocaleString('cs-CZ')} Kč — ta se započítá do konečné ceny.`
+          : paymentLabel && effectiveAmount > 0
+            ? ` Kliknutím termín vyberete a na kartě se předautorizuje ${paymentLabel} ${effectiveAmount.toLocaleString('cs-CZ')} Kč. Strhne se až poté, co poskytovatel rezervaci potvrdí.`
+            : effectiveAmount > 0
+              ? ` Kliknutím termín potvrdíte a zaplatíte zálohu ${effectiveAmount.toLocaleString('cs-CZ')} Kč — ta se započítá do konečné ceny.`
               : ' Kliknutím termín rovnou potvrdíte.'}
       </p>
 
@@ -587,10 +741,10 @@ export default function TimeProposalPanel({
             <span className="shrink-0 rounded-lg bg-emerald-500 px-3 py-1.5 text-sm font-bold text-white">
               {isReschedule || alreadyPaid
                 ? 'Přijmout změnu'
-                : depositAmount > 0
+                : effectiveAmount > 0
                   ? (singleOffer
-                      ? `Potvrdit a zaplatit ${depositAmount.toLocaleString('cs-CZ')} Kč`
-                      : `Zaplatit ${depositAmount.toLocaleString('cs-CZ')} Kč`)
+                      ? `Potvrdit a zaplatit ${effectiveAmount.toLocaleString('cs-CZ')} Kč`
+                      : `Zaplatit ${effectiveAmount.toLocaleString('cs-CZ')} Kč`)
                   : 'Potvrdit'}
             </span>
           </button>
@@ -604,7 +758,7 @@ export default function TimeProposalPanel({
         <p className="text-xs text-slate-500">
           {isReschedule
             ? 'Dokud změnu nepotvrdíte, platí původní termín.'
-            : depositAmount > 0
+            : effectiveAmount > 0
               ? 'Po výběru se termín krátce podrží, abyste stihli dokončit platbu.'
               : 'Termín se potvrdí ihned.'}
         </p>

@@ -63,6 +63,8 @@ export interface ServiceItemValues {
   price_per_km: number | null
   free_km: number | null
   quote_days: number | null
+  /** Výjezd: Cenu výjezdu odečtu z ceny zakázky, když zákazník přijme nabídku (VOP čl. 11.6) */
+  quote_fee_deductible: boolean
   // ── VÝROBEK ──
   item_type: 'service' | 'product'
   pickup_mode: 'pickup' | 'delivery' | 'both' | null
@@ -143,6 +145,7 @@ const EMPTY: ServiceItemValues = {
   price_per_km: null,
   free_km: null,
   quote_days: null,
+  quote_fee_deductible: false,
   item_type: 'service',
   pickup_mode: null,
   pickup_timing: null,
@@ -324,6 +327,7 @@ export default function ServiceItemEditor({
       out.price_per_km = null
       out.free_km = null
       out.quote_days = null
+      out.quote_fee_deductible = false
       if (zpusob === 'dohodou') { out.price = null; out.price_max = null }
       if (zpusob !== 'rozmezi') out.price_max = null
 
@@ -446,6 +450,7 @@ export default function ServiceItemEditor({
       out.price_per_km = null
       out.free_km = null
       out.quote_days = null
+      out.quote_fee_deductible = false
     }
 
     // Délka podle jednotky — stejné pravidlo jako na serveru v normalizeItem().
@@ -788,6 +793,16 @@ export default function ServiceItemEditor({
                 placeholder="45"
                 className="w-full rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 outline-none focus:border-emerald-500" />
               <p className="mt-1 text-[11.5px] text-slate-400">Podle délky poznáme, do kterých volných oken se úkon vejde.</p>
+              <details className="mt-1.5 rounded-lg bg-slate-50 px-3 py-2 text-[11.5px] leading-relaxed text-slate-500">
+                <summary className="cursor-pointer select-none font-semibold text-emerald-700">ⓘ Kolik minut zadat?</summary>
+                <p className="mt-1">
+                  Zadejte čas, který si úkon v kalendáři opravdu zabere, <strong>včetně přípravy a úklidu</strong> před dalším zákazníkem.
+                  Další zákazník si totiž může objednat hned po skončení tohoto času.
+                </p>
+                <p className="mt-1">
+                  Příklad: střih trvá 40 minut a 5 minut potřebujete na zametení a přípravu → zadejte <strong>45 minut</strong>.
+                </p>
+              </details>
             </div>
           )}
 
@@ -824,6 +839,20 @@ export default function ServiceItemEditor({
                     className="w-full rounded-xl border-[1.5px] border-slate-200 px-3 py-2.5 outline-none focus:border-emerald-500" />
                 </div>
               </div>
+              <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={v.quote_fee_deductible}
+                  onChange={e => set('quote_fee_deductible', e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-emerald-600"
+                />
+                <span>
+                  Když zákazník přijme moji nabídku, <strong>Cenu výjezdu mu odečtu z ceny zakázky</strong>.
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    Zákazník to uvidí před objednáním a před platbou. Odečíst ji pak musíte (VOP čl. 11.6). Bez zaškrtnutí je Cena výjezdu samostatná platba za cestu, prohlídku a nacenění.
+                  </span>
+                </span>
+              </label>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Nabídku dodám do (dnů)</label>
                 <input type="number" min={0} value={v.quote_days ?? ''} onChange={e => set('quote_days', numOrNull(e.target.value))}

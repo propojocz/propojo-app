@@ -10,7 +10,9 @@ import { createDepositCheckout } from '@/lib/actions/deposit'
 import { releaseUnpaidReservation } from '@/lib/actions/reservation-release'
 import { cancelBeforePayment } from '@/lib/actions/booking'
 import ProviderCancelReason from '@/components/ui/ProviderCancelReason'
+import BookingWizard from '@/components/ui/BookingWizard'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
+import { bookingStatusBadge } from '@/lib/booking/labels'
 import ConfirmCompletionButton from '@/components/ui/ConfirmCompletionButton'
 import ChatThread from '@/components/ui/ChatThread'
 import Avatar from '@/components/ui/Avatar'
@@ -291,6 +293,12 @@ export default function OrderDetailClient({
   // Objednávka položky nového modelu (má typ nabídky) – platí se Rezervační poplatek / Cena výjezdu
   // Typ se na objednávku zapíše až při platbě – do té doby rozhoduje typ položky.
   const jeV2Polozka = !!(order as any).offer_kind || !!(order as any).service_items?.offer_kind || bookingState !== null
+  // Štítek v hlavičce: u nového modelu podle booking_state („Potvrzeno“ až po stržení platby).
+  const statusBadge = bookingStatusBadge({
+    status: order.status,
+    booking_state: bookingState,
+    offer_kind: (order as any).offer_kind ?? (order as any).service_items?.offer_kind ?? null,
+  })
   // Termín, který už proběhl nebo začíná dřív než za minimální předstih, se nedá zaplatit (korekce 3).
   const terminNelzeZaplatit = jeV2Polozka && !!order.scheduled_at
     && new Date(order.scheduled_at).getTime() < Date.now() + BOOKING_POLICY.minLeadMinutes * 60_000
@@ -342,6 +350,14 @@ export default function OrderDetailClient({
   // Model v2: zákazník se vrátil ze Stripe, ale potvrzení platby (webhook) ještě nedorazilo.
   // Místo nové výzvy k platbě čekáme a stránku obnovujeme, dokud stav nepřejde dál (max. cca 1 min).
   const platbaSeZpracovava = isCustomer && jeV2Polozka && bookingState === 'pending_payment' && platbaStav === 'uspech'
+
+  // Krokový průvodce před platbou. Po přímé rezervaci času (?platba=pruvodce) se otevře sám.
+  const [wizardOpen, setWizardOpen] = useState(false)
+  useEffect(() => {
+    if (platbaStav === 'pruvodce' && isCustomer && jeV2Polozka && v2Platba && !!order.scheduled_at) setWizardOpen(true)
+    // jen při prvním načtení stránky
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [zpracovaniDlouho, setZpracovaniDlouho] = useState(false)
   useEffect(() => {
     if (!platbaSeZpracovava) return
@@ -390,6 +406,8 @@ export default function OrderDetailClient({
   }
 
   const handlePay = async () => {
+    // Model v2: platba jen přes krokového průvodce (shrnutí, kontakt, souhlas – model §15, §17).
+    if (jeV2Polozka) { setWizardOpen(true); return }
     setPayBusy(true)
     setPayError('')
     const res = await createDepositCheckout(order.id)
@@ -518,8 +536,8 @@ export default function OrderDetailClient({
                 Dotaz
               </span>
             ) : (
-              <span className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold ${STATUS_COLORS[order.status] ?? 'bg-slate-100 text-slate-500'}`}>
-                {STATUS_LABELS[order.status] ?? order.status}
+              <span className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold ${statusBadge?.cls ?? STATUS_COLORS[order.status] ?? 'bg-slate-100 text-slate-500'}`}>
+                {statusBadge?.label ?? STATUS_LABELS[order.status] ?? order.status}
               </span>
             )}
           </div>
@@ -855,11 +873,9 @@ export default function OrderDetailClient({
         )}
 
         {/* ── PŘESNÁ ADRESA (jen zákazník, jen když se koná U ZÁKAZNÍKA, po přijetí, před zaplacením) ── */}
-        {/* Výjezd (B) nového modelu: přesná adresa se souřadnicemi už před přijetím termínu
-            a platbou (korekce 5). Po zahájení platby se adresa nemění. */}
-        {isCustomer && atCustomer && !isPaid && !v2Aktivni && (
-          order.status === 'prijato' || order.status === 'v_procesu' || (jeV2Polozka && isModelB && order.status === 'cekajici')
-        ) && (
+        {/* Nový model: adresu zákazník potvrzuje v krokovém průvodci před platbou (u výjezdu
+            se souřadnicemi, korekce 5). Tento samostatný blok zůstává jen pro staré objednávky. */}
+        {isCustomer && atCustomer && !isPaid && !jeV2Polozka && (order.status === 'prijato' || order.status === 'v_procesu') && (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-1 flex items-center gap-2">
               <MapPin className="h-5 w-5 text-emerald-600" />
@@ -910,6 +926,10 @@ export default function OrderDetailClient({
         {/* isRefunded: u vrácené platby nemá smysl nabízet zaplacení — dřív se
             tenhle blok ukázal současně s hláškou „peníze jsme vrátili". */}
         {/* Nový model platí jen s domluveným termínem (začátek i konec okna) – bez něj se nabízí domluva. */}
+        {wizardOpen && (
+          <BookingWizard orderId={order.id} onClose={() => { setWizardOpen(false); router.refresh() }} />
+        )}
+
         {platbaSeZpracovava && (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
             <div className="flex items-start gap-3">
@@ -1033,7 +1053,7 @@ export default function OrderDetailClient({
                     </button>
                     {switchErr && <p className="mt-2 text-center text-sm text-red-600">{switchErr}</p>}
                   </div>
-                ) : atCustomer && !hasAddress ? (
+                ) : atCustomer && !hasAddress && !jeV2Polozka ? (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                     Nejdříve prosím vyplňte přesnou adresu výše — pak budete moci zaplatit.
                   </div>

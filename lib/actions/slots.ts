@@ -10,15 +10,15 @@
 //     14:30–16:00  volno   (nový záznam, přebírá služby původního okna)
 // Zbytky kratší než 15 minut nevznikají — přilepí se k rezervaci.
 //
-// PLATBA DRŽÍ TERMÍN: u úkonu se zálohou vytvoří rezervace rovnou i platbu
-// a vrátí na ni odkaz (payUrl). Odkaz platí 30 minut (deposit.ts) — když
-// zákazník nezaplatí, Stripe pošle 'checkout.session.expired', webhook
-// objednávku zruší a termín vrátí mezi volné.
+// PLATBA DRŽÍ TERMÍN (model v2): rezervace zabere úsek okna a nastaví krátký zámek.
+// Zákazník pak v detailu objednávky projde krokového průvodce a otevře platbu
+// (deposit.ts, checkout platí 30 minut). Když nezaplatí, Stripe pošle
+// 'checkout.session.expired' a webhook termín vrátí mezi volné; opuštěný průvodce
+// uvolní úklid nezaplacených rezervací (payout.ts).
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
-import { createDepositCheckout } from '@/lib/actions/deposit'
 import { rozsahCasu, cas, denVTydnuPraha, minutyOdPulnociPraha, casNaMinuty } from '@/lib/format'
 import { bookingBufferMs } from '@/lib/booking/rules'
 import { checkNewBooking, logOrderEvent } from '@/lib/booking/payments'
@@ -41,19 +41,10 @@ function getAdminClient() {
   )
 }
 
-// Založí platbu k čerstvé rezervaci. Když se nepovede (poskytovatel nemá
-// dokončený Stripe, výpadek…), rezervace platí dál — zákazník zaplatí
-// z detailu objednávky. Proto se chyba jen loguje.
-async function zaridPlatbu(orderId: string): Promise<string | undefined> {
-  try {
-    const pay = await createDepositCheckout(orderId)
-    if (pay.success) return pay.url
-    console.warn('[slots] platbu se nepodařilo založit:', pay.error)
-  } catch (err) {
-    console.error('[slots] zaridPlatbu:', err)
-  }
-  return undefined
-}
+// Model v2: platba se nespouští hned po rezervaci. Zákazník nejdřív projde krokového
+// průvodce (adresa, rekapitulace s kontaktem, souhlas – model §15, §17) v detailu objednávky.
+// Do té doby termín drží krátký zámek.
+const HOLD_MINUTES = 15
 
 const minutesBetween = (a: string, b: string) =>
   Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000)
@@ -151,7 +142,9 @@ export async function createSlot(values: {
   starts_at: string
   ends_at: string
   service_ids: string[]
-}): Promise<Result> {
+  /** Poskytovatel potvrdil, že v tomto čase pracuje, i když je mimo otevírací dobu. */
+  outsideHoursConfirmed?: boolean
+}): Promise<Result | { success: false; error: string; confirm: 'outside_hours' }> {
   const supabase = createClient()
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return { success: false, error: 'Nejste přihlášeni.' }
@@ -203,10 +196,13 @@ export async function createSlot(values: {
     return { success: false, error: `V čase ${rozsah} už máte volné okno.` }
   }
 
-  // Otevírací doba a blokace — poskytovatel nesmí vypsat čas, který si sám zavřel.
-  // Dřív to appka pustila a zákazník si mohl rezervovat termín na dovolenou.
+  // Otevírací doba je běžný provoz, ne zákaz: poskytovatel může pracovat i den nebo hodinu navíc.
+  // Mimo ni se jen zeptáme, jestli opravdu pracuje. Blokace (dovolená, doktor) dál platí natvrdo.
   const chybaDoby = await mimoOteviraciDobu(admin, ids, starts.toISOString(), ends.toISOString())
-  if (chybaDoby) return { success: false, error: chybaDoby }
+  if (chybaDoby && !values.outsideHoursConfirmed) {
+    const detail = chybaDoby.replace(/ Změňte otevírací dobu, nebo vyberte jiný den\.$/, '')
+    return { success: false, error: `${detail} Pracujete opravdu i v tomto čase?`, confirm: 'outside_hours' }
+  }
 
   const chybaBloku = await kryjeSeSBlokaci(admin, user.id, ids, starts.toISOString(), ends.toISOString())
   if (chybaBloku) return { success: false, error: `${chybaBloku} Nejdřív ji zrušte v Termínech.` }
@@ -586,6 +582,7 @@ export async function reserveSlotForItem(values: {
       // Když má úkon zálohu, objednávka čeká na úhradu — jinak by šlo zahájit
       // práci bez zaplacení (kontrola v updateOrderStatus testuje 'pending').
       deposit_status: platiSeHned ? 'pending' : 'none',
+      hold_expires_at: new Date(Date.now() + HOLD_MINUTES * 60000).toISOString(),
       location_city: values.location_city?.trim() || null,
       service_location: values.service_location ?? null,
       billing_is_company: values.billing?.is_company === true,
@@ -638,11 +635,10 @@ export async function reserveSlotForItem(values: {
   // Oznámení poskytovateli pošle webhook až po preautorizaci (ne o nezaplacených rezervacích).
   await logOrderEvent(admin, order.id, 'booking_created', { type: 'customer', id: user.id }, { direct: true })
 
-  const payUrl = platiSeHned ? await zaridPlatbu(order.id) : undefined
-
   revalidatePath('/dashboard/objednavky')
   revalidatePath('/dashboard/terminy')
-  return { success: true, id: order.id, payUrl }
+  // Platba se dokončí v průvodci na detailu objednávky (payUrl už se nevrací).
+  return { success: true, id: order.id }
 }
 
 // ── Rozhodnutí o zbytku okna po rezervaci ────────────────────────

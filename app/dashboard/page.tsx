@@ -1,5 +1,6 @@
 // app/dashboard/page.tsx
 import { createClient } from '@/lib/supabase/server'
+import { bookingStatusBadge } from '@/lib/booking/labels'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
@@ -43,7 +44,7 @@ export default async function DashboardPage() {
       supabase.from('orders').select('id', { count: 'exact', head: true }).eq('provider_id', user.id).eq('status', 'cekajici'),
       supabase.from('orders').select('id', { count: 'exact', head: true }).eq('provider_id', user.id),
       supabase.from('services').select('id, title, category, price, price_unit, is_active').eq('provider_id', user.id).order('created_at', { ascending: false }).limit(5),
-      supabase.from('orders').select('id, status, created_at, services(title), profiles!orders_customer_id_fkey(full_name)').eq('provider_id', user.id).order('created_at', { ascending: false }).limit(5),
+      supabase.from('orders').select('id, status, booking_state, offer_kind, created_at, services(title), profiles!orders_customer_id_fkey(full_name)').eq('provider_id', user.id).order('created_at', { ascending: false }).limit(5),
       // Volná okna, o kterých ještě nikdo neví — hlavní featura Propojo,
       // proto patří na dashboard, ne do podmenu.
       supabase
@@ -218,7 +219,7 @@ export default async function DashboardPage() {
                       <p className="truncate text-sm font-semibold text-slate-800">{o.services?.title ?? 'Neznámá služba'}</p>
                       <p className="text-xs text-slate-400">{o.profiles?.full_name ?? 'Zákazník'} · {denKratce(o.created_at)}</p>
                     </div>
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[o.status] ?? 'bg-slate-100 text-slate-500'}`}>{statusLabels[o.status] ?? o.status}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${bookingStatusBadge(o)?.cls ?? statusColors[o.status] ?? 'bg-slate-100 text-slate-500'}`}>{bookingStatusBadge(o)?.label ?? statusLabels[o.status] ?? o.status}</span>
                     <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
                   </Link>
                 ))}
@@ -271,7 +272,7 @@ export default async function DashboardPage() {
   ] = await Promise.all([
     supabase.from('orders').select('id', { count: 'exact', head: true }).eq('customer_id', user.id),
     supabase.from('orders').select('id', { count: 'exact', head: true }).eq('customer_id', user.id).in('status', ['cekajici', 'prijato', 'v_procesu']),
-    supabase.from('orders').select('id, status, created_at, services(title, price, price_unit), profiles!orders_provider_id_fkey(full_name)').eq('customer_id', user.id).order('created_at', { ascending: false }).limit(10),
+    supabase.from('orders').select('id, status, booking_state, offer_kind, created_at, services(title, price, price_unit), profiles!orders_provider_id_fkey(full_name)').eq('customer_id', user.id).order('created_at', { ascending: false }).limit(10),
     supabase.from('favorites').select('provider_id, profiles!favorites_provider_id_fkey(id, full_name, avatar_url, city, rating, review_count)').eq('user_id', user.id).order('created_at', { ascending: false }).limit(8),
   ])
 
@@ -337,8 +338,8 @@ export default async function DashboardPage() {
                     {datum(o.created_at)}
                   </p>
                 </div>
-                <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${statusColors[o.status] ?? 'bg-slate-100 text-slate-500'}`}>
-                  {statusLabels[o.status] ?? o.status}
+                <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${bookingStatusBadge(o)?.cls ?? statusColors[o.status] ?? 'bg-slate-100 text-slate-500'}`}>
+                  {bookingStatusBadge(o)?.label ?? statusLabels[o.status] ?? o.status}
                 </span>
                 <ChevronRight className="h-5 w-5 shrink-0 text-slate-300" />
               </Link>

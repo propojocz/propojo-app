@@ -25,7 +25,7 @@ import { CheckCircle2, AlertCircle, Loader2, ChevronRight, ChevronDown, Store, H
 import { createService, updateService } from '@/lib/actions/services'
 import { createOwnSubcategory } from '@/lib/actions/subcategories'
 import type { Service, ServiceItem } from '@/types/database'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, getBrowserUser } from '@/lib/supabase/client'
 import ServiceCard from '@/components/ui/ServiceCard'
 import ImageUpload from '@/components/ui/ImageUpload'
 import GalleryUpload from '@/components/ui/GalleryUpload'
@@ -166,7 +166,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
   useEffect(() => {
     const load = async () => {
       const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
+      const user = await getBrowserUser(supabase)
       if (!user) return
       const { data } = await supabase
         .from('profiles')

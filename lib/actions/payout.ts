@@ -837,7 +837,9 @@ export async function autoReleaseUnpaidReservations(): Promise<{ released: numbe
     .eq('status', 'prijato')
     .eq('deposit_status', 'pending')
     .not('slot_id', 'is', null)
-    .lt('created_at', cutoff) as { data: any[] | null }
+    // Starší objednávky po 24 h; nové přímé rezervace hned po vypršení zámku průvodce
+    // (platba nezačala, nic není předautorizováno).
+    .or(`created_at.lt.${cutoff},hold_expires_at.lt.${new Date().toISOString()}`) as { data: any[] | null }
 
   let released = 0
   let failed = 0

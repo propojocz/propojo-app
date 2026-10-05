@@ -34,6 +34,7 @@ Standard tarif:
 - 10 % z částky placené přes Propojo,
 - minimum 29 Kč,
 - maximum 89 Kč,
+- přirážka 2 % z části platby nad 3 000 Kč, bez stropu (rozhodnutí Mateje 4. 10. 2026; např. 5 450 Kč → 89 + 49 = 138 Kč),
 - částky bez DPH; pokud se DPH uplatní, připočte se.
 
 Provize se počítá pouze z Rezervačního poplatku a Ceny výjezdu. Nikdy ne z konečné ceny Hlavní smlouvy.
@@ -233,7 +234,7 @@ Pravidlo pro vývoj:
 - Doplatek není v MVP.
 
 ### OPEN – LEGAL (čeká na právničku, čísla podle odeslaného podkladu)
-1. Provize 10 % / min 29 / max 89 Kč, nevracení při refundu, minimum 200 Kč, měsíční doklad, application fee a PSD2.
+1. Provize 10 % / min 29 / max 89 Kč (od 4. 10. 2026 + 2 % z části nad 3 000 Kč – právničce doplnit), nevracení při refundu, minimum 200 Kč, měsíční doklad, application fee a PSD2.
 2. Potvrzení / odmítnutí rezervace úkonem ve Stripe Dashboardu; povinnost udržovat Stripe účet funkční.
 3. Vznik Rezervační smlouvy až úspěšným capture; předstih 60 min (VOP, nebo jen technický parametr).
 4. Předem udělený pokyn poskytovatele k automatickým refundům (forma souhlasu, PSD2).
@@ -259,7 +260,8 @@ Pravidlo pro vývoj:
     - zachování nebo odpuštění původní provize při schváleném handoffu.
 
 ### ROZHODNUTO MATEJEM, ALE LIŠÍ SE OD ODESLANÉHO PODKLADU / VOP 4.x
-- Cena výjezdu se do následné zakázky NIKDY nezapočítává, poskytovatel nemá volbu (28. 9. 2026). Odeslaný podklad (bod 8) a VOP 11.6 / 12.7 zatím počítají s volbou poskytovatele. Implementovat „nikdy“, právničku o změně informovat.
+- ZMĚNĚNO 4. 10. 2026: o započtení Ceny výjezdu do následné zakázky rozhoduje poskytovatel u Nabídky výjezdu (zaškrtávací pole v editoru, výchozí „nezapočítává se“). Odpovídá VOP v4.1 čl. 11.6 a 10.7. Zákazník slib vidí před objednáním i nad tlačítkem platby; snapshot se ukládá do `orders.quote_fee_deductible` a do evidence shrnutí. Propojo započtení nekontroluje ani nevymáhá. (Původní rozhodnutí 28. 9. „nikdy“ zrušeno.)
+- Provize: přirážka 2 % z části platby nad 3 000 Kč (4. 10. 2026). V odeslaném podkladu není – doplnit právničce, promítnout do Ceníku.
 - Zákazník nezastižen: jen po validním check-inu, alespoň jeden pokus o kontakt, jednotná čekací doba 15 min; Cena výjezdu včetně dopravy se pak nevrací (28. 9. 2026). V odeslaném podkladu není – doplnit právničce.
 - Doprava u Modelu B: zahrnutá v ceně, nebo připočtená podle km (28. 9. 2026). Nutné promítnout do informací před objednáním.
 

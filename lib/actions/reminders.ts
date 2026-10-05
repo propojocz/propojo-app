@@ -45,7 +45,7 @@ export async function sendTomorrowReminders(): Promise<{ sent: number; skipped: 
 
   const { data: rows } = await admin
     .from('orders')
-    .select('id, customer_id, provider_id, scheduled_at, location_city, reminder_sent_at, status, deposit_status, hold_expires_at, service_items(name), services(title, city)')
+    .select('id, customer_id, provider_id, scheduled_at, scheduled_end, location_city, reminder_sent_at, status, booking_state, offer_kind, deposit_status, hold_expires_at, service_items(name), services(title, city)')
     .not('scheduled_at', 'is', null)
     .is('reminder_sent_at', null)
     .neq('status', 'zruseno')
@@ -57,6 +57,10 @@ export async function sendTomorrowReminders(): Promise<{ sent: number; skipped: 
   let skipped = 0
 
   for (const o of rows ?? []) {
+    // Model v2: připomínat jen potvrzenou rezervaci (platba stržená). Nepotvrzená nebo
+    // zrušená rezervace se jako „zítra máte termín“ nikdy neukáže.
+    if (o.booking_state != null && o.booking_state !== 'confirmed') { skipped++; continue }
+
     // Rozdělaná platba s prošlým zámkem termín nedrží — připomínat ji nemá smysl.
     if (o.deposit_status === 'pending' && o.hold_expires_at
         && new Date(o.hold_expires_at).getTime() <= Date.now()) { skipped++; continue }
@@ -68,7 +72,10 @@ export async function sendTomorrowReminders(): Promise<{ sent: number; skipped: 
     if (den !== tomorrowStr) { skipped++; continue }
 
     const nazev = o.service_items?.name || o.services?.title || 'Objednaná služba'
-    const cas = fmtTime(o.scheduled_at)
+    // Výjezd (B): termín je okno příjezdu „10:00–12:00“.
+    const cas = o.offer_kind === 'B' && o.scheduled_end
+      ? `${fmtTime(o.scheduled_at)}–${fmtTime(o.scheduled_end)}`
+      : fmtTime(o.scheduled_at)
     const misto = o.location_city || o.services?.city || null
 
     try {

@@ -22,10 +22,10 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { CheckCircle2, Loader2, MapPin, Store, X, Clock, Wallet, CalendarDays, Truck, AlertTriangle, MessageCircle, Package, Minus, Plus } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { createOrder } from '@/lib/actions/orders'
+import { createOrder, getOpenOrderForItem } from '@/lib/actions/orders'
 import { reserveSlotForItem } from '@/lib/actions/slots'
 import { orderProduct } from '@/lib/actions/product-order'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, getBrowserUser } from '@/lib/supabase/client'
 import type { ServiceItem, PriceUnit } from '@/types/database'
 import { formatItemPrice, packageLabel } from '@/lib/price-format'
 import { vyzadujePotvrzeni, nejdrivejsiDenDodani } from '@/lib/product-confirmation'
@@ -116,12 +116,16 @@ export default function OrderItemModal({
   const [state, setState] = useState<'form' | 'loading' | 'success' | 'error'>('form')
   const [message, setMessage] = useState('')
   const [city, setCity] = useState('')
+  // Obec předvyplněná z profilu zákazníka – upozornit, ať ji přepíše, když jde o jiné místo.
+  const [cityFromProfile, setCityFromProfile] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   // Vybraný konkrétní čas — okno i začátek dohromady.
   const [selected, setSelected] = useState<TimeOption | null>(null)
   const [skipSlot, setSkipSlot] = useState(false)
   const [cityGeo, setCityGeo] = useState<{ lat: number; lng: number } | null>(null)
   const [goingToPay, setGoingToPay] = useState(false)
+  // Model v2: kam pokračovat po rezervaci času (průvodce na detailu objednávky)
+  const [nextUrl, setNextUrl] = useState<string | null>(null)
   // Modal může zůstat otevřený delší dobu. Každých 30 s ho přepočítáme, aby
   // časy, které mezitím přešly do minulosti, samy zmizely bez obnovy stránky.
   const [timeTick, setTimeTick] = useState(0)
@@ -217,7 +221,19 @@ export default function OrderItemModal({
       ? distanceKm(providerGeo.lat, providerGeo.lng, cityGeo.lat, cityGeo.lng)
       : null
   const outOfRange = distance != null && radius != null && distance > radius
+  // Mimo dosah: přímou rezervaci času nejde poslat (poskytovatel nic nepotvrzuje),
+  // poptávku ano – poskytovatel vzdálenost uvidí a rozhodne se sám.
   const blockedByRange = outOfRange && hasSlots && !!selected && !skipSlot
+
+  // Už rozjednaná objednávka u stejné položky – ať zákazník neobjednává omylem znovu.
+  const [openOrder, setOpenOrder] = useState<{ id: string; createdAt: string } | null>(null)
+  const [orderAgain, setOrderAgain] = useState(false)
+  useEffect(() => {
+    if (!isLoggedIn || isProductItem) return
+    let cancelled = false
+    getOpenOrderForItem(item.id).then((o) => { if (!cancelled) setOpenOrder(o) })
+    return () => { cancelled = true }
+  }, [isLoggedIn, isProductItem, item.id])
 
   useEffect(() => {
     const id = window.setInterval(() => setTimeTick((v) => v + 1), 30_000)
@@ -238,11 +254,11 @@ export default function OrderItemModal({
     let cancelled = false
     const load = async () => {
       const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
+      const user = await getBrowserUser(supabase)
       if (!user) return
       const { data } = await supabase.from('profiles').select('city').eq('id', user.id).single()
       const c = (data as { city: string | null } | null)?.city
-      if (!cancelled && c) setCity(c)
+      if (!cancelled && c) { setCity(c); setCityFromProfile(true) }
     }
     load()
     return () => { cancelled = true }
@@ -307,6 +323,11 @@ export default function OrderItemModal({
   const productDueAtPickup = jeVyrobek && celkovaCena != null ? Math.max(0, celkovaCena - productDueNow) : 0
 
   const handleSubmit = async () => {
+    // Už rozjednaná objednávka u stejné položky: další jen vědomě (druhé kliknutí).
+    if (openOrder && !orderAgain && !jeVyrobek) {
+      setOrderAgain(true)
+      return
+    }
     // ── Výrobek má vlastní cestu (množství, sklad, den dodání) ──
     if (jeVyrobek) {
       if (needsCity && !city.trim()) {
@@ -377,7 +398,13 @@ export default function OrderItemModal({
           setTimeout(() => { window.location.href = cil }, 900)
         } else {
           setState('success')
-          setTimeout(() => router.push(`/dashboard/objednavky/${res.id}`), 1200)
+          if (isV2) {
+            // Model v2: žádné automatické přesměrování – zákazník si v klidu přečte, co se děje,
+            // a sám pokračuje do průvodce (shrnutí a platba). Termín drží zámek 15 minut.
+            setNextUrl(`/dashboard/objednavky/${res.id}?platba=pruvodce`)
+          } else {
+            setTimeout(() => router.push(`/dashboard/objednavky/${res.id}`), 1200)
+          }
         }
       } else {
         setState('error'); setErrorMsg(res.error)
@@ -443,7 +470,7 @@ export default function OrderItemModal({
                   </div>
                   <p className="text-lg font-black text-emerald-800">
                     {bookedIso
-                      ? (goingToPay ? 'Termín pro vás držíme' : 'Termín je váš! 🎉')
+                      ? (goingToPay || isV2 ? 'Termín pro vás držíme' : 'Termín je váš! 🎉')
                       : jeVyrobek ? 'Objednávka vytvořena' : isModelB && isV2 ? 'Poptávka výjezdu odeslána' : 'Objednávka odeslána'}
                   </p>
                   {bookedIso ? (
@@ -466,6 +493,21 @@ export default function OrderItemModal({
                         <p className="text-xs font-semibold text-emerald-700">
                           Otevírám platbu… termín držíme 30 minut, potvrdí ho zaplacení.
                         </p>
+                      ) : isV2 ? (
+                        <>
+                          <p className="text-xs text-emerald-700">
+                            Termín pro vás držíme 15 minut. Zbývá potvrdit údaje a zaplatit.
+                          </p>
+                          {nextUrl && (
+                            <button
+                              type="button"
+                              onClick={() => router.push(nextUrl)}
+                              className="btn-primary mt-2 w-full justify-center"
+                            >
+                              Pokračovat k dokončení
+                            </button>
+                          )}
+                        </>
                       ) : (
                         <p className="text-xs text-emerald-600">Přesměrovávám na objednávku…</p>
                       )}
@@ -613,6 +655,9 @@ export default function OrderItemModal({
                           <span>
                             Cena výjezdu <strong className="text-slate-900">{quoteFee.toLocaleString('cs-CZ')} Kč</strong> zahrnuje
                             cestu, prohlídku na místě a nacenění.
+                            {(item as any).quote_fee_deductible === true
+                              ? ' Když přijmete nabídku poskytovatele, odečte vám ji z ceny zakázky.'
+                              : ' Do ceny zakázky se nezapočítává.'}
                           </span>
                         ) : (
                           <span>
@@ -885,8 +930,9 @@ export default function OrderItemModal({
                     onPickObec={(picked) => {
                       setCity(picked.obec)
                       setCityGeo({ lat: picked.latitude, lng: picked.longitude })
+                      setCityFromProfile(false)
                     }}
-                    onFreeText={(text) => { setCity(text); setCityGeo(null) }}
+                    onFreeText={(text) => { setCity(text); setCityGeo(null); setCityFromProfile(false) }}
                   />
                   {outOfRange ? (
                     <div className={`mt-2 flex items-start gap-2 rounded-xl border px-3 py-2.5 text-xs leading-relaxed ${
@@ -900,7 +946,7 @@ export default function OrderItemModal({
                           <>
                             <strong>Mimo dosah.</strong> Poskytovatel jezdí do {radius} km,
                             vaše obec je asi {Math.round(distance as number)} km daleko.
-                            Termín takhle rezervovat nejde — zkuste někoho blíž.
+                            Objednat takhle nejde – zkuste prosím někoho blíž.
                           </>
                         ) : (
                           <>
@@ -912,7 +958,10 @@ export default function OrderItemModal({
                       </span>
                     </div>
                   ) : (
-                    <p className="mt-1 text-[11px] text-slate-400">Stačí obec — přesnou adresu doplníte až po přijetí objednávky.</p>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      {cityFromProfile && <><strong className="text-slate-600">Předvyplněno z vašeho profilu</strong> – jde-li o jiné místo, přepište obec. </>}
+                      Teď stačí obec – přesnou adresu potvrdíte až před platbou.
+                    </p>
                   )}
                 </div>
               ) : (
@@ -995,6 +1044,20 @@ export default function OrderItemModal({
 
               {state === 'error' && <p className="text-xs text-red-600">{errorMsg}</p>}
 
+              {/* Už rozjednaná objednávka u stejné položky */}
+              {openOrder && !jeVyrobek && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-800">
+                  <p>
+                    <strong>Tuto službu už u poskytovatele máte rozjednanou</strong>{' '}
+                    (od {new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'numeric', timeZone: 'Europe/Prague' }).format(new Date(openOrder.createdAt))}).
+                  </p>
+                  <Link href={`/dashboard/objednavky/${openOrder.id}`} className="mt-1 inline-block font-bold text-amber-900 underline">
+                    Otevřít objednávku
+                  </Link>
+                  {orderAgain && <p className="mt-1">Opravdu chcete objednat další? Klikněte na tlačítko ještě jednou.</p>}
+                </div>
+              )}
+
               <button
                 onClick={handleSubmit}
                 disabled={submitDisabled}
@@ -1011,7 +1074,9 @@ export default function OrderItemModal({
                       ? (deposit > 0
                           ? <><Wallet className="h-4 w-4" /> {selected ? `Rezervovat ${fmtTime(selected.startIso)} a zaplatit` : 'Rezervovat a zaplatit'}</>
                           : <><CalendarDays className="h-4 w-4" /> {selected ? `Rezervovat ${fmtTime(selected.startIso)}` : 'Rezervovat termín'}</>)
-                      : isModelB ? 'Odeslat poptávku' : skipSlot ? 'Odeslat objednávku bez termínu' : 'Odeslat objednávku'}
+                      : openOrder && orderAgain
+                        ? 'Ano, objednat další'
+                        : isModelB ? 'Odeslat poptávku' : skipSlot ? 'Odeslat objednávku bez termínu' : 'Odeslat objednávku'}
               </button>
 
               <p className="text-center text-[11px] leading-relaxed text-slate-400">

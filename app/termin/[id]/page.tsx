@@ -74,10 +74,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function TerminPage({ params }: Props) {
   const supabase = createClient()
+  const adminDb = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
 
   const { data: slot } = await supabase
     .from('availability_slots')
-    .select('id, provider_id, starts_at, ends_at, status, pending_confirm')
+    .select('id, provider_id, starts_at, ends_at, status, pending_confirm, order_id')
     .eq('id', params.id)
     .single() as { data: SlotRow | null }
 
@@ -105,10 +109,6 @@ export default async function TerminPage({ params }: Props) {
 
   // Viditelnost stejná jako v marketplace: bez aktivního předplatného karta neexistuje.
   // (Čte se přes service role — subscriptions má RLS „každý vidí jen svoje".)
-  const adminDb = createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
   const { data: subs } = await adminDb
     .from('subscriptions')
     .select('user_id')
@@ -126,6 +126,22 @@ export default async function TerminPage({ params }: Props) {
   // obsazený — nabídne se, teprve až ho poskytovatel zveřejní.
   const isTaken = slot.status !== 'volno' || (slot as any).pending_confirm === true
   const gone = isPast || isTaken
+
+  // Termín zabral právě přihlášený zákazník (třeba před chvílí tady na stránce) –
+  // místo „někdo byl rychlejší“ mu ukážeme jeho rezervaci a cestu k dokončení.
+  let myOrder: { id: string; booking_state: string | null } | null = null
+  if (isTaken && user && (slot as any).order_id) {
+    const { data: o } = await adminDb
+      .from('orders')
+      .select('id, customer_id, booking_state, status')
+      .eq('id', (slot as any).order_id)
+      .maybeSingle()
+    const ord = o as { id: string; customer_id: string; booking_state: string | null; status: string } | null
+    if (ord && ord.customer_id === user.id && ord.status !== 'zruseno') {
+      myOrder = { id: ord.id, booking_state: ord.booking_state }
+    }
+  }
+  const myOrderNeedsPayment = !!myOrder && (myOrder.booking_state === null || myOrder.booking_state === 'pending_payment')
 
   // Úkony, které se do okna vejdou (jen zveřejněné, model A — nacenění se nerezervuje na čas)
   let items: ServiceItem[] = []
@@ -177,7 +193,7 @@ export default async function TerminPage({ params }: Props) {
           <div className={`px-5 py-4 ${gone ? 'bg-slate-100' : 'bg-emerald-50'}`}>
             <p className={`flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider ${gone ? 'text-slate-500' : 'text-emerald-700'}`}>
               {gone ? <CircleAlert className="h-3.5 w-3.5" /> : <CircleCheck className="h-3.5 w-3.5" />}
-              {isPast ? 'Termín už proběhl' : isTaken ? 'Termín je obsazený' : 'Volný termín'}
+              {isPast ? 'Termín už proběhl' : myOrder ? 'Váš termín' : isTaken ? 'Termín je obsazený' : 'Volný termín'}
             </p>
             <p className="mt-1 text-2xl font-black leading-tight text-slate-900">
               {fmtDayLong(slot.starts_at)}
@@ -205,7 +221,22 @@ export default async function TerminPage({ params }: Props) {
         </div>
 
         {/* Obsah podle stavu */}
-        {gone ? (
+        {myOrder && !isPast ? (
+          <div className="mt-4 rounded-2xl border border-emerald-200 bg-white p-6 text-center">
+            <p className="font-bold text-slate-900">Tento termín jste si rezervovali</p>
+            <p className="mt-1 text-sm leading-relaxed text-slate-600">
+              {myOrderNeedsPayment
+                ? 'Termín pro vás krátce držíme. Zbývá potvrdit údaje a zaplatit.'
+                : 'Stav rezervace najdete v detailu objednávky.'}
+            </p>
+            <Link
+              href={`/dashboard/objednavky/${myOrder.id}${myOrderNeedsPayment ? '?platba=pruvodce' : ''}`}
+              className="mt-4 inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-2.5 font-bold text-white transition hover:bg-emerald-600"
+            >
+              {myOrderNeedsPayment ? 'Pokračovat k dokončení' : 'Detail rezervace'} <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        ) : gone ? (
           <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-6 text-center">
             <p className="text-sm leading-relaxed text-slate-600">
               {isPast

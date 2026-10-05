@@ -59,6 +59,8 @@ Právní a produktová rozhodnutí se dělají mimo repo (claude.ai projekt Prop
 - Vrstva 1: `lib/booking/` (policy, commission, state, rules) + `docs/sql/rezervace-vrstva1.sql` – hotové, SQL spuštěno v Supabase 25. 9. 2026. Kód zatím nepřipojený.
 - Vrstva 2: Stripe Connect Standard + Direct Charges + manual capture, webhook z připojených účtů, okno příjezdu u výjezdu, domluvený termín, zrušení před platbou, povinná adresa u výjezdu – hotové a ručně otestované 28. 9. – 1. 10. 2026 (Test mode). Potvrzení zatím jen ve Stripe Dashboardu.
 - Vrstva 3a (potvrzení / odmítnutí, zrušení před potvrzením, ověření platby po návratu ze Stripe) – hotové a otestované 2. 10. 2026. 3b a 3g napsané, čekají na test.
+- Mimo dosah a cena dohodou (4. 10. 2026): poptávku mimo dosah lze poslat, poskytovatel jen vidí vzdálenost a rozhodne sám. Přímá rezervace času mimo dosah zůstává blokovaná. Poskytovatel může u návrhu termínu upravit Rezervační poplatek / Cenu výjezdu (A, B; 200–20 000 Kč), zákazník ji potvrdí s termínem. SQL `docs/sql/rezervace-cena-dohodou.sql` (`order_time_proposals.charge_halere`, `price_note`, `orders.agreed_charge_halere`).
+- Započtení Ceny výjezdu volbou poskytovatele + provize s přirážkou 2 % nad 3 000 Kč (4. 10. 2026, policy `2026-10-04-v2`, shrnutí `recap-2026-10-04-v4`). SQL `docs/sql/rezervace-zapocteni-vyjezdu.sql`.
 - Vrstva 3 (zbytek): 3a tlačítka Potvrdit / Odmítnout pro providera + zrušení zákazníkem před potvrzením; 3b krokový průvodce před platbou (termín → adresa předvyplněná a potvrzená → rekapitulace s kontaktem a souhlasem → platba); 3g nadcházející potvrzené rezervace: provider výsuvný přehled + přidání do kalendáře, zákazník lišta „Dorazte …“ + přidání do kalendáře (jen `booking_state = confirmed`).
 - Do `main` až s hotovou vrstvou 3, která musí obsahovat:
   - UI potvrzení/odmítnutí providerem + hlídání 48h lhůty,
@@ -85,7 +87,7 @@ Právní a produktová rozhodnutí se dělají mimo repo (claude.ai projekt Prop
   - u položky B nenabízet Rezervační zálohu; jediná platba je Cena výjezdu (`quote_fee`), a ta má být v editoru první a jasně pojmenovaná,
   - lhůta „Nabídku dodám do“ musí mít i volbu „ihned na místě“,
   - Doprava (rozhodnuto 28. 9. 2026, obě varianty v MVP): buď zahrnutá v Ceně výjezdu, nebo připočtená podle silniční vzdálenosti z adresy nabídky k zákazníkovi (Mapy.cz). Provider zadá „zdarma do X km, pak Y Kč za každý další km“. Výpočet na serveru z přesné adresy (korekce 5), zahrnutý do předautorizované Ceny výjezdu; zákazník před platbou vidí rozpad Cena výjezdu + doprava = celkem. Po předautorizaci se výpočet nemění. Ve vrstvě 2 jsou Kč/km jen skryté – nemazat.
-  - Cena výjezdu se do následné zakázky nikdy nezapočítává, provider nemá volbu (model §20).
+  - Započtení Ceny výjezdu do následné zakázky volí poskytovatel u položky (`service_items.quote_fee_deductible`, hotovo 4. 10. 2026, VOP 11.6).
   - Stav „Zákazník nezastižen“: jen po validním check-inu, alespoň jeden pokus o kontakt, jednotná čekací doba 15 min (nenastavitelná providerem); Cena výjezdu včetně dopravy se pak nevrací (model §20).
 
 ## Před ostrým spuštěním (vypnutím údržby)
@@ -94,3 +96,10 @@ Právní a produktová rozhodnutí se dělají mimo repo (claude.ai projekt Prop
 - Odstraněná brána předplatného.
 - Sběr údajů pro DAC7.
 - Finální VOP a Privacy Policy.
+- Z pracovních VOP v4.1 (3. 10. 2026), zatím neimplementováno:
+  - potvrzení potvrzené Rezervace e-mailem (trvalý nosič) s údaji poskytovatele, předmětem, termínem, poplatkem a poučením (čl. 8.3),
+  - odstoupení od Rezervační smlouvy funkcí v aplikaci + potvrzení e-mailem s datem a časem (čl. 9.1; tabulka `withdrawals` existuje),
+  - souhlas zákazníka s poskytnutím údajů k Hlavní smlouvě v textové podobě už při odeslání Rezervace (čl. 10.4),
+  - Ceník, FAQ a registrace (`app/cenik`, `app/faq`, `app/prihlasit`, `app/pridat-sluzbu`) ještě popisují předplatné a 0 % provize – přepsat na provizi 10 % (min. 29, max. 89 Kč) + 2 % z části platby nad 3 000 Kč.
+- Otázka pro právničku (3. 10. 2026): shrnutí před platbou je minimalistické – viditelná je jedna věta o platbě, započtení/vrácení a pravidla zrušení jsou pod ⓘ. Stačí to pro VOP čl. 7.8 („bezprostředně před ovládacím prvkem“)?
+- Otázka pro právničku (3. 10. 2026): smí poskytovatel nastavit Rezervační poplatek ve výši celé ceny služby („jako Reservio“)? VOP 7.4/7.6 a model §3, §18 s tím nepočítají; provize je max. 89 Kč, nad 3 000 Kč navíc 2 % z přesahu.

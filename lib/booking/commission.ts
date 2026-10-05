@@ -1,6 +1,7 @@
 // lib/booking/commission.ts
 // Provize Propojo = application fee ve Stripe.
-// 10 % z Rezervačního poplatku / Ceny výjezdu, minimum 29 Kč, maximum 89 Kč (bez DPH);
+// 10 % z Rezervačního poplatku / Ceny výjezdu, minimum 29 Kč, maximum 89 Kč (bez DPH),
+// k tomu přirážka 2 % z části platby nad 3 000 Kč (bez stropu);
 // pokud se DPH uplatní, připočte se. Nikdy se nepočítá z ceny Hlavní smlouvy.
 // Vše v celých haléřích, zaokrouhlení matematicky (0,5 nahoru).
 
@@ -38,7 +39,10 @@ export function computeCommission(
   }
 
   const raw = applyBps(chargeHalere, commission.rateBps)
-  const baseHalere = Math.min(commission.maxBaseHalere, Math.max(commission.minBaseHalere, raw))
+  const capped = Math.min(commission.maxBaseHalere, Math.max(commission.minBaseHalere, raw))
+  // Přirážka jen z části nad hranicí – provize roste plynule, bez skoku na hranici.
+  const over = Math.max(0, chargeHalere - commission.surcharge.thresholdHalere)
+  const baseHalere = capped + applyBps(over, commission.surcharge.rateBps)
   const vatHalere = applyBps(baseHalere, commission.vatRateBps)
   const applicationFeeHalere = baseHalere + vatHalere
 
@@ -68,11 +72,19 @@ export interface ChargeableItem {
   /** Cena výjezdu (B) v Kč */
   quote_fee: number | string | null
   deposit_type?: string | null
+  /** Cena upravená poskytovatelem u konkrétní objednávky a přijatá zákazníkem (v haléřích); má přednost */
+  agreed_charge_halere?: number | null
 }
 
 export type BookingChargeResult =
   | { ok: true; offerKind: OfferKind; commission: CommissionBreakdown }
   | { ok: false; error: string }
+
+/** Cena z nabídky (bez úpravy u objednávky) v Kč, nebo null */
+export function itemPriceKc(item: Pick<ChargeableItem, 'offer_kind' | 'deposit_amount' | 'quote_fee'>): number | null {
+  const kc = Number(item.offer_kind === 'B' ? item.quote_fee : item.deposit_amount)
+  return Number.isFinite(kc) && kc > 0 ? kc : null
+}
 
 export function isOfferKind(value: unknown): value is OfferKind {
   return typeof value === 'string' && (OFFER_KINDS as readonly string[]).includes(value)
@@ -88,6 +100,15 @@ export function bookingCharge(item: ChargeableItem, policy: BookingPolicy = BOOK
   }
   if (item.deposit_type === 'plna_platba') {
     return { ok: false, error: 'Tuto položku nelze v novém modelu rezervovat (platba celé ceny předem už není možná).' }
+  }
+  const agreed = item.agreed_charge_halere != null ? Number(item.agreed_charge_halere) : null
+  if (agreed != null) {
+    if (!Number.isInteger(agreed) || agreed > policy.maxAgreedChargeHalere) {
+      return { ok: false, error: 'Upravená cena není platná.' }
+    }
+    const result = computeCommission(agreed, policy.commission, policy.minChargeHalere)
+    if (!result.ok) return result
+    return { ok: true, offerKind: item.offer_kind, commission: result.commission }
   }
   const kc = Number(item.offer_kind === 'B' ? item.quote_fee : item.deposit_amount)
   if (!Number.isFinite(kc) || kc <= 0) {

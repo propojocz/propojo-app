@@ -59,6 +59,8 @@ export default function TerminyClient({
   const [err, setErr] = useState('')
   // Právě vytvořené okno — otevře panel „Komu dát vědět?"
   const [createdSlot, setCreatedSlot] = useState<{ id: string; label: string } | null>(null)
+  // Okno mimo otevírací dobu – čeká na potvrzení „opravdu pracuji“
+  const [askOutsideHours, setAskOutsideHours] = useState(false)
   // Zbytek okna, o kterém se právě rozhoduje
   const [remBusy, setRemBusy] = useState<string | null>(null)
 
@@ -74,8 +76,9 @@ export default function TerminyClient({
   const fmtTime = (iso: string) =>
     new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
 
-  const submit = async () => {
+  const submit = async (outsideHoursConfirmed = false) => {
     setErr('')
+    setAskOutsideHours(false)
     setCreatedSlot(null)
     if (!date || !from || !to) { setErr('Vyplňte den a čas od–do.'); return }
     if (checked.length === 0) { setErr('Zaškrtněte alespoň jednu kartu, jejíž ceník se do okna nabídne.'); return }
@@ -88,6 +91,7 @@ export default function TerminyClient({
       starts_at: startsAt.toISOString(),
       ends_at: endsAt.toISOString(),
       service_ids: checked,
+      outsideHoursConfirmed,
     })
 
     if (res.success && res.id) {
@@ -97,6 +101,8 @@ export default function TerminyClient({
       router.refresh()
     } else if (!res.success) {
       setErr(res.error)
+      // Mimo otevírací dobu: jen otázka, poskytovatel může okno přidat i tak.
+      if ('confirm' in res && res.confirm === 'outside_hours') setAskOutsideHours(true)
     }
     setBusy(false)
   }
@@ -268,9 +274,32 @@ export default function TerminyClient({
               </div>
             </div>
 
-            {err && <p className="text-sm text-red-600">{err}</p>}
+            {err && !askOutsideHours && <p className="text-sm text-red-600">{err}</p>}
 
-            <button onClick={submit} disabled={busy} className="btn-primary w-full justify-center disabled:opacity-60">
+            {askOutsideHours && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                <p>{err}</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => submit(true)}
+                    disabled={busy}
+                    className="rounded-lg bg-amber-500 px-3 py-1.5 text-sm font-bold text-white hover:bg-amber-600 disabled:opacity-60"
+                  >
+                    Ano, v tomto čase pracuji – přidat okno
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setAskOutsideHours(false); setErr('') }}
+                    className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-semibold text-amber-800 hover:bg-amber-100"
+                  >
+                    Upravit čas
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <button onClick={() => submit()} disabled={busy} className="btn-primary w-full justify-center disabled:opacity-60">
               {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Ukládám…</> : <><Plus className="h-4 w-4" /> Přidat okno</>}
             </button>
           </div>

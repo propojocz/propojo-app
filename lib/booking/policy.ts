@@ -16,8 +16,15 @@ export interface CommissionPolicy {
   rateBps: number
   /** Minimum provize bez DPH v haléřích */
   minBaseHalere: number
-  /** Maximum provize bez DPH v haléřích */
+  /** Maximum provize bez DPH v haléřích (bez přirážky nad hranicí) */
   maxBaseHalere: number
+  /** Přirážka z části platby nad hranicí – přičte se k provizi, strop se na ni nevztahuje */
+  surcharge: {
+    /** Hranice v haléřích (z částky do této výše se přirážka nepočítá) */
+    thresholdHalere: number
+    /** Sazba přirážky v bazických bodech: 200 = 2 % */
+    rateBps: number
+  }
   /** DPH v bazických bodech: 0 = neuplatňuje se, 2100 = 21 % */
   vatRateBps: number
 }
@@ -36,6 +43,8 @@ export interface BookingPolicy {
   currency: 'czk'
   /** Minimální placená částka (Rezervační poplatek / Cena výjezdu) */
   minChargeHalere: number
+  /** Horní hranice ceny, kterou poskytovatel upraví u konkrétní objednávky (pojistka proti překlepu) */
+  maxAgreedChargeHalere: number
   /** Minimální předstih rezervace před začátkem termínu (Stripe Checkout žije min. 30 min) */
   minLeadMinutes: number
   /** Platnost Stripe Checkout session (Stripe minimum je 30 min) */
@@ -69,9 +78,10 @@ export interface BookingPolicy {
 }
 
 export const BOOKING_POLICY: BookingPolicy = {
-  version: '2026-09-25-v1',
+  version: '2026-10-04-v2',
   currency: 'czk',
   minChargeHalere: 20000, // 200 Kč
+  maxAgreedChargeHalere: 2000000, // 20 000 Kč
   minLeadMinutes: 60, // parametr k potvrzení
   checkoutTtlMinutes: 30,
   confirmationWindowHours: 48,
@@ -79,6 +89,8 @@ export const BOOKING_POLICY: BookingPolicy = {
     rateBps: 1000, // 10 %
     minBaseHalere: 2900, // 29 Kč
     maxBaseHalere: 8900, // 89 Kč
+    // Rozhodnutí Mateje 4. 10. 2026: nad 3 000 Kč navíc 2 % z části nad hranicí (např. 5 450 Kč → 89 + 49 = 138 Kč)
+    surcharge: { thresholdHalere: 300000, rateBps: 200 },
     vatRateBps: 0, // nastavit podle DPH statusu provozovatele (21 % = 2100)
   },
   cannotKeepExpiryHours: 24,

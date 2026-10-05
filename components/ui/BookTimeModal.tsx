@@ -17,7 +17,6 @@ import { useRouter } from 'next/navigation'
 import type { ServiceItem } from '@/types/database'
 import type { FreeDay } from '@/lib/actions/free-times'
 import { reserveTime } from '@/lib/actions/reserve-time'
-import { createDepositCheckout } from '@/lib/actions/deposit'
 import SearchAutocomplete from '@/components/ui/SearchAutocomplete'
 
 interface Props {
@@ -87,23 +86,9 @@ export default function BookTimeModal({
       return
     }
 
-    // Bez zálohy je hotovo hned. Se zálohou jdeme na platební bránu —
-    // dokud se nezaplatí, termín drží zámek jen 10 minut.
-    if (!res.needsPayment) {
-      router.push(`/dashboard/objednavky/${res.id}`)
-      return
-    }
-
-    const pay = await createDepositCheckout(res.id)
-    if (pay.success) {
-      window.location.href = pay.url
-    } else {
-      // Objednávka existuje, jen se nepovedlo spustit platbu — pošleme
-      // zákazníka na detail, kde platbu zkusí znovu.
-      setError(pay.error)
-      setBusy(false)
-      router.push(`/dashboard/objednavky/${res.id}`)
-    }
+    // Model v2: termín drží krátký zámek. Na detailu objednávky se otevře krokový
+    // průvodce (adresa, shrnutí s kontaktem, souhlas) a z něj teprve platba.
+    router.push(`/dashboard/objednavky/${res.id}${res.needsPayment ? '?platba=pruvodce' : ''}`)
   }
 
   return (

@@ -21,8 +21,9 @@ import { bookingBufferMs } from '@/lib/booking/rules'
 import { adminDb, checkNewBooking, logOrderEvent } from '@/lib/booking/payments'
 
 // Model v2: každá rezervace je placená (min. 200 Kč) a začíná preautorizací.
-// Zámek drží čas jen do otevření platby; pak ho prodlouží checkout (deposit.ts).
-const HOLD_MINUTES = 10
+// Zámek drží čas, než zákazník projde krokového průvodce (adresa, rekapitulace, souhlas)
+// a otevře platbu; pak ho prodlouží checkout (deposit.ts). Po vypršení se vybírá znovu.
+const HOLD_MINUTES = 15
 
 type Result =
   | { success: true; id: string; needsPayment: boolean }

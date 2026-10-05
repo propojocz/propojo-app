@@ -20,6 +20,7 @@ import { BOOKING_POLICY } from '@/lib/booking/policy'
 import { cas } from '@/lib/format'
 import { bookingBufferMs } from '@/lib/booking/rules'
 import { adminDb, checkNewBooking } from '@/lib/booking/payments'
+import { bookingCharge, itemPriceKc } from '@/lib/booking/commission'
 
 // Stripe checkout běží 30 minut. Držíme o 5 minut déle kvůli zpoždění webhooku.
 const HOLD_MINUTES = 35
@@ -31,7 +32,14 @@ function v2Locked(order: any): boolean {
 }
 const MAX_PROPOSALS = 6
 
-export type Proposal = { id: string; starts_at: string; ends_at: string }
+export type Proposal = {
+  id: string
+  starts_at: string
+  ends_at: string
+  /** Cena upravená poskytovatelem pro tuto objednávku (haléře); null = cena z nabídky */
+  charge_halere?: number | null
+  price_note?: string | null
+}
 
 type Result = { success: true } | { success: false; error: string }
 type AcceptResult =
@@ -183,7 +191,7 @@ export async function getProposals(orderId: string): Promise<Proposal[]> {
   const supabase = createClient()
   const { data } = await supabase
     .from('order_time_proposals')
-    .select('id, starts_at, ends_at')
+    .select('id, starts_at, ends_at, charge_halere, price_note')
     .eq('order_id', orderId)
     .order('starts_at', { ascending: true }) as { data: Proposal[] | null }
   return data ?? []
@@ -195,6 +203,8 @@ export async function proposeTimes(
   starts: string[],
   /** Model B: délka okna příjezdu v minutách (jen hodnoty z policy) */
   arrivalWindowMinutes?: number,
+  /** Cena upravená poskytovatelem pro tuto objednávku (např. delší cesta). Prázdné = cena z nabídky. */
+  price?: { kc: number; note?: string | null } | null,
 ): Promise<Result> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -235,7 +245,31 @@ export async function proposeTimes(
     ? (arrivalWindowMinutes ?? BOOKING_POLICY.arrivalWindow.defaultMinutes)
     : Number(order.service_items?.duration_minutes ?? 0) || 60
 
-  const rows: { order_id: string; starts_at: string; ends_at: string }[] = []
+  // Upravená cena: jen u nového modelu (A, B), v celých korunách, min. 200 Kč, s pojistkou proti překlepu.
+  // Platí pro všechny posílané termíny; zákazník ji potvrdí přijetím termínu.
+  let chargeHalere: number | null = null
+  let priceNote: string | null = null
+  if (price) {
+    const kind = order.service_items?.offer_kind
+    if (kind !== 'A' && kind !== 'B') {
+      return { success: false, error: 'Cenu lze upravit jen u služby nebo výjezdu.' }
+    }
+    if (!Number.isInteger(price.kc) || price.kc <= 0) {
+      return { success: false, error: 'Zadejte cenu v celých korunách.' }
+    }
+    const base = itemPriceKc(order.service_items)
+    if (base == null || price.kc !== base) {
+      const check = bookingCharge({ ...order.service_items, agreed_charge_halere: price.kc * 100 })
+      if (!check.ok) return { success: false, error: check.error }
+      if (price.kc * 100 > BOOKING_POLICY.maxAgreedChargeHalere) {
+        return { success: false, error: `Cena může být nejvýš ${BOOKING_POLICY.maxAgreedChargeHalere / 100} Kč.` }
+      }
+      chargeHalere = price.kc * 100
+      priceNote = price.note?.trim().slice(0, 200) || null
+    }
+  }
+
+  const rows: { order_id: string; starts_at: string; ends_at: string; charge_halere?: number | null; price_note?: string | null }[] = []
   for (const s of clean) {
     const d = new Date(s)
     if (isNaN(d.getTime())) return { success: false, error: 'Neplatný termín.' }
@@ -247,6 +281,8 @@ export async function proposeTimes(
       order_id: orderId,
       starts_at: d.toISOString(),
       ends_at: new Date(d.getTime() + duration * 60000).toISOString(),
+      // Sloupce posíláme jen s úpravou ceny – bez ní návrh funguje i bez nového SQL.
+      ...(chargeHalere != null ? { charge_halere: chargeHalere, price_note: priceNote } : {}),
     })
   }
 
@@ -296,7 +332,9 @@ export async function proposeTimes(
       actorId: user.id,
       title: isReschedule
         ? 'Poskytovatel navrhl změnu termínu'
-        : rows.length === 1 ? 'Poskytovatel navrhl termín' : `Poskytovatel navrhl ${rows.length} termíny`,
+        : chargeHalere != null
+          ? (rows.length === 1 ? 'Poskytovatel navrhl termín a upravil cenu' : 'Poskytovatel navrhl termíny a upravil cenu')
+          : rows.length === 1 ? 'Poskytovatel navrhl termín' : `Poskytovatel navrhl ${rows.length} termíny`,
       preview: order.service_items?.name ?? null,
     })
   } catch (err) {
@@ -308,11 +346,14 @@ export async function proposeTimes(
     await (admin.from('messages') as any).insert({
       order_id: orderId,
       sender_id: user.id,
-      content: isReschedule
+      content: (isReschedule
         ? `Navrhuji změnu termínu z ${fmtWhen(order.scheduled_at)} na: ${navrhyText}. Původní termín zatím zůstává platný.`
         : rows.length === 1
           ? `Navrhuji termín ${navrhyText}. Potvrďte ho prosím nahoře v objednávce.`
-          : `Navrhuji termíny: ${navrhyText}. Vyberte si prosím jeden nahoře v objednávce.`,
+          : `Navrhuji termíny: ${navrhyText}. Vyberte si prosím jeden nahoře v objednávce.`)
+        + (chargeHalere != null
+          ? ` Cenu jsem upravil na ${(chargeHalere / 100).toLocaleString('cs-CZ')} Kč${priceNote ? ` (${priceNote})` : ''}.`
+          : ''),
     })
   } catch (err) {
     console.error('[proposeTimes] zpráva:', err)
@@ -357,7 +398,7 @@ export async function acceptProposal(orderId: string, start: string): Promise<Ac
   // Návrh musí opravdu existovat — klientovi se nevěří.
   const { data: proposal } = await admin
     .from('order_time_proposals')
-    .select('id, starts_at, ends_at')
+    .select('id, starts_at, ends_at, charge_halere')
     .eq('order_id', orderId)
     .eq('starts_at', new Date(start).toISOString())
     .maybeSingle() as { data: any }
@@ -384,7 +425,8 @@ export async function acceptProposal(orderId: string, start: string): Promise<Ac
   }
   if (!alreadyPaid) {
     const check = await checkNewBooking(adminDb(), {
-      item: order.service_items ?? { offer_kind: null, deposit_amount: null, quote_fee: null },
+      // Přijetím termínu zákazník přijímá i cenu, kterou k němu poskytovatel případně upravil.
+      item: { ...(order.service_items ?? { offer_kind: null, deposit_amount: null, quote_fee: null }), agreed_charge_halere: proposal.charge_halere ?? null },
       providerId: order.provider_id,
       start: new Date(proposal.starts_at),
       end: new Date(proposal.ends_at),
@@ -430,7 +472,7 @@ export async function acceptProposal(orderId: string, start: string): Promise<Ac
     scheduled_end: proposal.ends_at,
     slot_id: claimedNewSlotId ?? (isReschedule ? null : (order.slot_id ?? null)),
     deposit_amount: v2Charge ? v2Charge.chargeKc : order.deposit_amount ?? null,
-    ...(v2Charge ? { offer_kind: v2Charge.offerKind } : {}),
+    ...(v2Charge ? { offer_kind: v2Charge.offerKind, agreed_charge_halere: proposal.charge_halere ?? null } : {}),
     deposit_status: needsPayment
       ? 'pending'
       : alreadyPaid

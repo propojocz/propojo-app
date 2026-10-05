@@ -9,6 +9,7 @@ import MobileDashboardNav from './MobileDashboardNav'
 import Avatar from '@/components/ui/Avatar'
 import SuspendedBanner from '@/components/ui/SuspendedBanner'
 import ConnectBanner from '@/components/ui/ConnectBanner'
+import NextBookingBar from '@/components/ui/NextBookingBar'
 import { getCustomerTodoCount, getProviderTodoCount } from '@/lib/actions/order-alerts'
 
 function getAdminClient() {
@@ -158,6 +159,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             {/* Bannery: pozastavení + výzva k napojení účtu */}
             <SuspendedBanner />
             <ConnectBanner />
+            <NextBookingBar />
             {children}
           </main>
         </div>

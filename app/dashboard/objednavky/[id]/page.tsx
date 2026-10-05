@@ -9,6 +9,8 @@ import BookingProviderActions from '@/components/ui/BookingProviderActions'
 import { adminDb, syncCheckoutOnReturn } from '@/lib/booking/payments'
 import ReviewForm from '@/components/ui/ReviewForm'
 import TimeProposalPanel from '@/components/ui/TimeProposalPanel'
+import { itemPriceKc } from '@/lib/booking/commission'
+import { haversineKm } from '@/lib/geo'
 import { getProposals } from '@/lib/actions/time-proposals'
 import TimePreferenceForm from '@/components/ui/TimePreferenceForm'
 
@@ -134,6 +136,38 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
   const otherId = isProvider ? order.customer_id : order.provider_id
 
   const proposals = await getProposals(order.id)
+
+  // Vzdálenost zákazníka mimo obvyklý dosah poskytovatele – jen informace pro poskytovatele,
+  // rozhoduje on (přesná adresa, jinak obec z poptávky).
+  let outOfRange: { distanceKm: number; radiusKm: number } | null = null
+  if (isProvider && (order as any).service_location !== 'u_poskytovatele') {
+    const { data: card } = await supabase
+      .from('services').select('location_type, city, city_lat, city_lng, radius_km').eq('id', (order as any).service_id).maybeSingle() as { data: { location_type: string | null; city: string | null; city_lat: number | null; city_lng: number | null; radius_km: number | null } | null }
+    const atCustomer = (order as any).service_location
+      ? (order as any).service_location === 'u_zakaznika'
+      : card?.location_type !== 'u_poskytovatele'
+    // Souřadnice obce z tabulky obce; text může obsahovat i číslo domu („Prostřední Bečva 14“).
+    const obecCoords = async (text: string | null | undefined): Promise<{ lat: number; lng: number } | null> => {
+      const name = String(text ?? '').split(',')[0].replace(/\s+\d+[a-zA-Z/\d]*$/, '').trim()
+      if (!name) return null
+      const { data: obec } = await supabase
+        .from('obce').select('latitude, longitude').ilike('obec', name).limit(1).maybeSingle() as { data: { latitude: number; longitude: number } | null }
+      return obec ? { lat: obec.latitude, lng: obec.longitude } : null
+    }
+    if (atCustomer && card?.radius_km) {
+      const customer = (order as any).location_lat != null && (order as any).location_lng != null
+        ? { lat: Number((order as any).location_lat), lng: Number((order as any).location_lng) }
+        : await obecCoords((order as any).location_city)
+      // Starší karty nemají uložené souřadnice obce – dohledáme je podle názvu.
+      const base = card.city_lat != null && card.city_lng != null
+        ? { lat: Number(card.city_lat), lng: Number(card.city_lng) }
+        : await obecCoords(card.city)
+      if (customer && base) {
+        const dist = Math.round(haversineKm(base.lat, base.lng, customer.lat, customer.lng))
+        if (dist > card.radius_km) outOfRange = { distanceKm: dist, radiusKm: card.radius_km }
+      }
+    }
+  }
   const panelItem = order.service_items
   const panelModel = panelItem?.payment_model ?? order.services?.payment_model
   const panelDepositType = panelItem?.deposit_type ?? 'zaloha'
@@ -234,12 +268,21 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
         cancelReason={(order as any).cancel_reason ?? null}
       />
 
+      {outOfRange && !['confirmed', 'declined', 'expired', 'cancelled', 'capture_failed'].includes(v2BookingState ?? '') && order.status !== 'zruseno' && order.status !== 'dokonceno' && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Zákazník je asi <strong>{outOfRange.distanceKm} km</strong> daleko, mimo váš obvyklý dosah {outOfRange.radiusKm} km (vzdušnou čarou).
+          {' '}Jestli zakázku vezmete a za jakých podmínek, je na vás – domluvit se můžete ve zprávách.
+        </div>
+      )}
+
       {isProvider && (order as any).booking_state === 'awaiting_confirmation' && (
         <BookingProviderActions
           orderId={order.id}
           amountKc={Number((order as any).charge_halere ?? 0) / 100}
+          feeKc={(order as any).application_fee_halere != null ? Number((order as any).application_fee_halere) / 100 : null}
           deadlineAt={(order as any).confirm_deadline_at ?? null}
-          paymentLabel={(order as any).offer_kind === 'B' ? 'Cena výjezdu' : 'Rezervační poplatek'}
+          offerKind={(order as any).offer_kind ?? null}
+          quoteFeeDeductible={(order as any).quote_fee_deductible === true}
         />
       )}
 
@@ -250,7 +293,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
           orderId={order.id}
           isProvider={isProvider}
           proposals={proposals}
-          depositAmount={depositForPanel}
+          depositAmount={v2OfferKind ? (itemPriceKc({ offer_kind: v2OfferKind, deposit_amount: panelItem?.deposit_amount ?? null, quote_fee: panelItem?.quote_fee ?? null }) ?? 0) : depositForPanel}
           scheduledAt={order.scheduled_at}
           depositStatus={order.deposit_status}
           itemName={order.service_items?.name ?? order.services?.title ?? null}
@@ -260,6 +303,8 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
           prefTime={(order as any).pref_time ?? null}
           arrivalWindow={v2OfferKind === 'B'}
           paymentLabel={v2OfferKind ? (v2OfferKind === 'B' ? 'Cenu výjezdu' : 'Rezervační poplatek') : null}
+          customerPlace={isProvider ? ((order as any).location_city ?? null) : null}
+          outOfRange={isProvider ? outOfRange : null}
         />
       )}
 

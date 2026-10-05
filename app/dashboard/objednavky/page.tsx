@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { CalendarDays, AlertCircle } from 'lucide-react'
+import { bookingStatusBadge } from '@/lib/booking/labels'
 
 export const metadata = { title: 'Objednávky | Dashboard' }
 
@@ -23,6 +24,11 @@ const STATUS_COLORS: Record<string, string> = {
 // Díky tomu rezervace nezapadne — nedodělané jdou nahoru a je vidět proč.
 function customerTodo(o: any): string | null {
   if (o.status === 'zruseno' || o.status === 'dokonceno') return null
+  // Model v2: jediný úkol zákazníka je dokončit platbu, dokud rezervace nečeká na poskytovatele.
+  if (o.booking_state || o.offer_kind) {
+    const ceka = o.booking_state === 'pending_payment' || (o.booking_state == null && o.status === 'prijato')
+    return ceka ? 'Dokončete rezervaci a zaplaťte' : null
+  }
   if (o.deposit_status === 'pending') {
     return o.location_address
       ? 'Zaplaťte, aby termín platil'
@@ -54,11 +60,17 @@ function OrderCard({ o, role, otherName, todo }: { o: any; role: 'provider' | 'c
               Dotaz
             </span>
           ) : (
-            <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[o.status] ?? 'bg-slate-100 text-slate-500'}`}>
-              {STATUS_LABELS[o.status] ?? o.status}
-            </span>
+            (() => {
+              // Nový model: štítek podle booking_state („Potvrzeno“ až po stržení platby)
+              const b = bookingStatusBadge(o)
+              return (
+                <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${b?.cls ?? STATUS_COLORS[o.status] ?? 'bg-slate-100 text-slate-500'}`}>
+                  {b?.label ?? STATUS_LABELS[o.status] ?? o.status}
+                </span>
+              )
+            })()
           )}
-          {(Number(o.deposit_amount ?? 0) > 0 || Number(o.services?.quote_fee ?? 0) > 0) && o.status !== 'zruseno' && o.status !== 'cekajici' && (
+          {!o.booking_state && !o.offer_kind && (Number(o.deposit_amount ?? 0) > 0 || Number(o.services?.quote_fee ?? 0) > 0) && o.status !== 'zruseno' && o.status !== 'cekajici' && (
             (o.deposit_status === 'paid' || o.deposit_status === 'released')
               ? <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">{o.services?.payment_model === 'B' ? 'Výjezd zaplacen' : 'Záloha zaplacena'}</span>
               : <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs font-medium text-slate-500">{o.services?.payment_model === 'B' ? 'Výjezd nezaplacen' : 'Záloha nezaplacena'}</span>
@@ -67,7 +79,7 @@ function OrderCard({ o, role, otherName, todo }: { o: any; role: 'provider' | 'c
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
           <span>{role === 'provider' ? '👤' : '🔧'} {otherName}</span>
           {o.scheduled_at
-            ? <span className="inline-flex items-center gap-1 text-emerald-700"><CalendarDays className="h-3.5 w-3.5" /> {new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(o.scheduled_at))}</span>
+            ? <span className="inline-flex items-center gap-1 text-emerald-700"><CalendarDays className="h-3.5 w-3.5" /> {new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Prague' }).format(new Date(o.scheduled_at))}</span>
             : <span>📅 {new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(o.created_at))}</span>}
           {(o.services?.price ?? 0) > 0 && <span>💰 {Number(o.services.price).toLocaleString('cs-CZ')} Kč/{o.services.price_unit}</span>}
         </div>

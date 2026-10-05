@@ -228,6 +228,7 @@ export const ORDER_EVENT_TYPES = [
   'stripe_event',
   'provider_instruction_consent',
   'early_performance_request',
+  'recap_accepted', // zákazník odeslal shrnutí před platbou (payload.document_version, VOP 7.8 / 9.3)
   'brief_submitted',
   'offer_delivered',
   'quote_proof_uploaded',

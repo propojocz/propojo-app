@@ -67,6 +67,7 @@ function itemToValues(it: ServiceItem): ServiceItemValues {
     price_per_km: (it as any).price_per_km ?? null,
     free_km: (it as any).free_km ?? null,
     quote_days: (it as any).quote_days ?? null,
+    quote_fee_deductible: (it as any).quote_fee_deductible === true,
 
     // Fotka položky — sdílené pole (služba i výrobek), bez tohohle by se při
     // editaci existující položky ztratila.

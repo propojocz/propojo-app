@@ -37,6 +37,8 @@ const itemSchema = z.object({
   price_per_km: z.number().min(0).max(99999).nullable().optional(),
   free_km: z.number().int().min(0).max(100000).nullable().optional(),
   quote_days: z.number().int().min(0).max(365).nullable().optional(),
+  /** Výjezd: poskytovatel slibuje odečíst Cenu výjezdu z ceny zakázky (VOP čl. 11.6) */
+  quote_fee_deductible: z.boolean().optional(),
 
   // ── VÝROBEK ──
   // item_type rozhoduje, čím položka je. 'service' = dosavadní chování.
@@ -120,6 +122,7 @@ function normalizeItem(d: ItemParsed): ItemParsed {
     out.price_per_km = null
     out.free_km = null
     out.quote_days = null
+    out.quote_fee_deductible = false
 
     if (out.price_type === 'on_agreement') {
       out.price = null
@@ -235,6 +238,7 @@ function normalizeItem(d: ItemParsed): ItemParsed {
     out.price_per_km = null
     out.free_km = null
     out.quote_days = null
+    out.quote_fee_deductible = false
     if (out.price_type === 'on_agreement') {
       out.price = null
       out.price_max = null

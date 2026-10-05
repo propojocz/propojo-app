@@ -158,6 +158,42 @@ export async function createOrder(values: {
     return { success: false, error: 'Tento poskytovatel není momentálně dostupný.' }
   }
 
+  // ── Dosah poskytovatele (jede-li se k zákazníkovi) ──
+  // Stejná kontrola jako u rezervace času – poptávka (např. výjezd) mimo dosah nemá smysl.
+  {
+    const admin = getAdminClient()
+    const { data: card } = await admin
+      .from('services')
+      .select('location_type, city_lat, city_lng, radius_km')
+      .eq('id', values.service_id)
+      .maybeSingle() as { data: { location_type: string | null; city_lat: number | null; city_lng: number | null; radius_km: number | null } | null }
+    const atCustomer = values.service_location
+      ? values.service_location === 'u_zakaznika'
+      : card?.location_type !== 'u_poskytovatele'
+    // Obec je povinná. Mimo dosah poptávka projde – rozhoduje poskytovatel, který vzdálenost
+    // uvidí v objednávce (přímá rezervace času mimo dosah zůstává blokovaná, tam nic nepotvrzuje).
+    if (atCustomer && card?.location_type !== 'u_poskytovatele' && !values.location_city?.trim()) {
+      return { success: false, error: 'Zadejte prosím město nebo obec, kde se má služba provést.' }
+    }
+  }
+
+  // ── Opakované odeslání ──
+  // Dvojklik / opakované „Objednat“ během pár minut nesmí vytvořit další objednávku
+  // ani poslat poskytovateli další upozornění – vrátíme tu, která už vznikla.
+  if (values.service_item_id) {
+    const { data: recent } = await getAdminClient()
+      .from('orders')
+      .select('id')
+      .eq('customer_id', user.id)
+      .eq('service_item_id', values.service_item_id)
+      .eq('status', 'cekajici')
+      .gte('created_at', new Date(Date.now() - 5 * 60_000).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle() as { data: { id: string } | null }
+    if (recent) return { success: true, id: recent.id }
+  }
+
   // ── Úkon (pokud objednáváme konkrétní položku ceníku) ──
   // Cena i model se berou z ÚKONU, ne z karty. Když item chybí (starý tok),
   // spadneme zpět na price_agreed z karty.
@@ -655,4 +691,29 @@ export async function sendOrderMessage(
 
   revalidatePath(`/dashboard/objednavky/${orderId}`)
   return { success: true, id: data.id, message: data }
+}
+
+/**
+ * Rozjednaná objednávka zákazníka u stejné položky (aby omylem neobjednával znovu).
+ * Rozjednaná = čeká na domluvu, termín nebo platbu, případně rezervace ještě neskončila.
+ */
+export async function getOpenOrderForItem(serviceItemId: string): Promise<{ id: string; createdAt: string } | null> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+  const { data } = await getAdminClient()
+    .from('orders')
+    .select('id, created_at, status, booking_state, scheduled_end')
+    .eq('customer_id', user.id)
+    .eq('service_item_id', serviceItemId)
+    .in('status', ['cekajici', 'prijato', 'v_procesu'])
+    .order('created_at', { ascending: false })
+    .limit(5) as { data: { id: string; created_at: string; status: string; booking_state: string | null; scheduled_end: string | null }[] | null }
+  const KONEC = ['payment_expired', 'declined', 'expired', 'capture_failed', 'cancelled']
+  const open = (data ?? []).find((o) =>
+    // Po vypršení platby u domluvy (status cekajici) objednávka dál běží – domlouvá se nový termín.
+    !(o.booking_state && KONEC.includes(o.booking_state) && o.status !== 'cekajici')
+    && !(o.scheduled_end && new Date(o.scheduled_end).getTime() < Date.now()),
+  )
+  return open ? { id: open.id, createdAt: open.created_at } : null
 }
