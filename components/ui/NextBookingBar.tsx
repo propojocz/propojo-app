@@ -47,8 +47,8 @@ export default function NextBookingBar() {
   }
 
   const text = b.arrivalWindow && b.endIso
-    ? <>V {den(b.startIso)} mezi <strong>{cas(b.startIso)} a {cas(b.endIso)}</strong> k vám přijede <strong>{b.counterpart}</strong> ({b.itemName}){b.place ? <>, {b.place}</> : null}.</>
-    : <>V {den(b.startIso)} v <strong>{cas(b.startIso)}</strong> vás čeká <strong>{b.counterpart}</strong> ({b.itemName}){b.place ? <>, {b.place}</> : null}.</>
+    ? <>V {den(b.startIso)} mezi <strong>{cas(b.startIso)} a {cas(b.endIso)}</strong> k vám přijede <Link href={`/profil/${b.counterpartId}`} className="font-bold text-emerald-700 hover:underline">{b.counterpart}</Link> ({b.itemName}){b.place ? <>, {b.place}</> : null}.</>
+    : <>V {den(b.startIso)} v <strong>{cas(b.startIso)}</strong> vás čeká <Link href={`/profil/${b.counterpartId}`} className="font-bold text-emerald-700 hover:underline">{b.counterpart}</Link> ({b.itemName}){b.place ? <>, {b.place}</> : null}.</>
 
   return (
     <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">

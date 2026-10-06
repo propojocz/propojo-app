@@ -171,13 +171,24 @@ function earlier(a: Date, b: Date | null): Date {
   return b && b.getTime() < a.getTime() ? b : a
 }
 
-/** Nejzazší okamžik potvrzení: 48 h od preautorizace, vždy ale nejpozději začátek termínu */
+/**
+ * Nejzazší okamžik ručního potvrzení: dřívější z 48 h od preautorizace a 2 h před začátkem termínu,
+ * aby zákazník nepřišel na místo a teprve tam se nedozvěděl, že rezervace neplatí (rozhodnutí 6. 10. 2026).
+ * U last-minute rezervace má poskytovatel od platby aspoň 30 min, vždy ale nejpozději do začátku termínu.
+ * Starší snapshot pravidel tyto parametry nemá → výchozí hodnoty.
+ */
 export function confirmationDeadline(
   authorizedAt: Date,
   windowStart: Date | null,
   policy: BookingPolicy = BOOKING_POLICY,
 ): Date {
-  return earlier(new Date(authorizedAt.getTime() + policy.confirmationWindowHours * HOUR), windowStart)
+  const beforeStartMin = policy.confirmBeforeStartMinutes ?? BOOKING_POLICY.confirmBeforeStartMinutes
+  const minWindowMin = policy.minConfirmWindowMinutes ?? BOOKING_POLICY.minConfirmWindowMinutes
+  const byWindow = new Date(authorizedAt.getTime() + policy.confirmationWindowHours * HOUR)
+  const beforeStart = windowStart ? new Date(windowStart.getTime() - beforeStartMin * MINUTE) : null
+  const deadline = earlier(byWindow, beforeStart)
+  const minimum = earlier(new Date(authorizedAt.getTime() + minWindowMin * MINUTE), windowStart)
+  return deadline.getTime() < minimum.getTime() ? minimum : deadline
 }
 
 /** Preautorizace dorazila v době, kdy už potvrdit nejde (termín začal) → okamžitě uvolnit */
@@ -229,6 +240,7 @@ export const ORDER_EVENT_TYPES = [
   'provider_instruction_consent',
   'early_performance_request',
   'recap_accepted', // zákazník odeslal shrnutí před platbou (payload.document_version, VOP 7.8 / 9.3)
+  'confirmation_reminder_sent', // připomínka poskytovateli před koncem lhůty na potvrzení (3c)
   'brief_submitted',
   'offer_delivered',
   'quote_proof_uploaded',

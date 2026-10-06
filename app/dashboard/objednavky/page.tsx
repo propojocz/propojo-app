@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { CalendarDays, AlertCircle } from 'lucide-react'
 import { bookingStatusBadge } from '@/lib/booking/labels'
+import ProfileNameLink from '@/components/ui/ProfileNameLink'
 
 export const metadata = { title: 'Objednávky | Dashboard' }
 
@@ -77,7 +78,9 @@ function OrderCard({ o, role, otherName, todo }: { o: any; role: 'provider' | 'c
           )}
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
-          <span>{role === 'provider' ? '👤' : '🔧'} {otherName}</span>
+          <span>{role === 'provider' ? '👤' : '🔧'} {role === 'customer' && o.provider_id
+            ? <ProfileNameLink id={o.provider_id}>{otherName}</ProfileNameLink>
+            : otherName}</span>
           {o.scheduled_at
             ? <span className="inline-flex items-center gap-1 text-emerald-700"><CalendarDays className="h-3.5 w-3.5" /> {new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Prague' }).format(new Date(o.scheduled_at))}</span>
             : <span>📅 {new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(o.created_at))}</span>}

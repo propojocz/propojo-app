@@ -17,6 +17,7 @@ import {
   OFFER_KIND_TITLE,
   PAYMENT_NOTE,
   PAYMENT_SHORT,
+  PAYMENT_SHORT_AUTO,
   RECAP_DOCUMENT_VERSION,
   cancellationRules,
   recapCheckbox,
@@ -35,6 +36,7 @@ import {
   cancelPendingPayment,
   logOrderEvent,
   captureBooking,
+  isProviderOfferedTime,
   loadBookingOrder,
   releaseAuthorization,
   type BookingOrder,
@@ -144,7 +146,7 @@ export async function confirmBooking(orderId: string): Promise<Result> {
   if (order.booking_state !== 'awaiting_confirmation') {
     return { success: false, error: 'Rezervaci teď nelze potvrdit. Obnovte stránku.' }
   }
-  // Lhůta: 48 h od předautorizace, vždy ale nejpozději začátek termínu (§4).
+  // Lhůta: 48 h od předautorizace, nejpozději 2 h před začátkem termínu (§4, rozhodnutí 6. 10. 2026).
   if (order.confirm_deadline_at && new Date(order.confirm_deadline_at).getTime() <= Date.now()) {
     return { success: false, error: 'Lhůta na potvrzení už uplynula, rezervaci nelze potvrdit.' }
   }
@@ -174,7 +176,7 @@ export async function declineBooking(orderId: string, reason?: string | null): P
     orderId,
     actorId: userId,
     title: 'Poskytovatel rezervaci nepotvrdil',
-    preview: withReason(`${orderName(order)} · blokace na kartě se uvolnila, nic nebylo strženo.`, text),
+    preview: withReason(`${orderName(order)} · nic nebylo strženo, blokace na kartě se uvolnila. Banka ji může ještě pár dní ukazovat jako čekající platbu.`, text),
   })
   revalidateOrder(orderId)
   return { success: true }
@@ -201,6 +203,8 @@ export type BookingRecap = {
   cancellationRules: string[]
   paymentNote: string
   paymentShort: string
+  /** Termín nabídl sám poskytovatel → po zaplacení se rezervace hned potvrdí */
+  autoConfirm: boolean
   /** Zaškrtávací pole podle typu (VOP čl. 9); null = nic se nepotvrzuje */
   consentText: string | null
   consentWhy: string | null
@@ -224,7 +228,7 @@ export type BookingRecap = {
   /** Místo u poskytovatele (provozovna) */
   placeText: string | null
   /** Kontakt poskytovatele – zákazník ho poprvé vidí tady (model §15) */
-  provider: { name: string; phone: string | null; email: string | null }
+  provider: { id: string; name: string; phone: string | null; email: string | null }
 }
 
 type RecapResult = { success: true; recap: BookingRecap } | { success: false; error: string }
@@ -267,6 +271,8 @@ export async function getBookingRecap(
   const charge = bookingCharge({ ...item, agreed_charge_halere: agreedChargeHalere })
   if (!charge.ok) return { success: false, error: charge.error }
   const basePrice = itemPriceKc(item)
+  // Potvrzení předem: termín z návrhu poskytovatele, nebo vypsané okno (ne otevírací doba)
+  const autoConfirm = proposalStart ? true : await isProviderOfferedTime(db, order)
   const originalChargeKc = agreedChargeHalere != null && basePrice != null && basePrice * 100 !== agreedChargeHalere ? basePrice : null
 
   const atCustomer = o.service_location
@@ -321,9 +327,10 @@ export async function getBookingRecap(
       priceNote: originalChargeKc != null ? priceNote : null,
       paymentMeaning: paymentMeaning(charge.offerKind, item.quote_fee_deductible === true),
       deductionNote: quoteFeeDeductionNote(charge.offerKind, item.quote_fee_deductible === true),
-      cancellationRules: cancellationRules(charge.offerKind),
+      cancellationRules: cancellationRules(charge.offerKind, autoConfirm),
       paymentNote: PAYMENT_NOTE,
-      paymentShort: PAYMENT_SHORT,
+      paymentShort: autoConfirm ? PAYMENT_SHORT_AUTO : PAYMENT_SHORT,
+      autoConfirm,
       consentText: recapCheckbox(charge.offerKind),
       consentWhy: recapCheckboxWhy(charge.offerKind),
       withdrawalNote: withdrawalNote(charge.offerKind),
@@ -338,6 +345,7 @@ export async function getBookingRecap(
       suggestedAddress,
       placeText: atCustomer ? null : (o.services?.address ?? o.services?.city ?? null),
       provider: {
+        id: order.provider_id,
         name: pr?.company_name || pr?.full_name || 'Poskytovatel',
         phone: o.services?.phone || pr?.phone || null,
         email,
@@ -357,7 +365,7 @@ export async function startBookingPayment(
 ): Promise<{ success: true; url: string } | { success: false; error: string }> {
   const ctx = await loadForUser(orderId)
   if (!ctx.ok) return { success: false, error: ctx.error }
-  const { db, by, userId } = ctx
+  const { db, by, userId, order } = ctx
   if (by !== 'customer') return { success: false, error: 'Platbu dokončuje zákazník.' }
 
   const { data: row } = await db.from('orders').select('agreed_charge_halere, service_items(offer_kind, quote_fee_deductible)').eq('id', orderId).maybeSingle()
@@ -394,6 +402,8 @@ export async function startBookingPayment(
     confirmed: consent,
     // Cena upravená poskytovatelem, kterou zákazník přijal (null = cena z nabídky)
     agreed_charge_halere: (row as any)?.agreed_charge_halere ?? null,
+    // Termín nabídl poskytovatel → potvrdí se hned po zaplacení (zákazník to viděl ve shrnutí)
+    auto_confirm: await isProviderOfferedTime(db, order),
     // Výjezd: slib odečíst Cenu výjezdu z ceny zakázky, jak ho zákazník viděl (VOP 11.6)
     quote_fee_deductible: kind === 'B' ? (row as any)?.service_items?.quote_fee_deductible === true : null,
     ip,
@@ -416,6 +426,8 @@ export type UpcomingBooking = {
   state: string
   /** Druhá strana (jméno zákazníka / poskytovatele) */
   counterpart: string
+  /** Id druhé strany – u zákazníka je to poskytovatel (odkaz na jeho profil) */
+  counterpartId: string
   /** Kam: u zákazníka jeho adresa (poskytovatel ji vidí po předautorizaci), jinak provozovna */
   place: string | null
 }
@@ -463,6 +475,7 @@ export async function getUpcomingBookings(): Promise<UpcomingBooking[]> {
       arrivalWindow: r.offer_kind === 'B',
       state: r.booking_state,
       counterpart: names.get(role === 'customer' ? r.provider_id : r.customer_id) ?? 'Uživatel',
+      counterpartId: role === 'customer' ? r.provider_id : r.customer_id,
       place,
     }
   })

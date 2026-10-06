@@ -8,6 +8,7 @@ import { Package, ShoppingBag, TrendingUp, Star, ArrowRight, PlusCircle, Search,
 import { CATEGORY_META } from '@/types/database'
 import type { Profile } from '@/types/database'
 import Avatar from '@/components/ui/Avatar'
+import ProfileNameLink from '@/components/ui/ProfileNameLink'
 import FreeSlotReminder, { NoFreeSlotHint, type ReminderSlot } from '@/components/ui/FreeSlotReminder'
 import PushPrompt from '@/components/ui/PushPrompt'
 import ShareProfileStep from '@/components/ui/ShareProfileStep'
@@ -272,7 +273,7 @@ export default async function DashboardPage() {
   ] = await Promise.all([
     supabase.from('orders').select('id', { count: 'exact', head: true }).eq('customer_id', user.id),
     supabase.from('orders').select('id', { count: 'exact', head: true }).eq('customer_id', user.id).in('status', ['cekajici', 'prijato', 'v_procesu']),
-    supabase.from('orders').select('id, status, booking_state, offer_kind, created_at, services(title, price, price_unit), profiles!orders_provider_id_fkey(full_name)').eq('customer_id', user.id).order('created_at', { ascending: false }).limit(10),
+    supabase.from('orders').select('id, provider_id, status, booking_state, offer_kind, created_at, services(title, price, price_unit), profiles!orders_provider_id_fkey(full_name)').eq('customer_id', user.id).order('created_at', { ascending: false }).limit(10),
     supabase.from('favorites').select('provider_id, profiles!favorites_provider_id_fkey(id, full_name, avatar_url, city, rating, review_count)').eq('user_id', user.id).order('created_at', { ascending: false }).limit(8),
   ])
 
@@ -333,7 +334,9 @@ export default async function DashboardPage() {
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-slate-900">{o.services?.title ?? 'Neznámá služba'}</p>
                   <p className="text-sm text-slate-500">
-                    {o.profiles?.full_name ?? 'Živnostník'} ·{' '}
+                    {o.provider_id
+                      ? <ProfileNameLink id={o.provider_id}>{o.profiles?.full_name ?? 'Živnostník'}</ProfileNameLink>
+                      : (o.profiles?.full_name ?? 'Živnostník')} ·{' '}
                     {o.services?.price ? `${(o.services.price ?? 0).toLocaleString('cs-CZ')} Kč/${o.services.price_unit}` : ''} ·{' '}
                     {datum(o.created_at)}
                   </p>

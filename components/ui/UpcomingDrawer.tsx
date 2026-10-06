@@ -10,8 +10,11 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { AnimatePresence, motion } from 'framer-motion'
-import { CalendarDays, ChevronRight, Loader2, MapPin, X } from 'lucide-react'
+import { CalendarDays, ChevronRight, Loader2, MapPin, X, Zap } from 'lucide-react'
 import { getUpcomingBookings, type UpcomingBooking } from '@/lib/actions/booking'
+import { getQuickSlotCards } from '@/lib/actions/slots'
+import QuickSlotForm from '@/components/ui/QuickSlotForm'
+import ProfileNameLink from '@/components/ui/ProfileNameLink'
 import AddToCalendarButtons from '@/components/ui/AddToCalendarButtons'
 
 const TZ = 'Europe/Prague'
@@ -42,6 +45,9 @@ export default function UpcomingDrawer() {
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState<UpcomingBooking[] | null>(null)
   const [mounted, setMounted] = useState(false)
+  // Poskytovatel: rychlé vypsání volného termínu přímo z panelu
+  const [slotCards, setSlotCards] = useState<{ id: string; title: string }[] | null>(null)
+  const [quickSlot, setQuickSlot] = useState(false)
 
   useEffect(() => setMounted(true), [])
 
@@ -49,7 +55,9 @@ export default function UpcomingDrawer() {
     if (!open) return
     let cancelled = false
     setItems(null)
+    setQuickSlot(false)
     getUpcomingBookings().then((r) => { if (!cancelled) setItems(r) })
+    getQuickSlotCards().then((r) => { if (!cancelled) setSlotCards(r.isProvider ? r.cards : null) })
     // Za otevřeným panelem se stránka neroluje
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -100,6 +108,21 @@ export default function UpcomingDrawer() {
             </div>
 
             <div className="flex-1 overflow-y-auto px-4 py-4">
+              {slotCards !== null && (
+                <div className="mb-4">
+                  {quickSlot ? (
+                    <QuickSlotForm cards={slotCards} onClose={() => setQuickSlot(false)} />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setQuickSlot(true)}
+                      className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-orange-300 bg-white px-4 py-3 text-sm font-bold text-orange-700 transition hover:border-orange-400 hover:bg-orange-50"
+                    >
+                      <Zap className="h-4 w-4 fill-orange-400 text-orange-500" /> Vypsat volný termín
+                    </button>
+                  )}
+                </div>
+              )}
               {items === null ? (
                 <div className="flex items-center justify-center gap-2 py-12 text-sm text-slate-500">
                   <Loader2 className="h-4 w-4 animate-spin" /> Načítám…
@@ -145,7 +168,10 @@ export default function UpcomingDrawer() {
                                     <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${st.cls}`}>{st.text}</span>
                                   </div>
                                   <p className="mt-0.5 text-xs text-slate-500">
-                                    {b.role === 'provider' ? 'Zákazník' : 'Poskytovatel'}: {b.counterpart}
+                                    {b.role === 'provider' ? 'Zákazník' : 'Poskytovatel'}:{' '}
+                                    {b.role === 'customer'
+                                      ? <ProfileNameLink id={b.counterpartId} onNavigate={() => setOpen(false)}>{b.counterpart}</ProfileNameLink>
+                                      : b.counterpart}
                                     {b.arrivalWindow ? ' · okno příjezdu' : ''}
                                   </p>
                                   {b.place && (

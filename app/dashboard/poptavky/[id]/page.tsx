@@ -137,6 +137,7 @@ export default async function ZajemciPage({ params }: { params: { id: string } }
     return {
       responseId: r.id,
       conversationId: conv?.id ?? null,
+      providerId: r.provider_id,
       providerName: p?.display_name || p?.company_name || p?.full_name || 'Poskytovatel',
       providerCity: p?.city ?? null,
       avatarUrl: p?.avatar_url ?? null,

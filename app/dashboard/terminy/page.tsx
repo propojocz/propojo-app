@@ -80,6 +80,27 @@ export default async function TerminyPage({ searchParams }: { searchParams: { se
     .gte('ends_at', new Date().toISOString())
     .order('starts_at', { ascending: true }) as { data: any[] | null }
 
+  // Skutečný stav zabraného okna podle objednávky (model v2): rozpracovaná platba,
+  // čeká na potvrzení, nebo opravdu rezervováno.
+  const orderIds = Array.from(new Set((slots ?? []).map((s) => s.order_id).filter(Boolean))) as string[]
+  if (orderIds.length > 0) {
+    const { data: rows } = await supabase
+      .from('orders')
+      .select('id, booking_state, deposit_status')
+      .in('id', orderIds) as { data: { id: string; booking_state: string | null; deposit_status: string | null }[] | null }
+    const byId = new Map((rows ?? []).map((r) => [r.id, r]))
+    for (const s of slots ?? []) {
+      const o = s.order_id ? byId.get(s.order_id) : null
+      if (!o) continue
+      s.order_label =
+        o.booking_state === 'pending_payment' || (o.booking_state == null && o.deposit_status === 'pending')
+          ? 'Čeká na platbu'
+          : o.booking_state === 'awaiting_confirmation' || o.booking_state === 'capture_in_progress'
+            ? 'Čeká na potvrzení'
+            : 'Rezervováno'
+    }
+  }
+
   return (
     <div className="space-y-6">
       <DaySchedulePanel date={schedule.date} entries={schedule.entries} />

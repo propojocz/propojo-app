@@ -36,6 +36,8 @@ type SlotRow = {
   pending_confirm?: boolean | null
   /** Objednávka, která okno zabrala — odkaz na její detail. */
   order_id?: string | null
+  /** Stav objednávky v okně: „Čeká na platbu“ / „Čeká na potvrzení“ / „Rezervováno“ */
+  order_label?: string | null
   slot_services: { service_id: string; services: { title: string } | null }[]
 }
 
@@ -333,8 +335,16 @@ export default function TerminyClient({
                   <div className="min-w-0 flex-1">
                     <p className="font-bold text-slate-900">
                       {fmtTime(slot.starts_at)}–{fmtTime(slot.ends_at)}
-                      <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${taken ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                        {taken ? 'Rezervováno' : 'Volno'}
+                      <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${
+                        !taken
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : slot.order_label === 'Čeká na platbu'
+                            ? 'bg-slate-100 text-slate-600'
+                            : slot.order_label === 'Čeká na potvrzení'
+                              ? 'bg-orange-100 text-orange-700'
+                              : 'bg-amber-100 text-amber-700'
+                      }`}>
+                        {taken ? (slot.order_label ?? 'Rezervováno') : 'Volno'}
                       </span>
                     </p>
                     <p className="truncate text-sm text-slate-500">{names.join(' · ') || '—'}</p>

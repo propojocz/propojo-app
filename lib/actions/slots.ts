@@ -138,6 +138,37 @@ async function kryjeSeSBlokaci(
 }
 
 // ── Přidat volné okno ─────────────────────────────────────────
+/**
+ * Karty pro rychlé vypsání termínu (kalendářový panel u zvonečku): aktivní karty poskytovatele,
+ * které mají aspoň jednu aktivní službu s pevnou cenou – stejné pravidlo jako stránka Termíny.
+ * Nepřihlášený / neposkytovatel → isProvider: false.
+ */
+export async function getQuickSlotCards(): Promise<{ isProvider: boolean; cards: { id: string; title: string }[] }> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { isProvider: false, cards: [] }
+  const { data: profile } = await supabase.from('profiles').select('is_provider').eq('id', user.id).single() as { data: { is_provider: boolean } | null }
+  if (profile?.is_provider !== true) return { isProvider: false, cards: [] }
+
+  const { data: myServices } = await supabase
+    .from('services')
+    .select('id, title')
+    .eq('provider_id', user.id)
+    .eq('is_active', true)
+    .order('title') as { data: { id: string; title: string }[] | null }
+  const ids = (myServices ?? []).map((s) => s.id)
+  if (ids.length === 0) return { isProvider: true, cards: [] }
+
+  const { data: items } = await supabase
+    .from('service_items')
+    .select('service_id')
+    .in('service_id', ids)
+    .eq('is_active', true)
+    .eq('payment_model', 'A') as { data: { service_id: string }[] | null }
+  const withItems = new Set((items ?? []).map((i) => i.service_id))
+  return { isProvider: true, cards: (myServices ?? []).filter((s) => withItems.has(s.id)) }
+}
+
 export async function createSlot(values: {
   starts_at: string
   ends_at: string
@@ -322,9 +353,9 @@ export async function reserveSlotForItem(values: {
 
   const { data: item } = await admin
     .from('service_items')
-    .select('id, service_id, name, duration_minutes, deposit_amount, deposit_type, price, payment_model, is_active, offer_kind, quote_fee')
+    .select('id, service_id, name, duration_minutes, buffer_minutes, deposit_amount, deposit_type, price, payment_model, is_active, offer_kind, quote_fee')
     .eq('id', values.service_item_id)
-    .single() as { data: { id: string; service_id: string; name: string; duration_minutes: number | null; deposit_amount: number | null; deposit_type: string | null; price: number | null; payment_model: string; is_active: boolean; offer_kind: string | null; quote_fee: number | null } | null }
+    .single() as { data: { id: string; service_id: string; name: string; duration_minutes: number | null; buffer_minutes: number | null; deposit_amount: number | null; deposit_type: string | null; price: number | null; payment_model: string; is_active: boolean; offer_kind: string | null; quote_fee: number | null } | null }
 
   if (!item || item.service_id !== values.service_id) {
     return { success: false, error: 'Vybraný úkon nepatří k této kartě.' }
@@ -368,6 +399,13 @@ export async function reserveSlotForItem(values: {
   // Skutečný konec služby si držíme zvlášť. bookedEnd se níž může roztáhnout o
   // nepoužitelný zbytek fyzického okna, ale kolize objednávek se řeší podle služby.
   const serviceEnd = bookedEnd
+  // Příprava a úklid po službě: zablokuje se v okně hned za službou, aby další zákazník
+  // nepřišel dřív, než poskytovatel může (nejdéle do konce vypsaného okna).
+  const bufferMin = Math.max(0, Number(item.buffer_minutes ?? 0))
+  if (bufferMin > 0) {
+    const sPauzou = plusMinutes(serviceEnd, bufferMin)
+    bookedEnd = new Date(sPauzou).getTime() > new Date(loadedEnd).getTime() ? loadedEnd : sPauzou
+  }
 
   // Model v2: typ nabídky, částka (min. 200 Kč), předstih a funkční Stripe účet providera.
   // scheduled_end = serviceEnd = konec rezervovaného okna.
@@ -475,7 +513,7 @@ export async function reserveSlotForItem(values: {
     .eq('provider_id', slot.provider_id)
     .neq('status', 'zruseno')
     .not('scheduled_at', 'is', null)
-    .lt('scheduled_at', serviceEnd) as { data: any[] | null }
+    .lt('scheduled_at', plusMinutes(serviceEnd, bufferMin)) as { data: any[] | null }
 
   const liveClash = (orderClashes ?? []).some((o) => {
     if (o.deposit_status === 'pending' && o.hold_expires_at) {
@@ -486,7 +524,8 @@ export async function reserveSlotForItem(values: {
     const endMs = (o.scheduled_end
       ? new Date(o.scheduled_end).getTime()
       : startMs + fallbackDur * 60_000) + bookingBufferMs(o)
-    return new Date(zacatekUkonu).getTime() < endMs && new Date(serviceEnd).getTime() > startMs
+    // Vlastní pauza za službou se počítá taky – jinak by se nová rezervace přilepila na cizí začátek.
+    return new Date(zacatekUkonu).getTime() < endMs && new Date(serviceEnd).getTime() + bufferMin * 60_000 > startMs
   })
 
   if (liveClash) {
@@ -633,7 +672,7 @@ export async function reserveSlotForItem(values: {
   }
 
   // Oznámení poskytovateli pošle webhook až po preautorizaci (ne o nezaplacených rezervacích).
-  await logOrderEvent(admin, order.id, 'booking_created', { type: 'customer', id: user.id }, { direct: true })
+  await logOrderEvent(admin, order.id, 'booking_created', { type: 'customer', id: user.id }, { direct: true, source: 'slot' })
 
   revalidatePath('/dashboard/objednavky')
   revalidatePath('/dashboard/terminy')

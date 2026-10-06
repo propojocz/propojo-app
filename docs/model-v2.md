@@ -45,6 +45,9 @@ Provize vzniká/je stržena při úspěšném capture platby. Měsíční doklad
 ## 4. Model A – služba
 Customer: zadání → termín → preauthorization.
 Provider musí potvrdit nejpozději do 48 hodin od requestu, vždy ale před začátkem rezervovaného termínu.
+ZPŘESNĚNO 6. 10. 2026 (Matej):
+- ruční potvrzení nejpozději 2 h před začátkem termínu (u last-minute rezervace má provider od platby aspoň 30 min), aby zákazník nepřišel na místo k nepotvrzené rezervaci;
+- termín, který nabídl sám provider (vypsané okno, jeho návrh termínu, termín domluvený v chatu), se potvrzuje automaticky hned po preautorizaci – vypsáním / navržením termínu dal potvrzení předem. Ručně se potvrzují jen rezervace z otevírací doby.
 Provider klikne potvrdit → systém provede capture. Teprve úspěšný capture znamená stav confirmed.
 Capture fail → rezervace není potvrzena.
 Pokud provider nepotvrdí → authorization release / expiration → bez provize.
@@ -262,6 +265,7 @@ Pravidlo pro vývoj:
 ### ROZHODNUTO MATEJEM, ALE LIŠÍ SE OD ODESLANÉHO PODKLADU / VOP 4.x
 - ZMĚNĚNO 4. 10. 2026: o započtení Ceny výjezdu do následné zakázky rozhoduje poskytovatel u Nabídky výjezdu (zaškrtávací pole v editoru, výchozí „nezapočítává se“). Odpovídá VOP v4.1 čl. 11.6 a 10.7. Zákazník slib vidí před objednáním i nad tlačítkem platby; snapshot se ukládá do `orders.quote_fee_deductible` a do evidence shrnutí. Propojo započtení nekontroluje ani nevymáhá. (Původní rozhodnutí 28. 9. „nikdy“ zrušeno.)
 - Provize: přirážka 2 % z části platby nad 3 000 Kč (4. 10. 2026). V odeslaném podkladu není – doplnit právničce, promítnout do Ceníku.
+- Potvrzení předem (6. 10. 2026): vypsaný nebo navržený termín poskytovatele se potvrdí automaticky (capture hned po preautorizaci); ruční potvrzení nejpozději 2 h před začátkem. Doplnit právničce k OPEN – LEGAL bod 2 a 3 (vznik Rezervační smlouvy bez samostatného úkonu poskytovatele).
 - Zákazník nezastižen: jen po validním check-inu, alespoň jeden pokus o kontakt, jednotná čekací doba 15 min; Cena výjezdu včetně dopravy se pak nevrací (28. 9. 2026). V odeslaném podkladu není – doplnit právničce.
 - Doprava u Modelu B: zahrnutá v ceně, nebo připočtená podle km (28. 9. 2026). Nutné promítnout do informací před objednáním.
 

@@ -23,6 +23,8 @@ const itemSchema = z.object({
   price_unit: z.enum(['ukon', 'hod', 'kus', 'den', 'projekt', 'osoba', 'm2', 'bm', 'm3', 'baleni', 'sada', 'porce', 'g', 'kg', 'sto_g', 'ml', 'litr', 'metr'] as const),
   price_max: z.number().min(0).max(999999).nullable().optional(),
   duration_minutes: z.number().int().min(0).max(100000).nullable().optional(),
+  /** Příprava a úklid po službě – blokuje se v kalendáři za službou */
+  buffer_minutes: z.number().int().min(0).max(240).nullable().optional(),
   hourly_started_billing: z.boolean().optional(),
   deposit_amount: z.number().min(0).max(999999).nullable().optional(),
   deposit_type: z.enum(['zaloha', 'plna_platba', 'bez_platby'] as const).optional(),
@@ -260,22 +262,21 @@ function normalizeItem(d: ItemParsed): ItemParsed {
       out.hourly_started_billing = false
       if (out.price_unit !== 'ukon') out.duration_minutes = null
     }
+    // Pauza za službou má smysl jen u úkonu s délkou.
+    out.buffer_minutes = out.price_unit === 'ukon' && out.duration_minutes ? Math.max(0, out.buffer_minutes ?? 0) : 0
 
-    if (out.deposit_type == null) out.deposit_type = 'zaloha'
-    if (out.deposit_type === 'bez_platby') {
-      out.deposit_amount = null
-      out.no_show_fee = null
-      out.fee_mode = 'zadny'
-    } else if (out.deposit_type === 'plna_platba') {
-      out.deposit_amount = null   // platí se celá cena, záloha se neřeší
-    } else {
-      if (out.deposit_amount != null && out.deposit_amount < MIN_DEPOSIT) out.deposit_amount = MIN_DEPOSIT
-      if (out.deposit_amount == null) out.deposit_amount = MIN_DEPOSIT
-      // Strop až NAKONEC — u úkonu levnějšího než minimální záloha vyhrává cena
-      // (jinak by záloha přesáhla to, co má zákazník celkem zaplatit).
-      const strop = stropZalohy(out)
-      if (strop != null && out.deposit_amount > strop) out.deposit_amount = strop
-    }
+    // Model v2 (§18): u služby se předem platí jen Rezervační poplatek – bez „celé ceny“ a bez „nic“.
+    // Poplatek za nedostavení se nenastavuje: když zákazník bez omluvy nepřijde, Rezervační poplatek
+    // se mu nevrací (VOP 11.3), částečné vracení z účtu poskytovatele nedává smysl.
+    out.deposit_type = 'zaloha'
+    out.fee_mode = 'zadny'
+    out.no_show_fee = null
+    if (out.deposit_amount != null && out.deposit_amount < MIN_DEPOSIT) out.deposit_amount = MIN_DEPOSIT
+    if (out.deposit_amount == null) out.deposit_amount = MIN_DEPOSIT
+    // Strop až NAKONEC — u úkonu levnějšího než minimální poplatek vyhrává cena
+    // (jinak by poplatek přesáhl to, co má zákazník celkem zaplatit).
+    const strop = stropZalohy(out)
+    if (strop != null && out.deposit_amount > strop) out.deposit_amount = strop
     if (out.fee_mode == null) out.fee_mode = 'noshow'
     if (out.fee_mode === 'zadny') out.no_show_fee = null
     if (out.no_show_fee != null && out.no_show_fee <= 0) out.no_show_fee = null
@@ -288,6 +289,17 @@ function normalizeItem(d: ItemParsed): ItemParsed {
     out.price_note = out.price_note?.trim() || null
   }
   return out
+}
+
+/**
+ * Typ nabídky modelu v2 – stejné pravidlo jako jednorázové doplnění ve vrstvě 1
+ * (docs/sql/rezervace-vrstva1.sql): výjezd = B, výrobek na zakázku = C, služba = A,
+ * skladové zboží bez typu (v novém modelu se nerezervuje).
+ */
+function offerKindOf(d: ItemParsed): 'A' | 'B' | 'C' | null {
+  if (d.payment_model === 'B') return 'B'
+  if (d.item_type === 'product') return d.stock_mode === 'made_to_order' ? 'C' : null
+  return 'A'
 }
 
 // Ověří, že karta (service_id) patří přihlášenému uživateli.
@@ -359,7 +371,7 @@ export async function createServiceItem(values: ServiceItemFormValues): Promise<
     sort_order = lastSort + 1
   }
 
-  const insertData = { ...insertBase, sort_order }
+  const insertData = { ...insertBase, sort_order, offer_kind: offerKindOf(norm) }
   const { data, error } = await (supabase.from('service_items') as any)
     .insert(insertData)
     .select('id')
@@ -390,7 +402,7 @@ export async function updateServiceItem(id: string, values: ServiceItemFormValue
   const { id: _ignore, service_id: _svc, sort_order: _so, ...updateData } = norm
 
   const { error } = await (supabase.from('service_items') as any)
-    .update(updateData)
+    .update({ ...updateData, offer_kind: offerKindOf(norm) })
     .eq('id', id)
   if (error) {
     console.error('UPDATE service_items error:', error)

@@ -55,9 +55,13 @@ function itemToValues(it: ServiceItem): ServiceItemValues {
     price_unit: (it.price_unit as ServiceItemValues['price_unit']) ?? 'ukon',
     price_max: it.price_max,
     duration_minutes: it.duration_minutes,
+    buffer_minutes: (it as any).buffer_minutes ?? null,
     hourly_started_billing: (it as any).hourly_started_billing === true,
     deposit_amount: it.deposit_amount,
-    deposit_type: ((it as any).deposit_type as 'zaloha' | 'plna_platba' | 'bez_platby') ?? 'zaloha',
+    // Služba (model v2) má jen Rezervační poplatek; volba platby zůstává u výrobku.
+    deposit_type: (it as any).item_type === 'product'
+      ? (((it as any).deposit_type as 'zaloha' | 'plna_platba' | 'bez_platby') ?? 'zaloha')
+      : 'zaloha',
     no_show_fee: (it as any).no_show_fee ?? null,
     fee_mode: ((it as any).fee_mode as 'noshow' | 'storno' | 'zadny') ?? 'noshow',
     price_includes_material: it.price_includes_material ?? null,
@@ -98,10 +102,13 @@ function itemSummary(it: ServiceItem): string {
   const balení = packageLabel((it as any).package_quantity, (it as any).package_unit)
   if (balení) parts.push(`balení ${balení}`)
 
-  if (it.duration_minutes) parts.push(`${it.duration_minutes} min`)
+  if (it.duration_minutes) {
+    const buf = Number((it as any).buffer_minutes ?? 0)
+    parts.push(buf > 0 ? `${it.duration_minutes} min + ${buf} min úklid` : `${it.duration_minutes} min`)
+  }
   const dep = (it as any).deposit_type as string | undefined
   if (it.payment_model !== 'B' && dep === 'zaloha' && it.deposit_amount) {
-    parts.push(`záloha ${it.deposit_amount.toLocaleString('cs-CZ')} Kč`)
+    parts.push(`${(it as any).item_type === 'product' ? 'záloha' : 'rezervační poplatek'} ${it.deposit_amount.toLocaleString('cs-CZ')} Kč`)
   }
   if (it.payment_model !== 'B' && dep === 'plna_platba') parts.push('platba předem')
   if (dep === 'bez_platby') parts.push('platba až po službě')

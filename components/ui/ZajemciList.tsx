@@ -15,6 +15,7 @@ import { selectProvider } from '@/lib/actions/requests'
 export type Zajemce = {
   responseId: string
   conversationId: string | null
+  providerId: string
   providerName: string
   providerCity: string | null
   avatarUrl: string | null
@@ -67,7 +68,7 @@ export default function ZajemciList({
           <Avatar name={z.providerName} url={z.avatarUrl} size={44} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <p className="truncate font-bold text-slate-900">{z.providerName}</p>
+              <a href={`/profil/${z.providerId}`} target="_blank" rel="noopener noreferrer" className="truncate font-bold text-slate-900 hover:text-emerald-700 hover:underline">{z.providerName}</a>
               {isSelected && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
                   <CheckCircle2 className="h-3 w-3" /> vybraný

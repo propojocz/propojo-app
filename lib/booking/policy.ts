@@ -51,6 +51,17 @@ export interface BookingPolicy {
   checkoutTtlMinutes: number
   /** Lhůta na potvrzení od preautorizace (vždy ale nejpozději do začátku termínu) */
   confirmationWindowHours: number
+  /** Ruční potvrzení nejpozději tolik minut před začátkem termínu (rozhodnutí 6. 10. 2026: 2 h) */
+  confirmBeforeStartMinutes: number
+  /** …ale poskytovatel má od platby vždy aspoň tolik minut (last-minute rezervace) */
+  minConfirmWindowMinutes: number
+  /** Připomínka poskytovateli, že rezervace čeká na potvrzení (jednou) */
+  confirmationReminder: {
+    /** Pošle se, když do konce lhůty zbývá nejvýš tolik hodin */
+    hoursBeforeDeadline: number
+    /** …a od preautorizace uběhlo aspoň tolik hodin (ať nepřijde hned po oznámení o nové rezervaci) */
+    minHoursAfterAuthorization: number
+  }
   commission: CommissionPolicy
   /** Expirace návrhu „Původní termín nemohu dodržet“ (dřívější z této lhůty a začátku původního termínu) */
   cannotKeepExpiryHours: number
@@ -78,13 +89,16 @@ export interface BookingPolicy {
 }
 
 export const BOOKING_POLICY: BookingPolicy = {
-  version: '2026-10-04-v2',
+  version: '2026-10-06-v3',
   currency: 'czk',
   minChargeHalere: 20000, // 200 Kč
   maxAgreedChargeHalere: 2000000, // 20 000 Kč
   minLeadMinutes: 60, // parametr k potvrzení
   checkoutTtlMinutes: 30,
   confirmationWindowHours: 48,
+  confirmBeforeStartMinutes: 120,
+  minConfirmWindowMinutes: 30,
+  confirmationReminder: { hoursBeforeDeadline: 12, minHoursAfterAuthorization: 2 },
   commission: {
     rateBps: 1000, // 10 %
     minBaseHalere: 2900, // 29 Kč

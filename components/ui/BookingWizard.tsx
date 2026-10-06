@@ -200,7 +200,9 @@ export default function BookingWizard({
                 <p className="flex items-start gap-2 px-3.5 py-2.5 text-slate-700">
                   <User className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
                   <span>
-                    {recap.provider.name}
+                    <a href={`/profil/${recap.provider.id}`} target="_blank" rel="noopener noreferrer" className="font-semibold text-emerald-700 hover:underline">
+                      {recap.provider.name}
+                    </a>
                     {(recap.provider.phone || recap.provider.email) && (
                       <span className="block text-xs text-slate-500">
                         {[recap.provider.phone, recap.provider.email].filter(Boolean).join(' · ')}

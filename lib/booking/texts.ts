@@ -8,7 +8,7 @@
 import type { OfferKind } from './policy'
 
 /** Verze znění rekapitulace a souhlasu. Při každé změně textů zvýšit. */
-export const RECAP_DOCUMENT_VERSION = 'recap-2026-10-04-v4'
+export const RECAP_DOCUMENT_VERSION = 'recap-2026-10-06-v6'
 
 // Podle pracovních VOP (v4.1, 3. 10. 2026), čl. 9:
 //  A služba – zákazník může od Rezervační smlouvy odstoupit do 14 dnů; nic se nezaškrtává, jen poučení.
@@ -46,6 +46,9 @@ export function submitLabel(amountKc: number): string {
 /** Jedna věta o platbě pod částkou */
 export const PAYMENT_SHORT = 'Strhne se až po potvrzení poskytovatelem. Do té doby můžete zdarma zrušit.'
 
+/** Termín nabídl sám poskytovatel (vypsané okno, jeho návrh) – rezervace se potvrdí hned po zaplacení */
+export const PAYMENT_SHORT_AUTO = 'Termín nabídl sám poskytovatel, takže se rezervace po zaplacení hned potvrdí a částka se strhne.'
+
 export const OFFER_KIND_TITLE: Record<OfferKind, string> = {
   A: 'Rezervace služby',
   B: 'Výjezd a nacenění',
@@ -67,8 +70,10 @@ export function paymentMeaning(kind: OfferKind, quoteFeeDeductible = false): str
       ? 'Cena výjezdu je platba za samotný výjezd (cesta, prohlídka, nacenění). Když přijmete nabídku poskytovatele, odečte vám ji z ceny zakázky. Po provedení výjezdu se nevrací.'
       : 'Cena výjezdu je platba za samotný výjezd (cesta, prohlídka, nacenění), do ceny zakázky se nezapočítává. Po provedení výjezdu se nevrací.'
   }
-  const co = kind === 'C' ? 'výrobku' : 'služby'
-  return `Když se s poskytovatelem domluvíte, poplatek se odečte z ceny ${co}. Když k zakázce nedojde, poskytovatel vám ho vrátí do 14 dnů.`
+  if (kind === 'C') {
+    return 'Když přijmete závaznou nabídku poskytovatele, poplatek se odečte z ceny výrobku. Když ji nepřijmete, poskytovatel vám ho vrátí do 14 dnů.'
+  }
+  return 'Při placení služby se vám poplatek odečte z ceny. Když se služba neuskuteční, poskytovatel vám ho vrátí do 14 dnů – kromě případu, kdy bez omluvy nepřijdete.'
 }
 
 /**
@@ -82,12 +87,17 @@ export function quoteFeeDeductionNote(kind: OfferKind, quoteFeeDeductible: boole
 }
 
 /** Stručná pravidla zrušení podle modelu §7 a §8 (znění k potvrzení právničkou) */
-export function cancellationRules(kind: OfferKind): string[] {
-  const common = [
-    'Částka se na kartě jen zablokuje. Strhne se až poté, co poskytovatel rezervaci potvrdí. Když ji nepotvrdí včas, blokace se uvolní.',
-    'Než poskytovatel rezervaci potvrdí, můžete ji zrušit bez poplatku – blokace se uvolní.',
-    'Když poskytovatel potvrzenou rezervaci zruší nebo nedorazí, peníze se vám vrátí celé.',
-  ]
+export function cancellationRules(kind: OfferKind, autoConfirm = false): string[] {
+  const common = autoConfirm
+    ? [
+        'Termín nabídl sám poskytovatel, rezervace se proto potvrdí a částka strhne hned po zaplacení.',
+        'Když poskytovatel potvrzenou rezervaci zruší nebo nedorazí, peníze se vám vrátí celé.',
+      ]
+    : [
+        'Částka se na kartě jen zablokuje. Strhne se až poté, co poskytovatel rezervaci potvrdí – nejpozději 2 hodiny před začátkem termínu. Když ji nepotvrdí včas, blokace se uvolní.',
+        'Než poskytovatel rezervaci potvrdí, můžete ji zrušit bez poplatku – blokace se uvolní.',
+        'Když poskytovatel potvrzenou rezervaci zruší nebo nedorazí, peníze se vám vrátí celé.',
+      ]
   if (kind === 'B') {
     return [
       ...common,

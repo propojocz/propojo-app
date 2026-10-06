@@ -705,7 +705,7 @@ export default function TimeProposalPanel({
         {isReschedule
           ? ' Přijetím jednoho z nich se původní termín nahradí.'
           : paymentLabel && effectiveAmount > 0
-            ? ` Kliknutím termín vyberete a na kartě se předautorizuje ${paymentLabel} ${effectiveAmount.toLocaleString('cs-CZ')} Kč. Strhne se až poté, co poskytovatel rezervaci potvrdí.`
+            ? ` Kliknutím termín vyberete a zaplatíte ${paymentLabel} ${effectiveAmount.toLocaleString('cs-CZ')} Kč. Termín navrhl sám poskytovatel, takže se rezervace po zaplacení hned potvrdí.`
             : effectiveAmount > 0
               ? ` Kliknutím termín potvrdíte a zaplatíte zálohu ${effectiveAmount.toLocaleString('cs-CZ')} Kč — ta se započítá do konečné ceny.`
               : ' Kliknutím termín rovnou potvrdíte.'}

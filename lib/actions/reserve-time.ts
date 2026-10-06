@@ -230,7 +230,7 @@ export async function reserveTime(values: {
   }
 
   // Přímá rezervace času: po vypršení platby se ruší (nevrací se do domluvy).
-  await logOrderEvent(admin as any, order.id, 'booking_created', { type: 'customer', id: user.id }, { direct: true })
+  await logOrderEvent(admin as any, order.id, 'booking_created', { type: 'customer', id: user.id }, { direct: true, source: 'opening_hours' })
 
   // Oznámení poskytovateli pošle webhook až po preautorizaci – ať mu nechodí
   // zprávy o rezervacích, které nikdo nezaplatí.

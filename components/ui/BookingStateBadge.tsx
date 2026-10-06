@@ -66,9 +66,11 @@ function texty(
       }
       return isProvider
         ? { tone: 'off', title: 'Rezervaci jste odmítli', text: 'Zákazníkovi se uvolnila blokace na kartě, nic nebylo strženo.' }
-        : { tone: 'off', title: 'Rezervace nebyla potvrzena', text: 'Poskytovatel rezervaci nepotvrdil. Blokace na kartě se uvolnila, nic nebylo strženo.' }
+        : { tone: 'off', title: 'Rezervace nebyla potvrzena', text: 'Poskytovatel rezervaci nepotvrdil. Nic nebylo strženo, blokace na kartě se uvolnila. Banka ji může ještě pár dní ukazovat jako čekající platbu.' }
     case 'expired':
-      return { tone: 'off', title: 'Rezervace nebyla včas potvrzena', text: 'Platba byla uvolněna, peníze nebyly strženy.' }
+      return isProvider
+        ? { tone: 'off', title: 'Rezervace propadla', text: 'Nepotvrdili jste ji včas. Zákazníkovi se uvolnila blokace na kartě, termín je znovu volný.' }
+        : { tone: 'off', title: 'Rezervace nebyla včas potvrzena', text: 'Nic nebylo strženo, blokace na kartě se uvolnila. Banka ji může ještě pár dní ukazovat jako čekající platbu.' }
     case 'capture_failed':
       return { tone: 'warn', title: 'Platbu se nepodařilo strhnout', text: 'Rezervace není potvrzená.' }
     case 'cancelled':
@@ -77,7 +79,7 @@ function texty(
         const byCustomer = f.cancelReason === 'customer_cancelled'
         return isProvider
           ? { tone: 'off', title: byCustomer ? 'Zákazník rezervaci zrušil' : 'Rezervace zrušena', text: 'Rezervace nebyla potvrzena, nic nebylo strženo.' }
-          : { tone: 'off', title: byCustomer ? 'Rezervaci jste zrušili' : 'Rezervace zrušena', text: 'Nic vám nebylo strženo. Případná blokace na kartě se uvolní podle vaší banky.' }
+          : { tone: 'off', title: byCustomer ? 'Rezervaci jste zrušili' : 'Rezervace zrušena', text: 'Nic vám nebylo strženo, blokace na kartě se uvolnila. Banka ji může ještě pár dní ukazovat jako čekající platbu.' }
       }
       return isProvider
         ? { tone: 'off', title: 'Rezervace zrušena', text: 'Platba byla stržena. Stav vrácení peněz zákazníkovi sledujeme ve Stripe a uvidíte ho zde.' }

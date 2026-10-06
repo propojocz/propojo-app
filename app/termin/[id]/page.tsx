@@ -206,7 +206,7 @@ export default async function TerminPage({ params }: Props) {
           </div>
 
           {/* Poskytovatel */}
-          <Link href={`/sluzby/${mainService.id}`} className="flex items-center gap-3 border-t border-slate-100 px-5 py-4 transition hover:bg-slate-50">
+          <Link href={`/profil/${slot.provider_id}`} className="flex items-center gap-3 border-t border-slate-100 px-5 py-4 transition hover:bg-slate-50">
             <Avatar name={providerName} url={provider?.avatar_url} size={44} />
             <div className="min-w-0 flex-1">
               <p className="truncate font-bold text-slate-900">{providerName}</p>

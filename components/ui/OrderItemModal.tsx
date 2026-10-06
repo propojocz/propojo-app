@@ -564,9 +564,11 @@ export default function OrderItemModal({
                     <div className="flex items-center justify-between">
                       <span className="flex items-center gap-1.5 font-semibold text-slate-700">
                         <Wallet className="h-3.5 w-3.5 text-emerald-600" />
-                        {(skipSlot || !hasSlots)
-                          ? (isFullPayment ? 'Zaplatíte po potvrzení termínu' : 'Záloha po potvrzení termínu')
-                          : (isFullPayment ? 'Zaplatíte teď (celá cena)' : 'Zaplatíte teď (záloha)')}
+                        {isV2
+                          ? 'Rezervační poplatek'
+                          : (skipSlot || !hasSlots)
+                            ? (isFullPayment ? 'Zaplatíte po potvrzení termínu' : 'Záloha po potvrzení termínu')
+                            : (isFullPayment ? 'Zaplatíte teď (celá cena)' : 'Zaplatíte teď (záloha)')}
                       </span>
                       <strong className="text-emerald-700">{deposit.toLocaleString('cs-CZ')} Kč</strong>
                     </div>
@@ -577,7 +579,7 @@ export default function OrderItemModal({
                           <span>{Number(item.price).toLocaleString('cs-CZ')} Kč</span>
                         </div>
                         <div className="flex items-center justify-between text-slate-500">
-                          <span>Doplatíte na místě</span>
+                          <span>{isV2 ? 'Doplatíte poskytovateli' : 'Doplatíte na místě'}</span>
                           <span>{Math.max(0, Number(item.price) - deposit).toLocaleString('cs-CZ')} Kč</span>
                         </div>
                       </>
@@ -589,7 +591,9 @@ export default function OrderItemModal({
                       </div>
                     )}
                     <p className="pt-0.5 text-[11px] leading-relaxed text-slate-400">
-                      {(skipSlot || !hasSlots)
+                      {isV2
+                        ? `${(skipSlot || !hasSlots) ? 'Platí se až po domluvě termínu. ' : ''}Strhne se, jakmile je rezervace potvrzená – u termínu, který poskytovatel sám vypsal, hned po zaplacení. Při placení služby se vám odečte z ceny. Když se služba neuskuteční, poskytovatel vám ho vrátí do 14 dnů – kromě případu, kdy bez omluvy nepřijdete.`
+                        : (skipSlot || !hasSlots)
                         ? 'Platbu provedete až poté, co si s poskytovatelem potvrdíte konkrétní termín.'
                         : isFullPayment
                           ? 'Platíte celou cenu předem — na místě už nic nedoplácíte.'
@@ -634,7 +638,8 @@ export default function OrderItemModal({
                   </div>
                 )}
 
-                {!isModelB && noShowFee > 0 && feeMode !== 'zadny' && (
+                {/* Model v2: žádný zvláštní poplatek za nedostavení – nevrací se Rezervační poplatek (VOP 11.3). */}
+                {!isV2 && !isModelB && noShowFee > 0 && feeMode !== 'zadny' && (
                   <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-2 text-[11px] leading-relaxed text-amber-800">
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
                     <span>

@@ -49,6 +49,8 @@ export interface ServiceItemValues {
   price_unit: PriceUnit
   price_max: number | null
   duration_minutes: number | null
+  /** Příprava a úklid po službě (min) – v kalendáři se blokuje hned za službou, zákazník ji nevidí */
+  buffer_minutes: number | null
   /** U hodinové sazby: true = každá započatá hodina celá, false = poměrně podle skutečného času. */
   hourly_started_billing: boolean
   deposit_amount: number | null
@@ -133,6 +135,7 @@ const EMPTY: ServiceItemValues = {
   price_unit: 'ukon',
   price_max: null,
   duration_minutes: null,
+  buffer_minutes: null,
   hourly_started_billing: false,
   deposit_amount: MIN_DEPOSIT,
   deposit_type: 'zaloha',
@@ -482,7 +485,7 @@ export default function ServiceItemEditor({
   const platbaText = jeNaceneni
     ? null
     : platba === 'zaloha'
-      ? `záloha ${Number(v.deposit_amount ?? 0).toLocaleString('cs-CZ')} Kč`
+      ? `${jeVyrobek ? 'záloha' : 'rezervační poplatek'} ${Number(v.deposit_amount ?? 0).toLocaleString('cs-CZ')} Kč`
       : platba === 'plna_platba' ? 'platba předem' : 'platí až po službě'
   const hodinoveUctovani = jeHodinova
     ? (v.hourly_started_billing
@@ -788,19 +791,36 @@ export default function ServiceItemEditor({
           {/* Délka — poskytovatel ji zadává jen u ceny za konkrétní úkon. */}
           {potrebaDelku && (
             <div className="mt-3">
-              <label className="mb-1 block text-xs font-semibold text-slate-600">Jak dlouho (min)</label>
-              <input type="number" min={0} step={5} value={v.duration_minutes ?? ''} onChange={e => set('duration_minutes', numOrNull(e.target.value))}
-                placeholder="45"
-                className="w-full rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 outline-none focus:border-emerald-500" />
-              <p className="mt-1 text-[11.5px] text-slate-400">Podle délky poznáme, do kterých volných oken se úkon vejde.</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Délka služby (min)</label>
+                  <input type="number" min={0} step={5} value={v.duration_minutes ?? ''} onChange={e => set('duration_minutes', numOrNull(e.target.value))}
+                    placeholder="40"
+                    className="w-full rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 outline-none focus:border-emerald-500" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Příprava a úklid po ní (min)</label>
+                  <input type="number" min={0} max={240} step={5} value={v.buffer_minutes ?? ''} onChange={e => set('buffer_minutes', numOrNull(e.target.value))}
+                    placeholder="0"
+                    className="w-full rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 outline-none focus:border-emerald-500" />
+                </div>
+              </div>
+              {(v.duration_minutes ?? 0) > 0 && (
+                <p className="mt-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-[12px] leading-relaxed text-emerald-800">
+                  Jeden zákazník vám v kalendáři zabere <strong>{(v.duration_minutes ?? 0) + (v.buffer_minutes ?? 0)} min</strong>
+                  {(v.buffer_minutes ?? 0) > 0 ? <> ({v.duration_minutes} min služba + {v.buffer_minutes} min příprava a úklid)</> : null}.
+                  {' '}Další zákazník se může objednat až potom. Zákazník uvidí jen délku služby.
+                </p>
+              )}
               <details className="mt-1.5 rounded-lg bg-slate-50 px-3 py-2 text-[11.5px] leading-relaxed text-slate-500">
                 <summary className="cursor-pointer select-none font-semibold text-emerald-700">ⓘ Kolik minut zadat?</summary>
                 <p className="mt-1">
-                  Zadejte čas, který si úkon v kalendáři opravdu zabere, <strong>včetně přípravy a úklidu</strong> před dalším zákazníkem.
-                  Další zákazník si totiž může objednat hned po skončení tohoto času.
+                  <strong>Délka služby</strong> je čas, který strávíte se zákazníkem. <strong>Příprava a úklid</strong> je čas po ní, kdy ještě
+                  nemůžete vzít dalšího (zametení, dezinfekce, příprava nářadí). Podle součtu vám rozdělíme volná okna, aby další zákazník nečekal.
                 </p>
                 <p className="mt-1">
-                  Příklad: střih trvá 40 minut a 5 minut potřebujete na zametení a přípravu → zadejte <strong>45 minut</strong>.
+                  Příklad: střih trvá 40 minut a 5 minut potřebujete na zametení → délka <strong>40</strong>, příprava a úklid <strong>5</strong>.
+                  Když si někdo objedná 9:00, dalšímu zákazníkovi nabídneme nejdříve 9:45.
                 </p>
               </details>
             </div>
@@ -1088,8 +1108,9 @@ export default function ServiceItemEditor({
         {/* ── 3. PLATBA PŘEDEM ── */}
         {!jeNaceneni && (
           <div>
-            <label className="mb-1.5 block text-[13px] font-bold text-slate-800">Co zákazník platí předem?</label>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <label className="mb-1.5 block text-[13px] font-bold text-slate-800">{jeVyrobek ? 'Co zákazník platí předem?' : 'Rezervační poplatek'}</label>
+            {/* Služba (model v2): jen Rezervační poplatek – volba platby se nabízí jen u výrobku. */}
+            {jeVyrobek && <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <button type="button" onClick={() => set('deposit_type', 'zaloha')} className={btn(platba === 'zaloha')}>
                 <b className="block text-[13px] text-slate-900">Zálohu</b>
                 <span className="block text-[11px] text-slate-500">zbytek na místě</span>
@@ -1107,9 +1128,9 @@ export default function ServiceItemEditor({
                 <b className="block text-[13px] text-slate-900">Nic</b>
                 <span className="block text-[11px] text-slate-500">platí až po službě</span>
               </button>
-            </div>
+            </div>}
 
-            {!lzeCelaPlatba && (
+            {jeVyrobek && !lzeCelaPlatba && (
               <p className="mt-2 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-[11.5px] leading-relaxed text-amber-800">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>
@@ -1119,14 +1140,18 @@ export default function ServiceItemEditor({
               </p>
             )}
 
-            {platba === 'zaloha' && (
-              <div className="mt-3">
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Výše zálohy (Kč)</label>
+            {(platba === 'zaloha' || !jeVyrobek) && (
+              <div className={jeVyrobek ? 'mt-3' : ''}>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">{jeVyrobek ? 'Výše zálohy (Kč)' : 'Kolik zákazník zaplatí při rezervaci (Kč)'}</label>
                 <input type="number" min={MIN_DEPOSIT} value={v.deposit_amount ?? ''} onChange={e => set('deposit_amount', numOrNull(e.target.value))}
                   className={`w-full rounded-xl border-[1.5px] bg-white px-3 py-2.5 outline-none focus:border-emerald-500 ${zalohaMoc ? 'border-red-400' : 'border-slate-200'}`} />
                 <p className="mt-1 text-[11.5px] text-slate-400">
-                  Nejméně {MIN_DEPOSIT} Kč{cenovyStrop != null ? `, nejvýš ${cenovyStrop.toLocaleString('cs-CZ')} Kč` : ''}. Započítá se do konečné ceny.
+                  Nejméně {MIN_DEPOSIT} Kč{cenovyStrop != null ? `, nejvýš ${cenovyStrop.toLocaleString('cs-CZ')} Kč` : ''}
+                  {cenovyStrop != null && !jeVyrobek ? ' (cena služby – poplatek se z ní odečítá, víc být nemůže)' : ''}.
                   {zpusob === 'rozmezi' && cenovyStrop != null ? ' U rozmezí platí spodní cena.' : ''}
+                  {jeVyrobek
+                    ? ' Započítá se do konečné ceny.'
+                    : ' Když zákazník přijde a službu provedete, odečtete mu ho z ceny. Když se služba neuskuteční (třeba ji zrušíte vy nebo se na místě nedohodnete), vrátíte mu ho do 14 dnů. Když zákazník bez omluvy nepřijde, nevrací se mu (VOP čl. 11).'}
                 </p>
               </div>
             )}
@@ -1135,41 +1160,6 @@ export default function ServiceItemEditor({
               <p className="mt-2 rounded-lg bg-slate-100 px-3 py-2 text-[11.5px] leading-relaxed text-slate-600">
                 Bez platby předem nejde nastavit poplatek za nedostavení — není z čeho ho strhnout.
               </p>
-            )}
-          </div>
-        )}
-
-        {/* ── 4. KDYŽ ZÁKAZNÍK NEPŘIJDE ── */}
-        {!jeVyrobek && !jeNaceneni && platba !== 'bez_platby' && (
-          <div>
-            <label className="mb-1.5 block text-[13px] font-bold text-slate-800">Když zákazník nepřijde</label>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              <button type="button" onClick={() => set('fee_mode', 'zadny')} className={btn(v.fee_mode === 'zadny')}>
-                <b className="block text-[13px] text-slate-900">Nic neúčtuji</b>
-                <span className="block text-[11px] text-slate-500">záloha se vrací</span>
-              </button>
-              <button type="button" onClick={() => set('fee_mode', 'noshow')} className={btn(v.fee_mode === 'noshow')}>
-                <b className="block text-[13px] text-slate-900">Nedorazí</b>
-                <span className="block text-[11px] text-slate-500">a neozve se</span>
-              </button>
-              <button type="button" onClick={() => set('fee_mode', 'storno')} className={btn(v.fee_mode === 'storno')}>
-                <b className="block text-[13px] text-slate-900">Zruší pozdě</b>
-                <span className="block text-[11px] text-slate-500">dá vědět, ale těsně</span>
-              </button>
-            </div>
-
-            {v.fee_mode !== 'zadny' && (
-              <div className="mt-3">
-                <input type="number" min={0} max={stropPoplatku} value={v.no_show_fee ?? ''} onChange={e => set('no_show_fee', numOrNull(e.target.value))}
-                  placeholder="např. 300"
-                  className="w-full rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 outline-none focus:border-emerald-500" />
-                <p className="mt-1 text-[11.5px] text-slate-400">
-                  Kolik si necháte z {platba === 'plna_platba' ? 'uhrazené ceny' : 'zálohy'}.
-                  Nejvýš {stropPoplatku.toLocaleString('cs-CZ')} Kč
-                  {stropPoplatku < MAX_NO_SHOW_FEE ? ' — víc, než zákazník zaplatil, strhnout nejde' : ''}.
-                  {' '}Zákazník to vidí u objednávky.
-                </p>
-              </div>
             )}
           </div>
         )}

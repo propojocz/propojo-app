@@ -194,6 +194,26 @@ async function isDirectBooking(db: Db, order: BookingOrder): Promise<boolean> {
   return (data ?? []).length > 0
 }
 
+/**
+ * Termín nabídl sám poskytovatel – vypsané okno, jeho návrh termínu nebo termín domluvený v chatu.
+ * Tím je potvrzení dané předem a platba se po autorizaci hned strhne (rozhodnutí 6. 10. 2026).
+ * Ručně se potvrzují jen rezervace z otevírací doby, kde si čas vybral zákazník.
+ */
+export async function isProviderOfferedTime(db: Db, order: BookingOrder): Promise<boolean> {
+  const { data } = await db
+    .from('order_events')
+    .select('payload')
+    .eq('order_id', order.id)
+    .eq('type', 'booking_created')
+    .limit(1)
+  const created = ((data ?? []) as { payload: { source?: string } | null }[])[0]
+  if (!created) return true // termín z návrhu poskytovatele
+  const source = created.payload?.source
+  if (source === 'slot') return true
+  if (source === 'opening_hours') return false
+  return !!order.slot_id // starší záznam bez zdroje: vypsané okno má slot od založení
+}
+
 // ─── Stripe účet providera ────────────────────────────────────────────────
 
 interface StripeAccountRow {
@@ -479,6 +499,8 @@ export async function handleAuthorized(db: Db, accountId: string, pi: Stripe.Pay
   const now = new Date()
   const windowStart = toDate(order.scheduled_at)
   const policy = policyFromSnapshot(order.policy_snapshot)
+  // Zjistit před vyříznutím slotu níž (to by u rezervace z otevírací doby doplnilo slot_id).
+  const autoConfirm = await isProviderOfferedTime(db, order)
   const chargeId = piId(pi.latest_charge as string | Stripe.Charge | null)
 
   // Domluvený termín bez fyzického okna: vyřízneme ho z volného okna, ať se už nenabízí.
@@ -501,7 +523,7 @@ export async function handleAuthorized(db: Db, accountId: string, pi: Stripe.Pay
       confirm_deadline_at: confirmationDeadline(now, windowStart, policy).toISOString(),
       ...(claimedSlotId ? { slot_id: claimedSlotId } : {}),
     },
-    payload: { payment_intent: pi.id },
+    payload: { payment_intent: pi.id, auto_confirm: autoConfirm },
   })
   if (!authorized.ok) {
     if (claimedSlotId) await releaseSlotAndMerge(db, claimedSlotId, order.id)
@@ -526,6 +548,26 @@ export async function handleAuthorized(db: Db, accountId: string, pi: Stripe.Pay
   }
 
   const kdy = terminDlouze(order.scheduled_at)
+
+  // Termín nabídl sám poskytovatel → potvrdit hned (capture). Zákazník dostane „Rezervace je
+  // potvrzená“ z handleCaptured. Když capture nevyjde a rezervace zůstane čekat, jede ruční potvrzení.
+  if (autoConfirm) {
+    const res = await captureBooking(db, order, { type: 'system' })
+    if (res.ok) {
+      await notify({
+        userId: order.provider_id,
+        type: 'status_change',
+        orderId: order.id,
+        actorId: order.customer_id,
+        title: 'Nová potvrzená rezervace',
+        preview: `${nazev} · ${kdy} · potvrzeno automaticky, termín jste nabídli vy.`,
+      })
+      return
+    }
+    const fresh = await loadBookingOrder(db, order.id)
+    if (fresh?.booking_state !== 'awaiting_confirmation') return
+  }
+
   await notify({
     userId: order.provider_id,
     type: 'status_change',
