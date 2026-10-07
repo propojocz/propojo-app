@@ -52,8 +52,10 @@ function texty(
     case 'confirmed':
       return {
         tone: 'ok',
-        title: 'Rezervace je potvrzená',
-        text: isProvider ? 'Platba byla stržena na váš Stripe účet.' : 'Poskytovatel rezervaci potvrdil a platba byla stržena.',
+        title: isProvider ? '🎉 Máte nový potvrzený termín' : '🎉 Hotovo, termín je potvrzený',
+        text: isProvider
+          ? 'Zákazník zaplatil, peníze jsou na vašem Stripe účtu. Den předem vám oběma pošleme připomínku.'
+          : 'Platba proběhla. Den předem vám pošleme připomínku – termín si můžete přidat do kalendáře (ikona kalendáře nahoře).',
       }
     case 'payment_expired':
       return { tone: 'off', title: 'Platba vypršela', text: 'Platba nebyla dokončena, nic nebylo strženo.' }

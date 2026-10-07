@@ -11,6 +11,7 @@ import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import PoptavkaChat, { type ThreadItem } from '@/components/ui/PoptavkaChat'
+import { offerSummary } from '@/lib/booking/texts'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,9 +44,12 @@ export default async function JednaniPage({
 
   const { data: rr } = await admin
     .from('request_responses')
-    .select('id, request_id, provider_id, service_id, status')
+    .select('id, request_id, provider_id, service_id, status, offer_kind, charge_halere, quote_fee_deductible')
     .eq('id', conv.request_response_id)
-    .maybeSingle() as { data: { id: string; request_id: string; provider_id: string; service_id: string | null; status: string } | null }
+    .maybeSingle() as { data: {
+      id: string; request_id: string; provider_id: string; service_id: string | null; status: string
+      offer_kind: string | null; charge_halere: number | null; quote_fee_deductible: boolean | null
+    } | null }
   // Klíčová kontrola: konverzace musí patřit k této poptávce.
   if (!rr || rr.request_id !== requestId) notFound()
 
@@ -161,6 +165,10 @@ export default async function JednaniPage({
       orderId={conv.order_id}
       canSelect={canSelect}
       hasServiceForOrder={!!rr.service_id}
+      offerKind={rr.offer_kind === 'A' || rr.offer_kind === 'B' ? rr.offer_kind : null}
+      offerText={(rr.offer_kind === 'A' || rr.offer_kind === 'B') && rr.charge_halere
+        ? offerSummary(rr.offer_kind, rr.charge_halere / 100, rr.quote_fee_deductible === true)
+        : null}
       otherName={otherName}
       request={{
         heading: req.category ?? 'Poptávka',

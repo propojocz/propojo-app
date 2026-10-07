@@ -17,6 +17,7 @@ import { createNotification } from '@/lib/actions/notifications'
 import { BOOKING_POLICY, policyFromSnapshot, type OfferKind } from './policy'
 import { bookingCharge, type ChargeableItem, type CommissionBreakdown } from './commission'
 import { legacyMirror } from './legacy'
+import { isPlaceKnown, type KnownPlace } from '@/lib/geo'
 import {
   confirmationDeadline,
   isAuthorizationTooLate,
@@ -212,6 +213,43 @@ export async function isProviderOfferedTime(db: Db, order: BookingOrder): Promis
   if (source === 'slot') return true
   if (source === 'opening_hours') return false
   return !!order.slot_id // starší záznam bez zdroje: vypsané okno má slot od založení
+}
+
+/** Souřadnice obce podle názvu (text může obsahovat i číslo domu, „Prostřední Bečva 14“) */
+async function obecCoords(db: Db, text: string | null | undefined): Promise<{ lat: number; lng: number } | null> {
+  const name = String(text ?? '').split(',')[0].replace(/\s+\d+[a-zA-Z/\d]*$/, '').trim()
+  if (!name) return null
+  const { data } = await db.from('obce').select('latitude, longitude').ilike('obec', name).limit(1).maybeSingle()
+  const o = data as { latitude: number; longitude: number } | null
+  return o ? { lat: o.latitude, lng: o.longitude } : null
+}
+
+/** Místo, se kterým poskytovatel počítal: obec z objednávky a dosah karty (pojistka auto-potvrzení) */
+export async function knownPlaceOf(db: Db, orderId: string): Promise<KnownPlace> {
+  const { data } = await db
+    .from('orders')
+    .select('service_location, location_city, services(location_type, city, city_lat, city_lng, radius_km)')
+    .eq('id', orderId)
+    .maybeSingle()
+  const o = data as {
+    service_location: string | null; location_city: string | null
+    services: { location_type: string | null; city: string | null; city_lat: number | null; city_lng: number | null; radius_km: number | null } | null
+  } | null
+  const atCustomer = o?.service_location ? o.service_location === 'u_zakaznika' : o?.services?.location_type !== 'u_poskytovatele'
+  const card = o?.services
+  const base = card?.city_lat != null && card?.city_lng != null ? { lat: Number(card.city_lat), lng: Number(card.city_lng) } : await obecCoords(db, card?.city)
+  return { atCustomer, obec: await obecCoords(db, o?.location_city), base, radiusKm: card?.radius_km ?? null }
+}
+
+/**
+ * Potvrdit hned po preautorizaci? Jen když termín nabídl sám poskytovatel A adresa zákazníka
+ * leží tam, kde počítal (do ~15 km od obce v objednávce nebo v dosahu karty). Jinak ručně.
+ */
+export async function shouldAutoConfirm(db: Db, order: BookingOrder): Promise<boolean> {
+  if (!(await isProviderOfferedTime(db, order))) return false
+  const { data } = await db.from('orders').select('location_lat, location_lng').eq('id', order.id).maybeSingle()
+  const c = data as { location_lat: number | null; location_lng: number | null } | null
+  return isPlaceKnown(await knownPlaceOf(db, order.id), c?.location_lat, c?.location_lng)
 }
 
 // ─── Stripe účet providera ────────────────────────────────────────────────
@@ -500,7 +538,7 @@ export async function handleAuthorized(db: Db, accountId: string, pi: Stripe.Pay
   const windowStart = toDate(order.scheduled_at)
   const policy = policyFromSnapshot(order.policy_snapshot)
   // Zjistit před vyříznutím slotu níž (to by u rezervace z otevírací doby doplnilo slot_id).
-  const autoConfirm = await isProviderOfferedTime(db, order)
+  const autoConfirm = await shouldAutoConfirm(db, order)
   const chargeId = piId(pi.latest_charge as string | Stripe.Charge | null)
 
   // Domluvený termín bez fyzického okna: vyřízneme ho z volného okna, ať se už nenabízí.
@@ -549,7 +587,7 @@ export async function handleAuthorized(db: Db, accountId: string, pi: Stripe.Pay
 
   const kdy = terminDlouze(order.scheduled_at)
 
-  // Termín nabídl sám poskytovatel → potvrdit hned (capture). Zákazník dostane „Rezervace je
+  // Termín nabídl sám poskytovatel a adresa sedí → potvrdit hned (capture). Zákazník dostane „Rezervace je
   // potvrzená“ z handleCaptured. Když capture nevyjde a rezervace zůstane čekat, jede ruční potvrzení.
   if (autoConfirm) {
     const res = await captureBooking(db, order, { type: 'system' })
@@ -559,8 +597,8 @@ export async function handleAuthorized(db: Db, accountId: string, pi: Stripe.Pay
         type: 'status_change',
         orderId: order.id,
         actorId: order.customer_id,
-        title: 'Nová potvrzená rezervace',
-        preview: `${nazev} · ${kdy} · potvrzeno automaticky, termín jste nabídli vy.`,
+        title: '🎉 Nový termín díky Propoju',
+        preview: `${nazev} · ${kdy} · zákazník zaplatil, rezervace je potvrzená (termín jste nabídli vy).`,
       })
       return
     }
@@ -691,8 +729,8 @@ export async function handleCaptured(db: Db, accountId: string, pi: Stripe.Payme
       type: 'status_change',
       orderId: order.id,
       actorId: order.provider_id,
-      title: 'Rezervace je potvrzená',
-      preview: `${nazev} · ${terminDlouze(order.scheduled_at)}`,
+      title: '🎉 Rezervace je potvrzená',
+      preview: `${nazev} · ${terminDlouze(order.scheduled_at)}. Den předem vám připomeneme.`,
     })
     if (event === 'external_capture') {
       await notify({
@@ -996,7 +1034,7 @@ export async function rescueBookings(db: Db): Promise<{ checked: number; fixed: 
     .from('orders')
     .select(BOOKING_ORDER_COLUMNS)
     .eq('booking_state', 'capture_in_progress')
-    .lt('state_changed_at', new Date(now - 15 * 60_000).toISOString())
+    .lt('state_changed_at', new Date(now - 2 * 60_000).toISOString())
     .limit(50)
 
   for (const order of (capturing ?? []) as unknown as BookingOrder[]) {

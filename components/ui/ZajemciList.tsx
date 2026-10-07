@@ -26,16 +26,20 @@ export type Zajemce = {
   rating: { avg: number; count: number } | null
   priceEstimate: string | null
   hasService: boolean
+  /** Nabídka: typ a částka placená přes Propojo (3d) */
+  offerLabel: string | null
 }
 
 export default function ZajemciList({
-  requestId, heading, city, readOnly, orderId, primary, secondary,
+  requestId, heading, city, readOnly, orderId, primary, secondary, expiresAt = null,
 }: {
   requestId: string
   heading: string
   city: string
   readOnly: boolean
   orderId: string | null
+  /** Do kdy poptávka sbírá nabídky */
+  expiresAt?: string | null
   primary: Zajemce[]
   secondary: Zajemce[]
 }) {
@@ -47,7 +51,7 @@ export default function ZajemciList({
   const handleSelect = async (z: Zajemce) => {
     if (busyId) return
     if (!z.hasService) { setError('Tento poskytovatel u reakce nemá vybranou nabídku, ze které by šla založit objednávka.'); return }
-    if (!confirm(`Vybrat poskytovatele ${z.providerName}? Vznikne objednávka a ostatní jednání se uzavřou.`)) return
+    if (!confirm(`Vybrat poskytovatele ${z.providerName}?${z.offerLabel ? `\n${z.offerLabel}.` : ''}\nZaplatíte až po potvrzení termínu. Ostatní jednání se uzavřou.`)) return
     setBusyId(z.responseId)
     setError(null)
     const res = await selectProvider(requestId, z.responseId)
@@ -94,6 +98,15 @@ export default function ZajemciList({
               {z.cardTitle && (
                 <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
                   <Tag className="h-3.5 w-3.5 text-slate-400" /> Reaguje nabídkou: {z.cardTitle}
+                </span>
+              )}
+              {z.offerLabel ? (
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-sky-50 px-2.5 py-1 text-xs font-bold text-sky-700">
+                  <Coins className="h-3.5 w-3.5" /> {z.offerLabel}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                  Zatím neuvedl, kolik se platí přes Propojo
                 </span>
               )}
               {z.priceEstimate && (
@@ -158,6 +171,14 @@ export default function ZajemciList({
             </Link>
           )}
         </div>
+      )}
+
+      {!readOnly && (
+        <p className="mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-relaxed text-slate-600">
+          Nabídky můžete sbírat{expiresAt ? <> do <strong>{new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'numeric', timeZone: 'Europe/Prague' }).format(new Date(expiresAt))}</strong></> : null}.
+          {' '}Porovnejte zprávy, odhad ceny, částku placenou přes Propojo a hodnocení – klidně si s každým napište.
+          {' '}<strong>Výběrem jednoho poskytovatele se ostatní jednání uzavřou.</strong>
+        </p>
       )}
 
       {error && <p className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}

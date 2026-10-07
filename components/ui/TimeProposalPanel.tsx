@@ -5,7 +5,7 @@
 // Poskytovatel vědomě zadá datum + čas a může přidat další možnosti.
 // Původní potvrzený termín při změně zůstává platný, dokud zákazník nový nepřijme.
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { CalendarDays, Loader2, Plus, Send, Clock, CalendarRange, RefreshCw, X, MessageCircle } from 'lucide-react'
 import {
@@ -40,6 +40,14 @@ interface Props {
   /** Model v2, poskytovatel: kde zákazník je (obec) a jak daleko, pokud je mimo obvyklý dosah. */
   customerPlace?: string | null
   outOfRange?: { distanceKm: number; radiusKm: number } | null
+  /** Služba bez pevné délky (objednávka z poptávky): poskytovatel zadá, jak dlouho to zabere */
+  askDuration?: boolean
+  /** Výchozí délka v minutách (z položky, jinak 60) */
+  defaultDuration?: number
+  /** Zákazník přišel z chatu jednání s vybraným termínem → rovnou otevřít shrnutí a platbu */
+  autoOpenStart?: string | null
+  /** Započtení u částky: „odečte se z ceny služby / zakázky“ nebo „nezapočítává se“ */
+  paymentNote?: string | null
 }
 
 const kc = (n: number) => `${n.toLocaleString('cs-CZ')} Kč`
@@ -81,11 +89,17 @@ function combineLocalDateTime(date: string, time: string): string | null {
 }
 
 export default function TimeProposalPanel({
-  orderId, isProvider, proposals, depositAmount, scheduledAt = null, depositStatus = null,
-  itemName, customerName, prefFrom, prefTo, prefTime,
-  arrivalWindow = false, paymentLabel = null, customerPlace = null, outOfRange = null,
+  orderId, isProvider, proposals, depositAmount: depositAmountProp, scheduledAt = null, depositStatus = null,
+  itemName: itemNameProp, customerName, prefFrom, prefTo, prefTime,
+  arrivalWindow: arrivalWindowProp = false, paymentLabel: paymentLabelProp = null, customerPlace = null, outOfRange = null,
+  askDuration = false, defaultDuration = 60, autoOpenStart = null, paymentNote = null,
 }: Props) {
   const router = useRouter()
+  const arrivalWindow = arrivalWindowProp
+  const paymentLabel = paymentLabelProp
+  const depositAmount = depositAmountProp
+  const itemName = itemNameProp
+  const [durationInput, setDurationInput] = useState<string>('')
   const isReschedule = !!scheduledAt
   const alreadyPaid = depositStatus === 'paid' || depositStatus === 'released'
   const paymentPending = depositStatus === 'pending'
@@ -101,6 +115,14 @@ export default function TimeProposalPanel({
   const [agreedMode, setAgreedMode] = useState(false)
   // Zákazník: otevřený krokový průvodce pro vybraný návrh termínu.
   const [wizardProposal, setWizardProposal] = useState<{ starts_at: string; ends_at: string } | null>(null)
+  // Zákazník přišel z chatu jednání s vybraným termínem → rovnou shrnutí a platba
+  useEffect(() => {
+    if (isProvider || !autoOpenStart) return
+    const p = proposals.find((x) => new Date(x.starts_at).getTime() === new Date(autoOpenStart).getTime())
+    if (p) setWizardProposal({ starts_at: p.starts_at, ends_at: p.ends_at })
+    // jen při prvním zobrazení
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [windowMinutes, setWindowMinutes] = useState<number>(BOOKING_POLICY.arrivalWindow.defaultMinutes)
   // Cena upravená poskytovatelem pro tuto objednávku (např. delší cesta) – zákazník ji potvrdí s termínem.
   const [priceEdit, setPriceEdit] = useState(false)
@@ -214,6 +236,14 @@ export default function TimeProposalPanel({
         setError('Jednomu zákazníkovi můžete poslat maximálně 6 termínů.')
         return
       }
+      let durationMinutes: number | null = null
+      if (askDuration && !arrivalWindow && durationInput.trim()) {
+        durationMinutes = Number(durationInput)
+        if (!Number.isInteger(durationMinutes) || durationMinutes < 5 || durationMinutes > 720) {
+          setError('Délka musí být celé číslo mezi 5 a 720 minutami.')
+          return
+        }
+      }
       let price: { kc: number; note: string | null } | null = null
       if (canAdjustPrice && priceEdit) {
         const n = Number(priceInput.replace(/\s/g, '').replace(',', '.'))
@@ -228,7 +258,8 @@ export default function TimeProposalPanel({
         if (n !== depositAmount) price = { kc: n, note: priceNote.trim() || null }
       }
       setBusy(true); setError('')
-      const res = await proposeTimes(orderId, allSelected, arrivalWindow ? windowMinutes : undefined, price)
+      const res = await proposeTimes(orderId, allSelected, arrivalWindow ? windowMinutes : undefined, price,
+        durationMinutes != null ? { durationMinutes } : null)
       setBusy(false)
       if (!res.success) { setError(res.error); return }
       setEditMode(false)
@@ -490,6 +521,25 @@ export default function TimeProposalPanel({
                     : ' Zákazník si jeden vybere a případnou zálohou ho potvrdí.'}
             </p>
 
+            {askDuration && !arrivalWindow && (
+              <div className="mb-3 rounded-xl border border-amber-200 bg-white p-3">
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Jak dlouho to u zákazníka zabere (min)</label>
+                <input
+                  type="number"
+                  min={5}
+                  max={720}
+                  step={5}
+                  value={durationInput}
+                  placeholder={String(defaultDuration)}
+                  onChange={(e) => { setDurationInput(e.target.value); setError('') }}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-amber-400"
+                />
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Prázdné = {defaultDuration} min. Tolik času se vám zablokuje v kalendáři.
+                </p>
+              </div>
+            )}
+
             {draft.length > 0 && (
               <div className="mb-3 space-y-2">
                 <p className="text-xs font-semibold text-slate-500">Přidané možnosti</p>
@@ -691,6 +741,16 @@ export default function TimeProposalPanel({
       {isReschedule && scheduledAt && (
         <div className="mb-3 rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-sm text-slate-700">
           Váš současný termín je <strong>{fmtLong(scheduledAt)}</strong>. Zůstává platný, dokud nepotvrdíte jiný.
+        </div>
+      )}
+
+      {itemName && paymentLabel && !isReschedule && (
+        <div className="mb-3 flex items-baseline justify-between gap-3 rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-sm">
+          <span className="font-bold text-slate-900">{itemName}</span>
+          <span className="shrink-0 text-right text-slate-600">
+            {paymentLabel === 'Cenu výjezdu' ? 'Cena výjezdu' : paymentLabel} <strong className="text-slate-900">{kc(effectiveAmount)}</strong>
+            {paymentNote && <span className="block text-[11px] text-slate-500">{paymentNote}</span>}
+          </span>
         </div>
       )}
 

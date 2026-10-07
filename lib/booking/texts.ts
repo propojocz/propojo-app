@@ -115,3 +115,15 @@ export function cancellationRules(kind: OfferKind, autoConfirm = false): string[
 
 export const PAYMENT_NOTE =
   'Platba jde přímo poskytovateli přes Stripe, Propojo peníze nedrží. Na výpisu uvidíte údaje poskytovatele.'
+
+/**
+ * Krátké shrnutí nabídky z poptávky / chatu: „Cena výjezdu 500 Kč · odečte se z ceny zakázky“.
+ * Služba: poplatek se odečítá vždy (VOP 11.1). Výjezd: podle volby poskytovatele (VOP 11.6).
+ */
+export function offerSummary(kind: 'A' | 'B', chargeKc: number, quoteFeeDeductible = false): string {
+  const castka = `${chargeKc.toLocaleString('cs-CZ')} Kč`
+  if (kind === 'A') return `Rezervační poplatek ${castka} · odečte se z ceny služby`
+  return quoteFeeDeductible
+    ? `Cena výjezdu ${castka} · odečte se z ceny zakázky`
+    : `Cena výjezdu ${castka} · do ceny zakázky se nezapočítává`
+}

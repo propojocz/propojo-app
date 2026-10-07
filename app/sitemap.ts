@@ -26,11 +26,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     .select('id, updated_at')
     .eq('is_active', true)
     .order('created_at', { ascending: false })
-    .limit(1000)
+    .limit(1000) as { data: { id: string; updated_at: string | null }[] | null }
 
   const servicePages: MetadataRoute.Sitemap = (services ?? []).map(s => ({
     url: `${APP_URL}/sluzby/${s.id}`,
-    lastModified: new Date(s.updated_at),
+    lastModified: s.updated_at ? new Date(s.updated_at) : new Date(),
     changeFrequency: 'weekly' as const,
     priority: 0.7,
   }))
@@ -40,11 +40,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     .from('profiles')
     .select('id, updated_at')
     .eq('is_provider', true)
-    .limit(1000)
+    .limit(1000) as { data: { id: string; updated_at: string | null }[] | null }
 
   const profilePages: MetadataRoute.Sitemap = (providers ?? []).map(p => ({
     url: `${APP_URL}/profil/${p.id}`,
-    lastModified: new Date(p.updated_at),
+    lastModified: p.updated_at ? new Date(p.updated_at) : new Date(),
     changeFrequency: 'weekly' as const,
     priority: 0.6,
   }))

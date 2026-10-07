@@ -13,6 +13,7 @@ import { revalidatePath } from 'next/cache'
 import { headers } from 'next/headers'
 import { createDepositCheckout } from '@/lib/actions/deposit'
 import { bookingCharge, isOfferKind, itemPriceKc } from '@/lib/booking/commission'
+import { isPlaceKnown, type KnownPlace } from '@/lib/geo'
 import {
   OFFER_KIND_TITLE,
   PAYMENT_NOTE,
@@ -37,6 +38,8 @@ import {
   logOrderEvent,
   captureBooking,
   isProviderOfferedTime,
+  knownPlaceOf,
+  shouldAutoConfirm,
   loadBookingOrder,
   releaseAuthorization,
   type BookingOrder,
@@ -203,8 +206,17 @@ export type BookingRecap = {
   cancellationRules: string[]
   paymentNote: string
   paymentShort: string
-  /** Termín nabídl sám poskytovatel → po zaplacení se rezervace hned potvrdí */
+  /** Termín nabídl sám poskytovatel → po zaplacení se rezervace hned potvrdí (u adresy, kterou znal) */
   autoConfirm: boolean
+  /** Termín nabídl poskytovatel – bez ohledu na adresu (průvodce přepočítá při změně adresy) */
+  autoConfirmBase: boolean
+  /** Místo, se kterým poskytovatel počítal (obec z objednávky, dosah karty) */
+  knownPlace: KnownPlace
+  /** Texty pro obě varianty – průvodce je přepne podle zvolené adresy */
+  paymentShortAuto: string
+  paymentShortManual: string
+  cancellationRulesAuto: string[]
+  cancellationRulesManual: string[]
   /** Zaškrtávací pole podle typu (VOP čl. 9); null = nic se nepotvrzuje */
   consentText: string | null
   consentWhy: string | null
@@ -245,11 +257,15 @@ export async function getBookingRecap(
 
   const { data: row } = await db
     .from('orders')
-    .select('service_location, location_address, location_lat, location_lng, location_city, agreed_charge_halere, service_items(name, offer_kind, deposit_amount, quote_fee, deposit_type, quote_fee_deductible), services(title, location_type, address, city, phone)')
+    .select('service_location, location_address, location_lat, location_lng, location_city, agreed_charge_halere, offer_kind, service_item_id, quote_fee_deductible, service_items(name, offer_kind, deposit_amount, quote_fee, deposit_type, quote_fee_deductible), services(title, location_type, address, city, phone)')
     .eq('id', orderId)
     .maybeSingle()
   const o = row as any
-  const item = o?.service_items
+  // Objednávka z veřejné poptávky nemá položku – typ a částka jsou z nabídky poskytovatele (3d).
+  const itemless = !o?.service_item_id
+  const item = o?.service_items ?? (itemless && (o?.offer_kind === 'A' || o?.offer_kind === 'B')
+    ? { name: null, offer_kind: o.offer_kind, deposit_amount: null, quote_fee: null, deposit_type: null, quote_fee_deductible: o.quote_fee_deductible === true }
+    : null)
   if (!item || !isOfferKind(item.offer_kind)) {
     return { success: false, error: 'Tuto objednávku nelze v novém modelu rezervovat.' }
   }
@@ -265,14 +281,18 @@ export async function getBookingRecap(
       .maybeSingle()
     const pp = prop as { charge_halere: number | null; price_note: string | null } | null
     if (!pp) return { success: false, error: 'Tento termín už není v nabídce. Obnovte stránku.' }
-    agreedChargeHalere = pp.charge_halere ?? null
+    agreedChargeHalere = pp.charge_halere ?? (itemless ? o.agreed_charge_halere ?? null : null)
     priceNote = pp.price_note ?? null
   }
   const charge = bookingCharge({ ...item, agreed_charge_halere: agreedChargeHalere })
   if (!charge.ok) return { success: false, error: charge.error }
-  const basePrice = itemPriceKc(item)
-  // Potvrzení předem: termín z návrhu poskytovatele, nebo vypsané okno (ne otevírací doba)
-  const autoConfirm = proposalStart ? true : await isProviderOfferedTime(db, order)
+  // Cena „bez úpravy“: z položky, u objednávky z poptávky částka z nabídky
+  const basePrice = itemless ? (o.agreed_charge_halere != null ? Number(o.agreed_charge_halere) / 100 : null) : itemPriceKc(item)
+  // Potvrzení předem: termín z návrhu poskytovatele, nebo vypsané okno (ne otevírací doba),
+  // a jen u adresy v místě, se kterým poskytovatel počítal.
+  const autoConfirmBase = proposalStart ? true : await isProviderOfferedTime(db, order)
+  const knownPlace = await knownPlaceOf(db, orderId)
+  const autoConfirm = autoConfirmBase && isPlaceKnown(knownPlace, o.location_lat, o.location_lng)
   const originalChargeKc = agreedChargeHalere != null && basePrice != null && basePrice * 100 !== agreedChargeHalere ? basePrice : null
 
   const atCustomer = o.service_location
@@ -331,6 +351,12 @@ export async function getBookingRecap(
       paymentNote: PAYMENT_NOTE,
       paymentShort: autoConfirm ? PAYMENT_SHORT_AUTO : PAYMENT_SHORT,
       autoConfirm,
+      autoConfirmBase,
+      knownPlace,
+      paymentShortAuto: PAYMENT_SHORT_AUTO,
+      paymentShortManual: PAYMENT_SHORT,
+      cancellationRulesAuto: cancellationRules(charge.offerKind, true),
+      cancellationRulesManual: cancellationRules(charge.offerKind, false),
       consentText: recapCheckbox(charge.offerKind),
       consentWhy: recapCheckboxWhy(charge.offerKind),
       withdrawalNote: withdrawalNote(charge.offerKind),
@@ -368,8 +394,8 @@ export async function startBookingPayment(
   const { db, by, userId, order } = ctx
   if (by !== 'customer') return { success: false, error: 'Platbu dokončuje zákazník.' }
 
-  const { data: row } = await db.from('orders').select('agreed_charge_halere, service_items(offer_kind, quote_fee_deductible)').eq('id', orderId).maybeSingle()
-  const kind = (row as any)?.service_items?.offer_kind
+  const { data: row } = await db.from('orders').select('agreed_charge_halere, offer_kind, quote_fee_deductible, service_items(offer_kind, quote_fee_deductible)').eq('id', orderId).maybeSingle()
+  const kind = (row as any)?.service_items?.offer_kind ?? (row as any)?.offer_kind
   if (!isOfferKind(kind)) return { success: false, error: 'Tuto objednávku nelze v novém modelu rezervovat.' }
   if (recapCheckbox(kind) && !consent) {
     return { success: false, error: 'Pro pokračování prosím zaškrtněte políčko ve shrnutí.' }
@@ -403,9 +429,9 @@ export async function startBookingPayment(
     // Cena upravená poskytovatelem, kterou zákazník přijal (null = cena z nabídky)
     agreed_charge_halere: (row as any)?.agreed_charge_halere ?? null,
     // Termín nabídl poskytovatel → potvrdí se hned po zaplacení (zákazník to viděl ve shrnutí)
-    auto_confirm: await isProviderOfferedTime(db, order),
+    auto_confirm: await shouldAutoConfirm(db, order),
     // Výjezd: slib odečíst Cenu výjezdu z ceny zakázky, jak ho zákazník viděl (VOP 11.6)
-    quote_fee_deductible: kind === 'B' ? (row as any)?.service_items?.quote_fee_deductible === true : null,
+    quote_fee_deductible: kind === 'B' ? ((row as any)?.service_items?.quote_fee_deductible ?? (row as any)?.quote_fee_deductible) === true : null,
     ip,
     user_agent: userAgent,
   })

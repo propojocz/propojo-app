@@ -17,6 +17,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { createNotification } from './notifications'
+import { selectProvider } from './requests'
+import { BOOKING_POLICY } from '@/lib/booking/policy'
+import { cas, terminDlouze } from '@/lib/format'
 
 function getAdminClient() {
   return createAdminClient(
@@ -272,4 +275,148 @@ export async function sendPriceEstimate(
   }
 
   return { success: true, id: data.id, message: data }
+}
+
+// ── Termín přímo v jednání (3d, 7. 10. 2026) ─────────────────
+// Poskytovatel může termín navrhnout už v chatu jednání, zákazník pak jedním
+// tlačítkem vybere poskytovatele i termín („Vybrat a rezervovat“). Návrh je zpráva
+// s payloadem { kind: 'term_proposal', starts_at, ends_at, arrival_window }; závazně
+// se ověří (kolize, předstih, platba) až při přijetí v objednávce (acceptProposal).
+
+const ACTIVE_RESPONSE = ['interested', 'negotiating']
+
+export async function proposeTermInChat(
+  conversationId: string,
+  startsAt: string,
+  minutes: number,
+): Promise<SendResult> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+
+  const admin = getAdminClient()
+  const conv = await loadConversation(admin, conversationId)
+  if (!conv || !conv.responseId) return { success: false, error: 'Konverzace nebyla nalezena.' }
+  if (user.id !== conv.providerId) return { success: false, error: 'Termín může navrhnout jen poskytovatel.' }
+  if (conv.status !== 'open' || conv.orderId) return { success: false, error: 'Tahle konverzace je uzavřená.' }
+
+  const { data: rr } = await admin
+    .from('request_responses')
+    .select('status, offer_kind, charge_halere')
+    .eq('id', conv.responseId)
+    .single() as { data: { status: string; offer_kind: string | null; charge_halere: number | null } | null }
+  if (!rr || !ACTIVE_RESPONSE.includes(rr.status)) return { success: false, error: 'U téhle poptávky už termín navrhnout nejde.' }
+  if ((rr.offer_kind !== 'A' && rr.offer_kind !== 'B') || !rr.charge_halere) {
+    return { success: false, error: 'Nejdřív u poptávky vyplňte nabídku (co zákazník zaplatí přes Propojo).' }
+  }
+
+  const start = new Date(startsAt)
+  if (isNaN(start.getTime())) return { success: false, error: 'Neplatný termín.' }
+  if (start.getTime() < Date.now() + BOOKING_POLICY.minLeadMinutes * 60_000) {
+    return { success: false, error: `Termín musí začínat nejdříve za ${BOOKING_POLICY.minLeadMinutes} minut.` }
+  }
+  const arrival = rr.offer_kind === 'B'
+  const m = Math.round(Number(minutes))
+  if (arrival ? !BOOKING_POLICY.arrivalWindow.optionsMinutes.includes(m) : (!Number.isFinite(m) || m < 5 || m > 720)) {
+    return { success: false, error: arrival ? 'Neplatná délka okna příjezdu.' : 'Délka musí být mezi 5 minutami a 12 hodinami.' }
+  }
+  const end = new Date(start.getTime() + m * 60_000)
+
+  // Rychlá kontrola kolize s jinou rezervací poskytovatele (závazně znovu při přijetí).
+  const { data: clashes } = await admin
+    .from('orders')
+    .select('id, scheduled_at, scheduled_end, deposit_status, hold_expires_at')
+    .eq('provider_id', user.id)
+    .neq('status', 'zruseno')
+    .not('scheduled_at', 'is', null)
+    .lt('scheduled_at', end.toISOString()) as { data: any[] | null }
+  const clash = (clashes ?? []).find((o) => {
+    if (o.deposit_status === 'pending' && o.hold_expires_at && new Date(o.hold_expires_at).getTime() <= Date.now()) return false
+    const oEnd = o.scheduled_end ? new Date(o.scheduled_end).getTime() : new Date(o.scheduled_at).getTime() + 60 * 60_000
+    return oEnd > start.getTime()
+  })
+  if (clash) {
+    return { success: false, error: `V tu dobu už máte jinou rezervaci (${terminDlouze(clash.scheduled_at)}). Vyberte prosím jiný čas.` }
+  }
+
+  const label = arrival ? `${terminDlouze(start)}–${cas(end)} (přijedu v tomto rozmezí)` : `${terminDlouze(start)} (${m} min)`
+  const { data, error } = await (admin.from('messages') as any)
+    .insert({
+      conversation_id: conversationId,
+      order_id: null,
+      sender_id: user.id,
+      content: `Navrhuji termín: ${label}.`,
+      type: 'message',
+      payload: { kind: 'term_proposal', starts_at: start.toISOString(), ends_at: end.toISOString(), arrival_window: arrival },
+    })
+    .select('*')
+    .single() as { data: any; error: any }
+  if (error || !data) {
+    console.error('[proposeTermInChat]', error)
+    return { success: false, error: 'Návrh se nepodařilo odeslat.' }
+  }
+
+  await (admin.from('request_responses') as any)
+    .update({ last_message_at: new Date().toISOString() })
+    .eq('id', conv.responseId)
+
+  try {
+    if (conv.customerId) {
+      await createNotification({
+        userId: conv.customerId,
+        type: 'new_message',
+        actorId: user.id,
+        title: 'Poskytovatel navrhl termín',
+        preview: label,
+        url: `/poptavky/${conv.requestId}/jednani/${conversationId}`,
+      })
+    }
+  } catch (err) {
+    console.error('[proposeTermInChat] notifikace', err)
+  }
+
+  return { success: true, id: data.id, message: data }
+}
+
+/**
+ * Zákazník vybere poskytovatele rovnou s termínem z chatu: vznikne objednávka (selectProvider),
+ * termín se do ní vloží jako návrh a zákazník pokračuje shrnutím a platbou v objednávce.
+ */
+export async function selectProviderWithTerm(
+  conversationId: string,
+  messageId: string,
+): Promise<{ success: true; orderId: string; startsAt: string } | { success: false; error: string }> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+
+  const admin = getAdminClient()
+  const conv = await loadConversation(admin, conversationId)
+  if (!conv || !conv.responseId || !conv.requestId) return { success: false, error: 'Konverzace nebyla nalezena.' }
+  if (user.id !== conv.customerId) return { success: false, error: 'Vybírá zákazník.' }
+
+  const { data: msg } = await admin
+    .from('messages')
+    .select('id, conversation_id, sender_id, payload')
+    .eq('id', messageId)
+    .maybeSingle() as { data: { id: string; conversation_id: string | null; sender_id: string; payload: any } | null }
+  const p = msg?.payload
+  if (!msg || msg.conversation_id !== conversationId || msg.sender_id !== conv.providerId || p?.kind !== 'term_proposal') {
+    return { success: false, error: 'Návrh termínu nebyl nalezen.' }
+  }
+  if (new Date(p.starts_at).getTime() < Date.now() + BOOKING_POLICY.minLeadMinutes * 60_000) {
+    return { success: false, error: 'Tento termín už nejde vybrat. Požádejte poskytovatele o nový.' }
+  }
+
+  const sel = await selectProvider(conv.requestId, conv.responseId)
+  if (!sel.success || !sel.id) return { success: false, error: sel.success ? 'Objednávku se nepodařilo vytvořit.' : sel.error }
+
+  const { error } = await (admin.from('order_time_proposals') as any)
+    .insert({ order_id: sel.id, starts_at: p.starts_at, ends_at: p.ends_at })
+  if (error) {
+    console.error('[selectProviderWithTerm] návrh', error)
+    // Objednávka vznikla – termín se dá domluvit v ní.
+    return { success: true, orderId: sel.id, startsAt: '' }
+  }
+  return { success: true, orderId: sel.id, startsAt: p.starts_at }
 }

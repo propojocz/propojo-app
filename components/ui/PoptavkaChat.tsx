@@ -13,10 +13,11 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   Send, Loader2, ArrowLeft, MapPin, CalendarClock, Tag, Lock, ImagePlus, X,
-  Tags, Coins, Info, CheckCircle2, MessagesSquare,
+  Tags, Coins, Info, CheckCircle2, MessagesSquare, CalendarDays,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { sendConversationMessage, sendPriceEstimate } from '@/lib/actions/conversation-chat'
+import { sendConversationMessage, sendPriceEstimate, proposeTermInChat, selectProviderWithTerm } from '@/lib/actions/conversation-chat'
+import { BOOKING_POLICY } from '@/lib/booking/policy'
 import { selectProvider } from '@/lib/actions/requests'
 import ChatThread from '@/components/ui/ChatThread'
 
@@ -40,7 +41,7 @@ type RequestCtx = {
 
 export default function PoptavkaChat({
   conversationId, requestId, responseId,
-  isProvider, readOnly, orderId, canSelect, hasServiceForOrder,
+  isProvider, readOnly, orderId, canSelect, hasServiceForOrder, offerText = null, offerKind = null,
   otherName, request, threads, initialMessages, myUserId, senderNames,
 }: {
   conversationId: string
@@ -51,6 +52,10 @@ export default function PoptavkaChat({
   orderId: string | null
   canSelect: boolean
   hasServiceForOrder: boolean
+  /** Nabídka poskytovatele: „Cena výjezdu 500 Kč · odečte se z ceny zakázky“ (null = neuvedená) */
+  offerText?: string | null
+  /** Typ nabídky: B = termín je okno příjezdu, A = délka služby */
+  offerKind?: 'A' | 'B' | null
   otherName: string
   request: RequestCtx
   threads: ThreadItem[]
@@ -71,6 +76,13 @@ export default function PoptavkaChat({
   const [estFrom, setEstFrom] = useState('')
   const [estTo, setEstTo] = useState('')
   const [estBusy, setEstBusy] = useState(false)
+  // Návrh termínu v jednání (poskytovatel) a „Vybrat a rezervovat“ (zákazník)
+  const [termOpen, setTermOpen] = useState(false)
+  const [termDate, setTermDate] = useState('')
+  const [termClock, setTermClock] = useState('')
+  const [termMinutes, setTermMinutes] = useState<number>(offerKind === 'B' ? BOOKING_POLICY.arrivalWindow.defaultMinutes : 60)
+  const [termBusy, setTermBusy] = useState(false)
+  const [bookBusy, setBookBusy] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -114,7 +126,7 @@ export default function PoptavkaChat({
   }
 
   // Strukturovaný odhad ceny (jen poskytovatel). Nezávazný, ukáže se i u zájemce.
-  // Termín se v jednání NENAVRHUJE — patří až do objednávky po výběru.
+  // Termín jde navrhnout zvlášť (proposeTermInChat), zákazník ho pak vybere i s poskytovatelem.
   const handleEstimate = async () => {
     if (estBusy) return
     setEstBusy(true)
@@ -127,6 +139,49 @@ export default function PoptavkaChat({
       setError(res.error)
     }
     setEstBusy(false)
+  }
+
+  const handleProposeTerm = async () => {
+    if (termBusy) return
+    setError(null)
+    if (!termDate || !termClock) { setError('Vyberte den a čas.'); return }
+    const start = new Date(`${termDate}T${termClock}`)
+    setTermBusy(true)
+    const res = await proposeTermInChat(conversationId, start.toISOString(), termMinutes)
+    setTermBusy(false)
+    if (res.success) {
+      setMessages((prev) => [...prev, res.message])
+      setTermDate(''); setTermClock(''); setTermOpen(false)
+    } else {
+      setError(res.error)
+    }
+  }
+
+  // Zákazník: vybrat poskytovatele i termín jedním klikem → objednávka, shrnutí a platba
+  const handleBookTerm = async (messageId: string) => {
+    if (bookBusy) return
+    setBookBusy(messageId)
+    setError(null)
+    const res = await selectProviderWithTerm(conversationId, messageId)
+    if (res.success) {
+      router.push(`/dashboard/objednavky/${res.orderId}${res.startsAt ? `?rezervovat=${encodeURIComponent(res.startsAt)}` : ''}`)
+    } else {
+      setError(res.error)
+      setBookBusy(null)
+    }
+  }
+
+  // Aktuální návrhy termínu od poskytovatele (ještě je jde vybrat)
+  const termProposals = messages
+    .filter((m) => m?.payload?.kind === 'term_proposal' && m.sender_id !== myUserId)
+    .filter((m) => new Date(m.payload.starts_at).getTime() > Date.now() + BOOKING_POLICY.minLeadMinutes * 60_000)
+    .sort((a, b) => new Date(a.payload.starts_at).getTime() - new Date(b.payload.starts_at).getTime())
+  const fmtTerm = (p: any) => {
+    const d = new Date(p.starts_at)
+    const den = new Intl.DateTimeFormat('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' }).format(d)
+    const od = new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(d)
+    const doo = new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(p.ends_at))
+    return p.arrival_window ? `${den} ${od}–${doo}` : `${den} ${od}`
   }
 
   const handleSelect = async () => {
@@ -234,6 +289,14 @@ export default function PoptavkaChat({
             <p className="truncate text-sm font-bold text-slate-900">
               {isProvider ? 'Chat se zákazníkem' : `Chat s ${otherName}`}
             </p>
+            {isProvider && !readOnly && offerKind && (
+              <button
+                onClick={() => { setTermOpen((v) => !v); setEstimateOpen(false) }}
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100"
+              >
+                <CalendarDays className="h-3.5 w-3.5" /> Navrhnout termín
+              </button>
+            )}
             {isProvider && !readOnly && (
               <button
                 onClick={() => setEstimateOpen((v) => !v)}
@@ -242,6 +305,15 @@ export default function PoptavkaChat({
                 <Coins className="h-3.5 w-3.5" /> Poslat odhad ceny
               </button>
             )}
+          </div>
+
+          {/* Nabídka poskytovatele – kolik se platí přes Propojo a jestli se to odečte */}
+          <div className={`mx-5 mt-4 rounded-xl border px-4 py-2.5 text-sm ${offerText ? 'border-sky-200 bg-sky-50 text-sky-900' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+            {offerText
+              ? <><b>Nabídka:</b> {offerText}. Platí se přes Propojo až po potvrzení termínu.</>
+              : isProvider
+                ? 'Zatím jste neuvedli, kolik zákazník zaplatí přes Propojo. Doplňte to u poptávky přes „Upravit nabídku“.'
+                : 'Poskytovatel zatím neuvedl, kolik se platí přes Propojo.'}
           </div>
 
           {/* Vybráno → odkaz na objednávku */}
@@ -259,8 +331,44 @@ export default function PoptavkaChat({
               <div>
                 <b className="block text-[13px]">Předběžná domluva</b>
                 {isProvider
-                  ? 'Zákazník si zatím vybírá. Domluvte se rámcově a klidně pošlete nezávazný odhad ceny. Závazný termín i platba vzniknou, až vás zákazník vybere.'
-                  : 'Tohle zatím není objednávka — cena ani termín nejsou závazné. Až si poskytovatele vyberete, potvrdíte termín a platbu v objednávce.'}
+                  ? 'Zákazník si zatím vybírá. Domluvte se, pošlete odhad ceny a navrhněte termín – zákazník pak jedním klikem vybere vás i termín a zaplatí.'
+                  : 'Tohle zatím není objednávka. Až vám poskytovatel navrhne termín, můžete ho rovnou vybrat a zaplatit – nebo si poskytovatele vyberte a termín domluvte potom.'}
+              </div>
+            </div>
+          )}
+
+          {/* Composer návrhu termínu (jen poskytovatel) */}
+          {termOpen && isProvider && !readOnly && offerKind && (
+            <div className="mx-5 mt-3 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+              <p className="mb-2 text-xs font-semibold text-slate-600">
+                Návrh termínu – zákazník ho může rovnou vybrat a zaplatit
+              </p>
+              <div className="flex flex-wrap items-end gap-2">
+                <input type="date" value={termDate} onChange={(e) => setTermDate(e.target.value)}
+                  className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-amber-400" />
+                <input type="time" step={300} value={termClock} onChange={(e) => setTermClock(e.target.value)}
+                  className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-amber-400" />
+                {offerKind === 'B' ? (
+                  <select value={termMinutes} onChange={(e) => setTermMinutes(Number(e.target.value))}
+                    className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-amber-400">
+                    {BOOKING_POLICY.arrivalWindow.optionsMinutes.map((m) => (
+                      <option key={m} value={m}>přijedu v rozmezí {m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60} min`}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <label className="flex items-center gap-1.5 text-sm text-slate-600">
+                    <input type="number" min={5} max={720} step={5} value={termMinutes} onChange={(e) => setTermMinutes(Number(e.target.value))}
+                      className="w-20 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-amber-400" />
+                    min
+                  </label>
+                )}
+                <button
+                  onClick={handleProposeTerm}
+                  disabled={termBusy || !termDate || !termClock}
+                  className="inline-flex items-center gap-1 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-amber-600 disabled:opacity-50"
+                >
+                  {termBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Poslat návrh
+                </button>
               </div>
             </div>
           )}
@@ -361,12 +469,40 @@ export default function PoptavkaChat({
           )}
           </section>
 
+          {/* 3a) Termíny navržené v chatu → vybrat poskytovatele i termín jedním klikem (jen zákazník) */}
+          {canSelect && termProposals.length > 0 && (
+            <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50/60 p-5 shadow-sm">
+              <p className="text-sm font-bold text-slate-900">Navržené termíny</p>
+              <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                Kliknutím vyberete tohoto poskytovatele i termín a pokračujete ke shrnutí a platbě. Ostatní jednání se uzavřou.
+              </p>
+              <div className="mt-3 space-y-2">
+                {termProposals.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => handleBookTerm(m.id)}
+                    disabled={!!bookBusy}
+                    className="flex w-full items-center justify-between gap-3 rounded-xl bg-emerald-500 px-4 py-3 text-left text-sm font-bold text-white transition hover:bg-emerald-600 disabled:opacity-60"
+                  >
+                    <span className="flex items-center gap-2">
+                      {bookBusy === m.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarDays className="h-4 w-4" />}
+                      Vybrat a rezervovat · {fmtTerm(m.payload)}
+                    </span>
+                    {offerText && <span className="shrink-0 text-xs font-semibold text-emerald-50">{offerText.split(' · ')[0]}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* 3) Domluveno? Vybrat poskytovatele — hned pod chatem (jen zákazník) */}
           {canSelect && (
             <div className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
               <p className="text-sm font-bold text-slate-900">Domluveno?</p>
               <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                Výběrem vznikne objednávka s tímto poskytovatelem a ostatní jednání se uzavřou.
+                {termProposals.length > 0
+                  ? 'Nebo vyberte poskytovatele bez termínu – termín pak domluvíte ve stejném chatu.'
+                  : 'Výběrem vznikne objednávka s tímto poskytovatelem a ostatní jednání se uzavřou. Termín domluvíte ve stejném chatu.'}
               </p>
               <button
                 onClick={() => setConfirmOpen(true)}
@@ -374,7 +510,7 @@ export default function PoptavkaChat({
                 className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-600 disabled:opacity-60"
               >
                 {selectBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                Vybrat poskytovatele
+                Vybrat poskytovatele{offerText ? ` · ${offerText.split(' · ')[0]}` : ''}
               </button>
             </div>
           )}
@@ -396,8 +532,9 @@ export default function PoptavkaChat({
             </div>
             <h2 className="text-center text-lg font-black text-slate-900">Vybrat tohoto poskytovatele?</h2>
             <p className="mx-auto mt-2 text-center text-sm leading-relaxed text-slate-600">
-              Vznikne skutečná objednávka s tímto poskytovatelem a celá vaše domluva se do ní přenese.
-              Ostatní jednání u této poptávky se uzavřou. Termín a platbu pak potvrdíte už v objednávce.
+              {offerText && <><b className="text-slate-900">{offerText}.</b><br /></>}
+              Vznikne objednávka a celá domluva se do ní přenese. Zaplatíte až po potvrzení termínu.
+              Ostatní jednání u této poptávky se uzavřou.
             </p>
             <div className="mt-6 flex flex-col gap-2">
               <button

@@ -13,7 +13,7 @@ interface ReviewModalProps {
   serviceTitle: string
 }
 
-export default function ReviewModal({ orderId, providerId, providerName, serviceTitle }: ReviewModalProps) {
+export default function ReviewModal({ orderId }: ReviewModalProps) {
   const [open, setOpen] = useState(false)
   const [done, setDone] = useState(false)
 
@@ -58,13 +58,8 @@ export default function ReviewModal({ orderId, providerId, providerName, service
                   <X className="h-5 w-5" />
                 </button>
               </div>
-              <ReviewForm
-                orderId={orderId}
-                providerId={providerId}
-                providerName={providerName}
-                serviceTitle={serviceTitle}
-                onSuccess={() => { setDone(true); setOpen(false) }}
-              />
+              {/* ReviewForm potřebuje jen objednávku; po odeslání sám ukáže poděkování a obnoví stránku. */}
+              <ReviewForm orderId={orderId} />
             </motion.div>
           </motion.div>
         )}

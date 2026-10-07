@@ -8,6 +8,7 @@ import { Package, ShoppingBag, TrendingUp, Star, ArrowRight, PlusCircle, Search,
 import { CATEGORY_META } from '@/types/database'
 import type { Profile } from '@/types/database'
 import Avatar from '@/components/ui/Avatar'
+import NextBookingBar from '@/components/ui/NextBookingBar'
 import ProfileNameLink from '@/components/ui/ProfileNameLink'
 import FreeSlotReminder, { NoFreeSlotHint, type ReminderSlot } from '@/components/ui/FreeSlotReminder'
 import PushPrompt from '@/components/ui/PushPrompt'
@@ -152,6 +153,7 @@ export default async function DashboardPage() {
         </div>
 
         {/* Volný termín, o kterém nikdo neví — nejvýš, hned na očích */}
+        <NextBookingBar />
         {reminder ? <FreeSlotReminder slot={reminder} /> : maRezervovatelneUkony && <NoFreeSlotHint />}
 
         {/* Upozornění do telefonu — schová se samo, když je prohlížeč nepodporuje */}
@@ -294,6 +296,9 @@ export default async function DashboardPage() {
         <h1 className="text-2xl font-black text-slate-900">Dobrý den, {profile?.full_name?.split(' ')[0]} 👋</h1>
         <p className="mt-0.5 text-sm text-slate-500">{denDlouze(new Date())}</p>
       </div>
+
+      {/* Nejbližší potvrzená rezervace jako zákazník – jen tady na Přehledu */}
+      <NextBookingBar />
 
       {/* Upozornění do telefonu — schová se samo, když je prohlížeč nepodporuje */}
       <PushPrompt />

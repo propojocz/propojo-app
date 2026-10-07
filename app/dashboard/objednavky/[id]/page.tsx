@@ -2,11 +2,11 @@
 import { createClient } from '@/lib/supabase/server'
 import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
+import { AlertTriangle, ArrowLeft } from 'lucide-react'
 import OrderDetailClient from './OrderDetailClient'
 import BookingStateBadge from '@/components/ui/BookingStateBadge'
 import BookingProviderActions from '@/components/ui/BookingProviderActions'
-import { adminDb, syncCheckoutOnReturn } from '@/lib/booking/payments'
+import { adminDb, loadBookingOrder, resolveCaptureInProgress, syncCheckoutOnReturn } from '@/lib/booking/payments'
 import ReviewForm from '@/components/ui/ReviewForm'
 import TimeProposalPanel from '@/components/ui/TimeProposalPanel'
 import { itemPriceKc } from '@/lib/booking/commission'
@@ -14,7 +14,7 @@ import { haversineKm } from '@/lib/geo'
 import { getProposals } from '@/lib/actions/time-proposals'
 import TimePreferenceForm from '@/components/ui/TimePreferenceForm'
 
-interface Props { params: { id: string }; searchParams: { platba?: string } }
+interface Props { params: { id: string }; searchParams: { platba?: string; rezervovat?: string } }
 
 type ServiceLite = {
   id: string
@@ -113,7 +113,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
   // Návrat ze Stripe přes „zpět" nic automaticky neruší.
   // Zákazník může platbu zkusit znovu; jiný termín uvolní až explicitním tlačítkem.
 
-  const ORDER_SELECT = '*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee, location_type, address, address_lat, address_lng, address_public, phone), service_items(name, price, price_unit, deposit_amount, deposit_type, payment_model, duration_minutes, quote_fee, fee_mode, item_type, stock_mode, lead_time_days, pickup_mode, pickup_timing, offer_kind)'
+  const ORDER_SELECT = '*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee, location_type, address, address_lat, address_lng, address_public, phone), service_items(name, price, price_unit, deposit_amount, deposit_type, payment_model, duration_minutes, quote_fee, fee_mode, item_type, stock_mode, lead_time_days, pickup_mode, pickup_timing, offer_kind, quote_fee_deductible)'
 
   const { data: order, error } = await supabase
     .from('orders')
@@ -131,6 +131,18 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
     const { data: fresh } = await supabase.from('orders').select(ORDER_SELECT).eq('id', params.id).single()
     if (fresh) Object.assign(order, fresh)
   }
+  // Stržení platby, které se nedopsalo (výpadek po capture): po minutě se zeptáme Stripe
+  // a stav dořešíme hned při otevření, ne až pětiminutovou kontrolou.
+  if ((order as any).booking_state === 'capture_in_progress'
+    && new Date((order as any).state_changed_at ?? 0).getTime() < Date.now() - 60_000) {
+    const db = adminDb()
+    const bo = await loadBookingOrder(db, order.id)
+    if (bo) {
+      try { await resolveCaptureInProgress(db, bo) } catch (err) { console.error('[objednávka] dořešení capture', err) }
+      const { data: fresh } = await supabase.from('orders').select(ORDER_SELECT).eq('id', params.id).single()
+      if (fresh) Object.assign(order, fresh)
+    }
+  }
 
   const isProvider = order.provider_id === user.id
   const otherId = isProvider ? order.customer_id : order.provider_id
@@ -140,7 +152,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
   // Vzdálenost zákazníka mimo obvyklý dosah poskytovatele – jen informace pro poskytovatele,
   // rozhoduje on (přesná adresa, jinak obec z poptávky).
   let outOfRange: { distanceKm: number; radiusKm: number } | null = null
-  if (isProvider && (order as any).service_location !== 'u_poskytovatele') {
+  if ((order as any).service_location !== 'u_poskytovatele') {
     const { data: card } = await supabase
       .from('services').select('location_type, city, city_lat, city_lng, radius_km').eq('id', (order as any).service_id).maybeSingle() as { data: { location_type: string | null; city: string | null; city_lat: number | null; city_lng: number | null; radius_km: number | null } | null }
     const atCustomer = (order as any).service_location
@@ -186,7 +198,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
 
   const proposalModel = order.service_items?.payment_model ?? order.services?.payment_model
   // Model v2: položka s typem nabídky. I výjezd (B) potřebuje termín = okno příjezdu (korekce 4).
-  const v2OfferKind = ((order.service_items as any)?.offer_kind ?? null) as string | null
+  const v2OfferKind = ((order.service_items as any)?.offer_kind ?? (order as any).offer_kind ?? null) as string | null
   const futureConfirmedTerm = !!order.scheduled_at && new Date(order.scheduled_at).getTime() > Date.now()
   // Rezervace nového modelu s rozběhnutou nebo hotovou platbou: termín se tudy nemění
   // (změna potvrzené rezervace má vlastní pravidla, model §10).
@@ -197,7 +209,8 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
     order.status !== 'zruseno' &&
     order.status !== 'dokonceno' &&
     order.status !== 'ceka_potvrzeni' &&
-    (proposalModel !== 'B' || v2OfferKind === 'B')
+    // Objednávka z veřejné poptávky nemá položku – poskytovatel ji vybere s návrhem termínu (3d).
+    (proposalModel !== 'B' || v2OfferKind === 'B' || !order.service_item_id)
 
   // Bez termínu: provider panel vidí vždy, zákazník až když má co vybírat.
   // S potvrzeným budoucím termínem: provider má kompaktní „Navrhnout změnu",
@@ -258,7 +271,8 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
         <ArrowLeft className="h-4 w-4" /> Zpět na objednávky
       </Link>
 
-      <BookingStateBadge
+      {/* Poskytovatel u čekající rezervace: stav i akce jsou ve velkém bloku níž – bez duplicity */}
+      {!(isProvider && (order as any).booking_state === 'awaiting_confirmation') && <BookingStateBadge
         state={(order as any).booking_state ?? null}
         isProvider={isProvider}
         confirmDeadlineAt={(order as any).confirm_deadline_at ?? null}
@@ -266,12 +280,25 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
         authorizedAt={(order as any).authorized_at ?? null}
         confirmedAt={(order as any).confirmed_at ?? null}
         cancelReason={(order as any).cancel_reason ?? null}
-      />
+      />}
 
-      {outOfRange && !['confirmed', 'declined', 'expired', 'cancelled', 'capture_failed'].includes(v2BookingState ?? '') && order.status !== 'zruseno' && order.status !== 'dokonceno' && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Zákazník je asi <strong>{outOfRange.distanceKm} km</strong> daleko, mimo váš obvyklý dosah {outOfRange.radiusKm} km (vzdušnou čarou).
-          {' '}Jestli zakázku vezmete a za jakých podmínek, je na vás – domluvit se můžete ve zprávách.
+      {/* Vzdálenost mimo obvyklý dosah – výrazně pro poskytovatele; zákazníkovi jen u čekající rezervace */}
+      {outOfRange && !['confirmed', 'declined', 'expired', 'cancelled', 'capture_failed'].includes(v2BookingState ?? '') && order.status !== 'zruseno' && order.status !== 'dokonceno'
+        && (isProvider || v2BookingState === 'awaiting_confirmation') && (
+        <div className="flex items-start gap-3 rounded-2xl border-2 border-orange-400 bg-orange-50 px-4 py-3.5 text-sm text-orange-950">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-orange-600" />
+          <div>
+            <p className="font-black">Pozor, je to daleko – asi {outOfRange.distanceKm} km</p>
+            <p className="mt-0.5 leading-relaxed">
+              {isProvider
+                ? <>Adresa je mimo váš obvyklý dosah {outOfRange.radiusKm} km (vzdušnou čarou).
+                    {v2BookingState === 'awaiting_confirmation'
+                      ? ' Potvrďte jen, pokud tam opravdu dojedete – jinak rezervaci odmítněte a zákazníkovi se blokace uvolní.'
+                      : ' Jestli zakázku vezmete a za jakých podmínek, je na vás – domluvit se můžete ve zprávách.'}</>
+                : <>Adresa je mimo obvyklý dosah poskytovatele ({outOfRange.radiusKm} km). Rezervaci proto potvrzuje ručně – částka je zatím
+                    jen zablokovaná. Když tam nedojede, rezervaci odmítne a blokace se uvolní, nic nezaplatíte.</>}
+            </p>
+          </div>
         </div>
       )}
 
@@ -293,7 +320,11 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
           orderId={order.id}
           isProvider={isProvider}
           proposals={proposals}
-          depositAmount={v2OfferKind ? (itemPriceKc({ offer_kind: v2OfferKind, deposit_amount: panelItem?.deposit_amount ?? null, quote_fee: panelItem?.quote_fee ?? null }) ?? 0) : depositForPanel}
+          depositAmount={v2OfferKind
+            ? (panelItem
+                ? (itemPriceKc({ offer_kind: v2OfferKind, deposit_amount: panelItem.deposit_amount ?? null, quote_fee: panelItem.quote_fee ?? null }) ?? 0)
+                : Number((order as any).agreed_charge_halere ?? 0) / 100)
+            : depositForPanel}
           scheduledAt={order.scheduled_at}
           depositStatus={order.deposit_status}
           itemName={order.service_items?.name ?? order.services?.title ?? null}
@@ -303,7 +334,17 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
           prefTime={(order as any).pref_time ?? null}
           arrivalWindow={v2OfferKind === 'B'}
           paymentLabel={v2OfferKind ? (v2OfferKind === 'B' ? 'Cenu výjezdu' : 'Rezervační poplatek') : null}
+          paymentNote={v2OfferKind === 'A'
+            ? 'odečte se z ceny služby'
+            : v2OfferKind === 'B'
+              ? ((((order as any).quote_fee_deductible ?? (order.service_items as any)?.quote_fee_deductible) === true)
+                  ? 'odečte se z ceny zakázky'
+                  : 'do ceny zakázky se nezapočítává')
+              : null}
           customerPlace={isProvider ? ((order as any).location_city ?? null) : null}
+          askDuration={!order.service_item_id}
+          autoOpenStart={!isProvider ? (searchParams.rezervovat ?? null) : null}
+          defaultDuration={Number((order.service_items as any)?.duration_minutes ?? 0) || 60}
           outOfRange={isProvider ? outOfRange : null}
         />
       )}

@@ -224,14 +224,18 @@ export default function OrderDetailClient({
 
   const item = order.service_items ?? null
   const paymentModel = item?.payment_model ?? service?.payment_model
-  const isModelB = paymentModel === 'B'
+  // Objednávka z veřejné poptávky nemá položku – typ a částka jsou z nabídky poskytovatele (3d).
+  const bezPolozky = !item && ((order as any).offer_kind === 'A' || (order as any).offer_kind === 'B')
+  const isModelB = bezPolozky ? (order as any).offer_kind === 'B' : paymentModel === 'B'
   const depositType = item?.deposit_type ?? 'zaloha'
   const isFullPayment = !isModelB && depositType === 'plna_platba' && Number(item?.price ?? 0) > 0
 
   // Částka, která se opravdu platí předem. U plné platby je to cena úkonu,
   // u zálohy deposit_amount a u „bez platby" nula. Hodnota na objednávce má
   // přednost, ale u starších chybných objednávek s plnou platbou umíme dopočítat cenu z úkonu.
-  const depositAmount = Number(
+  const depositAmount = bezPolozky
+    ? Number((order as any).agreed_charge_halere ?? 0) / 100
+    : Number(
     (isFullPayment && (order.deposit_amount == null || Number(order.deposit_amount) <= 0)
       ? item?.price
       : order.deposit_amount) ??
@@ -549,7 +553,7 @@ export default function OrderDetailClient({
             {service?.city && (
               <span className="inline-flex items-center gap-1.5"><MapPin className="h-4 w-4 text-slate-400" /> {service.city}</span>
             )}
-            {Number(item?.price ?? service?.price ?? 0) > 0 && (
+            {!bezPolozky && Number(item?.price ?? service?.price ?? 0) > 0 && (
               <span className="inline-flex items-center gap-1.5">
                 <Wallet className="h-4 w-4 text-slate-400" />
                 {Number(item?.price ?? service?.price).toLocaleString('cs-CZ')} Kč
@@ -563,6 +567,14 @@ export default function OrderDetailClient({
           {jeV2Polozka && depositAmount > 0 && (
             <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${isModelB ? 'border-blue-200 bg-blue-50 text-blue-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
               <strong>{isModelB ? 'Cena výjezdu' : 'Rezervační poplatek'}:</strong> {depositAmount.toLocaleString('cs-CZ')} Kč
+              <span className="opacity-80">
+                {' · '}
+                {!isModelB
+                  ? 'odečte se z ceny služby'
+                  : (((order as any).quote_fee_deductible ?? (item as any)?.quote_fee_deductible) === true)
+                    ? 'odečte se z ceny zakázky'
+                    : 'do ceny zakázky se nezapočítává'}
+              </span>
             </div>
           )}
           {!jeV2Polozka && !isModelB && depositType !== 'bez_platby' && depositAmount > 0 && (
@@ -799,7 +811,7 @@ export default function OrderDetailClient({
                 durationMinutes={(order as any).service_items?.duration_minutes ?? null}
                 // Model v2: i výjezd (B) potřebuje okno termínu před platbou (korekce 4),
                 // takže „Přijmout bez termínu“ jen u starých položek bez typu nabídky.
-                canAcceptWithoutTime={isModelB && !jeV2Polozka}
+                canAcceptWithoutTime={isModelB && !jeV2Polozka && !!order.service_item_id}
                 isProduct={jeVyrobek}
                 productQuantity={order.quantity}
                 productName={item?.name ?? null}

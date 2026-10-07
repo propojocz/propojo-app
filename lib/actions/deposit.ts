@@ -44,11 +44,24 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
     .select('name, item_type, offer_kind, deposit_amount, quote_fee, deposit_type, buffer_minutes, quote_fee_deductible')
     .eq('id', order.service_item_id ?? '')
     .maybeSingle()
-  const item = itemRow as {
+  type ItemRow = {
     name: string | null; item_type: string | null; offer_kind: string | null
     deposit_amount: number | null; quote_fee: number | null; deposit_type: string | null; buffer_minutes: number | null
     quote_fee_deductible: boolean | null
-  } | null
+  }
+  // Objednávka z veřejné poptávky nemá položku z ceníku – typ a částku určila nabídka
+  // poskytovatele (orders.offer_kind + agreed_charge_halere, 3d).
+  let offerDeductible = false
+  if (!itemRow && !order.service_item_id) {
+    const { data: od } = await db.from('orders').select('quote_fee_deductible').eq('id', orderId).maybeSingle()
+    offerDeductible = (od as { quote_fee_deductible: boolean | null } | null)?.quote_fee_deductible === true
+  }
+  const item: ItemRow | null = (itemRow as ItemRow | null) ?? (!order.service_item_id && (order.offer_kind === 'A' || order.offer_kind === 'B')
+    ? {
+        name: order.services?.title ?? null, item_type: 'service', offer_kind: order.offer_kind,
+        deposit_amount: null, quote_fee: null, deposit_type: null, buffer_minutes: 0, quote_fee_deductible: offerDeductible,
+      }
+    : null)
 
   if (order.status !== 'prijato') {
     // U výrobku čekajícího na vyjádření poskytovatele je to očekávaný stav, ne chyba.

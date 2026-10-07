@@ -17,6 +17,7 @@ import Link from 'next/link'
 import { createRequest } from '@/lib/actions/requests'
 import { createClient } from '@/lib/supabase/client'
 import GalleryUpload from '@/components/ui/GalleryUpload'
+import SearchAutocomplete from '@/components/ui/SearchAutocomplete'
 
 export default function NovaPoptavkaPage() {
   const searchParams = useSearchParams()
@@ -30,6 +31,10 @@ export default function NovaPoptavkaPage() {
     preferred_date: '',
   })
   const [photos, setPhotos] = useState<string[]>([])
+  // Poloha obce – podle ní poptávku uvidí hlavně poskytovatelé v okolí (3d, 7. 10. 2026)
+  const [cityGeo, setCityGeo] = useState<{ lat: number; lng: number } | null>(null)
+  // Obec předvyplněná z URL – změna klíče přenačte našeptávač s novou výchozí hodnotou
+  const [cityPrefill, setCityPrefill] = useState('')
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
@@ -41,6 +46,7 @@ export default function NovaPoptavkaPage() {
     const city = searchParams.get('city') ?? ''
     if (category || city) {
       setForm((f) => ({ ...f, category: category || f.category, city: city || f.city }))
+      if (city) setCityPrefill(city)
     }
   }, [searchParams])
 
@@ -69,6 +75,8 @@ export default function NovaPoptavkaPage() {
       category: form.category || null,
       description: form.description,
       city: form.city,
+      city_lat: cityGeo?.lat ?? null,
+      city_lng: cityGeo?.lng ?? null,
       email: form.email || null,
       phone: form.phone || null,
       preferred_date: form.preferred_date || null,
@@ -186,13 +194,16 @@ export default function NovaPoptavkaPage() {
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
-            <label className="text-sm font-bold text-slate-800">Město / lokalita *</label>
-            <input
-              value={form.city}
-              onChange={(e) => set('city', e.target.value)}
-              placeholder="Např. Rožnov pod Radhoštěm"
-              className="w-full rounded-xl border-[1.5px] border-slate-200 px-4 py-3 text-[15px] outline-none transition focus:border-emerald-500"
+            <label className="text-sm font-bold text-slate-800">Obec *</label>
+            <SearchAutocomplete
+              key={`obec-${cityPrefill}`}
+              mode="obce"
+              defaultValue={cityPrefill}
+              placeholder="Začněte psát a vyberte obec…"
+              onPickObec={(o) => { set('city', o.obec); setCityGeo({ lat: o.latitude, lng: o.longitude }) }}
+              onFreeText={(t) => { set('city', t); setCityGeo(null) }}
             />
+            <p className="text-[11px] text-slate-400">Vyberte ze seznamu – podle obce poptávku uvidí hlavně poskytovatelé v okolí.</p>
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-bold text-slate-800">

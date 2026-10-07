@@ -9,13 +9,14 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
-import { CalendarDays, Info, Loader2, MapPin, ShieldCheck, User, X } from 'lucide-react'
+import { AlertTriangle, CalendarDays, Info, Loader2, MapPin, ShieldCheck, User, X } from 'lucide-react'
 import AddressInput from '@/components/ui/AddressInput'
 import { getBookingRecap, startBookingPayment, type BookingRecap } from '@/lib/actions/booking'
 import { acceptProposal } from '@/lib/actions/time-proposals'
 import { setOrderAddress } from '@/lib/actions/orders'
 import { releaseUnpaidReservation } from '@/lib/actions/reservation-release'
 import { cas, terminDlouze } from '@/lib/format'
+import { distanceFromKnownKm, isPlaceKnown } from '@/lib/geo'
 
 export default function BookingWizard({
   orderId,
@@ -63,6 +64,12 @@ export default function BookingWizard({
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [recap?.holdExpiresAt, proposal])
+
+  // Pojistka: automatické potvrzení jen u adresy v místě, se kterým poskytovatel počítal.
+  const placeOk = recap ? isPlaceKnown(recap.knownPlace, addrCoords.lat, addrCoords.lng) : true
+  const autoNow = !!recap?.autoConfirmBase && placeOk
+  const placeMoved = !!recap?.autoConfirmBase && !placeOk
+  const movedKm = recap ? distanceFromKnownKm(recap.knownPlace, addrCoords.lat, addrCoords.lng) : null
 
   const start = proposal?.starts_at ?? recap?.scheduledAt ?? null
   const end = proposal?.ends_at ?? recap?.scheduledEnd ?? null
@@ -212,6 +219,21 @@ export default function BookingWizard({
                 </p>
               </div>
 
+              {/* Adresa jinde, než poskytovatel počítal → rezervaci potvrdí ručně (pojistka) */}
+              {placeMoved && (
+                <div className="flex items-start gap-2.5 rounded-xl border-2 border-orange-400 bg-orange-50 px-3.5 py-3 text-xs leading-relaxed text-orange-950">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-orange-600" />
+                  <div>
+                    <p className="text-sm font-black">Pozor, je to daleko{movedKm != null ? ` – asi ${movedKm} km` : ''}</p>
+                    <p className="mt-0.5">
+                      Adresa je jinde, než s čím poskytovatel počítal. Rezervaci proto potvrdí ručně, nejpozději 2 hodiny před začátkem –
+                      do té doby se částka jen zablokuje. Když tam nedojede, rezervaci odmítne a blokace se uvolní, nic nezaplatíte.
+                      {' '}<strong>Lepší je mu nejdřív napsat.</strong>
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Kolik + jedna věta, zbytek pod ⓘ */}
               <div className="rounded-xl bg-emerald-50 px-3.5 py-3">
                 <div className="flex items-baseline justify-between">
@@ -230,7 +252,7 @@ export default function BookingWizard({
                 )}
                 <p className="mt-1 flex items-start gap-1.5 text-xs leading-relaxed text-slate-600">
                   <span className="flex-1">
-                    {recap.paymentShort}
+                    {autoNow ? recap.paymentShortAuto : recap.paymentShortManual}
                     {recap.deductionNote && <span className="mt-0.5 block font-semibold text-slate-700">{recap.deductionNote}</span>}
                   </span>
                   <button
@@ -247,7 +269,7 @@ export default function BookingWizard({
                   <ul className="mt-2 list-disc space-y-1 border-t border-emerald-100 pl-5 pt-2 text-xs leading-relaxed text-slate-600">
                     <li>{recap.paymentMeaning}</li>
                     {recap.withdrawalNote && <li>{recap.withdrawalNote}</li>}
-                    {recap.cancellationRules.map((r) => <li key={r}>{r}</li>)}
+                    {(autoNow ? recap.cancellationRulesAuto : recap.cancellationRulesManual).map((r) => <li key={r}>{r}</li>)}
                     <li>{recap.paymentNote}</li>
                   </ul>
                 )}

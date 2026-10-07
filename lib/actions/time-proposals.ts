@@ -114,7 +114,7 @@ async function loadOrder(orderId: string) {
   const admin = getAdminClient()
   const { data } = await admin
     .from('orders')
-    .select('id, customer_id, provider_id, service_id, service_item_id, status, booking_state, offer_kind, location_lat, location_lng, scheduled_at, scheduled_end, slot_id, deposit_status, deposit_amount, hold_expires_at, pref_date_from, pref_date_to, pref_time, service_items(name, duration_minutes, buffer_minutes, deposit_amount, payment_model, offer_kind, quote_fee, deposit_type)')
+    .select('id, customer_id, provider_id, service_id, service_item_id, status, booking_state, offer_kind, location_lat, location_lng, scheduled_at, scheduled_end, slot_id, deposit_status, deposit_amount, hold_expires_at, pref_date_from, pref_date_to, pref_time, agreed_charge_halere, service_items(name, duration_minutes, buffer_minutes, deposit_amount, payment_model, offer_kind, quote_fee, deposit_type), services(title)')
     .eq('id', orderId)
     .single() as { data: any }
   return data
@@ -197,6 +197,26 @@ export async function getProposals(orderId: string): Promise<Proposal[]> {
   return data ?? []
 }
 
+// ─── Objednávka bez položky z ceníku (3d: z veřejné poptávky) ─────────────
+// Typ a částku určila nabídka poskytovatele v odpovědi na poptávku (orders.offer_kind,
+// orders.agreed_charge_halere). Položka objednávky má přednost, když existuje.
+
+function kindOf(order: any): 'A' | 'B' | 'C' | null {
+  const k = order.service_items?.offer_kind ?? order.offer_kind ?? null
+  return k === 'A' || k === 'B' || k === 'C' ? k : null
+}
+
+function chargeItemOf(order: any, agreedHalere?: number | null) {
+  const base = order.service_items ?? { offer_kind: order.offer_kind ?? null, deposit_amount: null, quote_fee: null, deposit_type: null }
+  return { ...base, agreed_charge_halere: agreedHalere ?? null }
+}
+
+/** Cena „bez úpravy“: z položky, u objednávky z poptávky částka z nabídky */
+function basePriceKcOf(order: any): number | null {
+  if (order.service_items) return itemPriceKc(order.service_items)
+  return order.agreed_charge_halere != null ? Number(order.agreed_charge_halere) / 100 : null
+}
+
 /** Poskytovatel odešle návrhy. Staré nahradí novými. */
 export async function proposeTimes(
   orderId: string,
@@ -205,6 +225,8 @@ export async function proposeTimes(
   arrivalWindowMinutes?: number,
   /** Cena upravená poskytovatelem pro tuto objednávku (např. delší cesta). Prázdné = cena z nabídky. */
   price?: { kc: number; note?: string | null } | null,
+  /** Délka služby pro tuto objednávku (u objednávky z poptávky nebo položky bez délky) */
+  opts?: { durationMinutes?: number | null } | null,
 ): Promise<Result> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -228,6 +250,11 @@ export async function proposeTimes(
     return { success: false, error: 'Probíhající nebo už proběhlý termín nelze tímto způsobem měnit.' }
   }
 
+  // Bez typu nabídky (položka nebo nabídka z poptávky) by termín nešel zaplatit.
+  if (!kindOf(order)) {
+    return { success: false, error: 'U objednávky chybí, co zákazník zaplatí přes Propojo. Napište prosím zákazníkovi.' }
+  }
+
   const clean = Array.from(new Set(starts.filter(Boolean))).slice(0, MAX_PROPOSALS)
   if (clean.length === 0) return { success: false, error: 'Vyberte alespoň jeden termín.' }
   if (order.scheduled_at && clean.some((x) => new Date(x).toISOString() === new Date(order.scheduled_at).toISOString())) {
@@ -236,30 +263,35 @@ export async function proposeTimes(
 
   // Model B (výjezd): termín je okno příjezdu, které zvolí poskytovatel (korekce 4).
   // Ostatní: délka z úkonu; když ji nemá, počítáme hodinu, ať má termín konec.
-  const isArrivalWindow = order.service_items?.offer_kind === 'B'
+  const isArrivalWindow = kindOf(order) === 'B'
   const windowOptions = BOOKING_POLICY.arrivalWindow.optionsMinutes
   if (isArrivalWindow && arrivalWindowMinutes != null && !windowOptions.includes(arrivalWindowMinutes)) {
     return { success: false, error: 'Neplatná délka okna příjezdu.' }
   }
+  // Délka služby: zadaná poskytovatelem pro tuto objednávku, jinak z položky, jinak hodina.
+  const customDuration = opts?.durationMinutes != null ? Math.round(Number(opts.durationMinutes)) : null
+  if (!isArrivalWindow && customDuration != null && (customDuration < 5 || customDuration > 720)) {
+    return { success: false, error: 'Délka musí být mezi 5 minutami a 12 hodinami.' }
+  }
   const duration = isArrivalWindow
     ? (arrivalWindowMinutes ?? BOOKING_POLICY.arrivalWindow.defaultMinutes)
-    : Number(order.service_items?.duration_minutes ?? 0) || 60
+    : customDuration ?? (Number(order.service_items?.duration_minutes ?? 0) || 60)
 
   // Upravená cena: jen u nového modelu (A, B), v celých korunách, min. 200 Kč, s pojistkou proti překlepu.
   // Platí pro všechny posílané termíny; zákazník ji potvrdí přijetím termínu.
   let chargeHalere: number | null = null
   let priceNote: string | null = null
   if (price) {
-    const kind = order.service_items?.offer_kind
+    const kind = kindOf(order)
     if (kind !== 'A' && kind !== 'B') {
       return { success: false, error: 'Cenu lze upravit jen u služby nebo výjezdu.' }
     }
     if (!Number.isInteger(price.kc) || price.kc <= 0) {
       return { success: false, error: 'Zadejte cenu v celých korunách.' }
     }
-    const base = itemPriceKc(order.service_items)
+    const base = basePriceKcOf(order)
     if (base == null || price.kc !== base) {
-      const check = bookingCharge({ ...order.service_items, agreed_charge_halere: price.kc * 100 })
+      const check = bookingCharge(chargeItemOf(order, price.kc * 100))
       if (!check.ok) return { success: false, error: check.error }
       if (price.kc * 100 > BOOKING_POLICY.maxAgreedChargeHalere) {
         return { success: false, error: `Cena může být nejvýš ${BOOKING_POLICY.maxAgreedChargeHalere / 100} Kč.` }
@@ -289,7 +321,7 @@ export async function proposeTimes(
   const admin = getAdminClient()
 
   // Poskytovatel nesmí nabídnout čas, kdy už má jinou rezervaci (kontrola i při přijetí zákazníkem).
-  const ownBufferMs = order.service_items?.offer_kind
+  const ownBufferMs = kindOf(order)
     ? Math.max(0, Number(order.service_items?.buffer_minutes ?? 0)) * 60_000
     : 0
   for (const r of rows) {
@@ -335,7 +367,7 @@ export async function proposeTimes(
         : chargeHalere != null
           ? (rows.length === 1 ? 'Poskytovatel navrhl termín a upravil cenu' : 'Poskytovatel navrhl termíny a upravil cenu')
           : rows.length === 1 ? 'Poskytovatel navrhl termín' : `Poskytovatel navrhl ${rows.length} termíny`,
-      preview: order.service_items?.name ?? null,
+      preview: order.service_items?.name ?? order.services?.title ?? null,
     })
   } catch (err) {
     console.error('[proposeTimes] notifikace:', err)
@@ -417,7 +449,7 @@ export async function acceptProposal(orderId: string, start: string): Promise<Ac
   const alreadyPaid = order.booking_state == null && (order.deposit_status === 'paid' || order.deposit_status === 'released')
   let v2Charge: { offerKind: string; chargeKc: number } | null = null
   // Výjezd (B): přesná adresa se souřadnicemi musí být před potvrzením termínu a platbou (korekce 5).
-  if (!alreadyPaid && order.service_items?.offer_kind === 'B' && (order.location_lat == null || order.location_lng == null)) {
+  if (!alreadyPaid && kindOf(order) === 'B' && (order.location_lat == null || order.location_lng == null)) {
     return {
       success: false,
       error: 'Nejdřív prosím doplňte přesnou adresu výjezdu níže (vyberte ji ze seznamu). Pak můžete termín potvrdit.',
@@ -426,7 +458,8 @@ export async function acceptProposal(orderId: string, start: string): Promise<Ac
   if (!alreadyPaid) {
     const check = await checkNewBooking(adminDb(), {
       // Přijetím termínu zákazník přijímá i cenu, kterou k němu poskytovatel případně upravil.
-      item: { ...(order.service_items ?? { offer_kind: null, deposit_amount: null, quote_fee: null }), agreed_charge_halere: proposal.charge_halere ?? null },
+      // U objednávky z poptávky platí částka z nabídky, pokud ji návrh neupravil.
+      item: chargeItemOf(order, proposal.charge_halere ?? (order.service_item_id ? null : order.agreed_charge_halere ?? null)),
       providerId: order.provider_id,
       start: new Date(proposal.starts_at),
       end: new Date(proposal.ends_at),
@@ -472,7 +505,7 @@ export async function acceptProposal(orderId: string, start: string): Promise<Ac
     scheduled_end: proposal.ends_at,
     slot_id: claimedNewSlotId ?? (isReschedule ? null : (order.slot_id ?? null)),
     deposit_amount: v2Charge ? v2Charge.chargeKc : order.deposit_amount ?? null,
-    ...(v2Charge ? { offer_kind: v2Charge.offerKind, agreed_charge_halere: proposal.charge_halere ?? null } : {}),
+    ...(v2Charge ? { offer_kind: v2Charge.offerKind, agreed_charge_halere: order.service_item_id ? (proposal.charge_halere ?? null) : v2Charge.chargeKc * 100 } : {}),
     deposit_status: needsPayment
       ? 'pending'
       : alreadyPaid
@@ -526,7 +559,7 @@ export async function acceptProposal(orderId: string, start: string): Promise<Ac
       title: isReschedule
         ? 'Zákazník potvrdil nový termín'
         : needsPayment ? 'Zákazník vybral termín — čeká na platbu' : 'Zákazník přijal termín',
-      preview: order.service_items?.name ?? null,
+      preview: order.service_items?.name ?? order.services?.title ?? null,
     })
   } catch (err) {
     console.error('[acceptProposal] notifikace:', err)
@@ -575,7 +608,7 @@ export async function declineProposals(orderId: string): Promise<Result> {
       title: isReschedule
         ? 'Zákazník odmítl změnu termínu — původní termín platí'
         : 'Zákazníkovi nevyhovuje žádný z termínů',
-      preview: order.service_items?.name ?? null,
+      preview: order.service_items?.name ?? order.services?.title ?? null,
     })
   } catch (err) {
     console.error('[declineProposals] notifikace:', err)

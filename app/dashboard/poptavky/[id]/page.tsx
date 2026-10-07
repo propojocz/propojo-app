@@ -5,6 +5,7 @@
 // Pozn.: hvězdičkové hodnocení zatím nezobrazujeme (chybí ověřené schéma reviews);
 // místo něj je počet dokončených zakázek poskytovatele jako důvěryhodnostní signál.
 
+import { offerSummary } from '@/lib/booking/texts'
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
@@ -32,21 +33,22 @@ export default async function ZajemciPage({ params }: { params: { id: string } }
 
   const { data: req } = await admin
     .from('requests')
-    .select('id, customer_id, category, city, preferred_date, status, selected_response_id')
+    .select('id, customer_id, category, city, preferred_date, status, selected_response_id, expires_at')
     .eq('id', id)
     .maybeSingle() as { data: {
       id: string; customer_id: string | null; category: string | null; city: string
-      preferred_date: string | null; status: string; selected_response_id: string | null
+      preferred_date: string | null; status: string; selected_response_id: string | null; expires_at: string | null
     } | null }
   if (!req) notFound()
   if (req.customer_id !== user.id) notFound()
 
   const { data: rrs } = await admin
     .from('request_responses')
-    .select('id, provider_id, service_id, status, last_message_at')
+    .select('id, provider_id, service_id, status, last_message_at, offer_kind, charge_halere, quote_fee_deductible')
     .eq('request_id', id)
     .order('last_message_at', { ascending: false, nullsFirst: false }) as { data: Array<{
       id: string; provider_id: string; service_id: string | null; status: string; last_message_at: string | null
+      offer_kind: string | null; charge_halere: number | null; quote_fee_deductible: boolean | null
     }> | null }
   const responses = rrs ?? []
 
@@ -148,6 +150,9 @@ export default async function ZajemciPage({ params }: { params: { id: string } }
       rating: ratingByProv.get(r.provider_id) ?? null,
       priceEstimate: conv ? (estimateByConv.get(conv.id) ?? null) : null,
       hasService: !!r.service_id,
+      offerLabel: (r.offer_kind === 'A' || r.offer_kind === 'B') && r.charge_halere
+        ? offerSummary(r.offer_kind, r.charge_halere / 100, r.quote_fee_deductible === true)
+        : null,
     }
   }
 
@@ -161,6 +166,7 @@ export default async function ZajemciPage({ params }: { params: { id: string } }
       city={req.city}
       readOnly={readOnly}
       orderId={orderId}
+      expiresAt={req.expires_at}
       primary={primary}
       secondary={secondary}
     />

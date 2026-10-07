@@ -22,6 +22,20 @@ import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { createNotification } from './notifications'
 import type { ActionResult } from './types'
+import { bookingCharge } from '@/lib/booking/commission'
+
+/** Nabídka v odpovědi na poptávku: typ a částka placená přes Propojo (3d, 7. 10. 2026). */
+export type ResponseOffer = { offerKind: 'A' | 'B'; chargeKc: number; quoteFeeDeductible?: boolean }
+
+function checkOffer(offer: ResponseOffer | null | undefined): { ok: true; kind: 'A' | 'B'; halere: number; deductible: boolean } | { ok: false; error: string } {
+  if (!offer) return { ok: false, error: 'Vyplňte prosím, co zákazník zaplatí přes Propojo.' }
+  if (offer.offerKind !== 'A' && offer.offerKind !== 'B') return { ok: false, error: 'Vyberte typ nabídky.' }
+  if (!Number.isInteger(offer.chargeKc) || offer.chargeKc <= 0) return { ok: false, error: 'Zadejte částku v celých korunách.' }
+  const c = bookingCharge({ offer_kind: offer.offerKind, deposit_amount: null, quote_fee: null, agreed_charge_halere: offer.chargeKc * 100 })
+  if (!c.ok) return { ok: false, error: c.error }
+  // Služba se odečítá vždy (VOP 11.1); u výjezdu rozhoduje poskytovatel (VOP 11.6).
+  return { ok: true, kind: offer.offerKind, halere: offer.chargeKc * 100, deductible: offer.offerKind === 'B' && offer.quoteFeeDeductible === true }
+}
 
 // Kolik poskytovatelů může s JEDNOU poptávkou zároveň aktivně jednat.
 // Aktivní = 'interested' nebo 'negotiating'. Odmítnutí ('rejected') místo uvolní.
@@ -80,6 +94,18 @@ export async function createRequest(values: CreateRequestValues): Promise<Action
   }
 
   const admin = getAdminClient()
+
+  // Obec musí mít polohu – podle ní se poptávka ukazuje poskytovatelům v okolí a počítá vzdálenost.
+  let cityLat = d.city_lat ?? null
+  let cityLng = d.city_lng ?? null
+  if (cityLat == null || cityLng == null) {
+    const { data: obec } = await admin
+      .from('obce').select('latitude, longitude').ilike('obec', d.city.trim()).limit(1).maybeSingle() as { data: { latitude: number; longitude: number } | null }
+    if (!obec) return { success: false, error: 'Vyberte prosím obec ze seznamu.' }
+    cityLat = obec.latitude
+    cityLng = obec.longitude
+  }
+
   const insertData = {
     customer_id: user?.id ?? null,
     email,
@@ -89,8 +115,8 @@ export async function createRequest(values: CreateRequestValues): Promise<Action
     description: d.description.trim(),
     photos: d.photos ?? [],
     city: d.city.trim(),
-    city_lat: d.city_lat ?? null,
-    city_lng: d.city_lng ?? null,
+    city_lat: cityLat,
+    city_lng: cityLng,
     preferred_date: d.preferred_date?.trim() || null,
     needed_at: d.needed_at || null,
     // status ('open') i expires_at (now + 14 dní) řeší default v DB
@@ -117,6 +143,8 @@ export async function createRequest(values: CreateRequestValues): Promise<Action
 export async function expressInterest(
   requestId: string,
   serviceId?: string | null,
+  /** Typ a částka placená přes Propojo – povinné u nové odpovědi, u existující ji upraví */
+  offer?: ResponseOffer | null,
 ): Promise<InterestResult> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -158,20 +186,31 @@ export async function expressInterest(
     .eq('request_id', requestId)
     .eq('provider_id', user.id)
     .maybeSingle() as { data: { id: string; status: string } | null }
+  const offerCheck = checkOffer(offer)
   if (existing) {
+    // Úprava nabídky u živé odpovědi (před výběrem zákazníkem).
+    if (offer && (ACTIVE_STATUSES as readonly string[]).includes(existing.status)) {
+      if (!offerCheck.ok) return { success: false, error: offerCheck.error }
+      await (admin.from('request_responses') as any)
+        .update({ offer_kind: offerCheck.kind, charge_halere: offerCheck.halere, quote_fee_deductible: offerCheck.deductible, ...(serviceId ? { service_id: serviceId } : {}), updated_at: new Date().toISOString() })
+        .eq('id', existing.id)
+    }
     // Aktivní = beze změny (idempotentní). Dřív odmítnutý zájem znovu otevřeme.
     if (existing.status === 'rejected') {
+      if (!offerCheck.ok) return { success: false, error: offerCheck.error }
       const strop = await countActive(admin, requestId)
       if (strop >= MAX_ACTIVE_RESPONSES) {
         return { success: false, error: 'Tahle poptávka už má plno zájemců.' }
       }
       await (admin.from('request_responses') as any)
-        .update({ status: 'interested', service_id: serviceId ?? null, updated_at: new Date().toISOString() })
+        .update({ status: 'interested', service_id: serviceId ?? null, offer_kind: offerCheck.kind, charge_halere: offerCheck.halere, quote_fee_deductible: offerCheck.deductible, updated_at: new Date().toISOString() })
         .eq('id', existing.id)
     }
     const convId = await conversationIdOf(admin, existing.id)
     return { success: true, id: existing.id, conversationId: convId }
   }
+
+  if (!offerCheck.ok) return { success: false, error: offerCheck.error }
 
   // Strop aktivních jednání na tuhle poptávku.
   const aktivnich = await countActive(admin, requestId)
@@ -186,6 +225,9 @@ export async function expressInterest(
       provider_id: user.id,
       service_id: serviceId ?? null,
       status: 'interested',
+      offer_kind: offerCheck.kind,
+      charge_halere: offerCheck.halere,
+      quote_fee_deductible: offerCheck.deductible,
     })
     .select('id')
     .single()
@@ -299,9 +341,9 @@ export async function selectProvider(requestId: string, responseId: string): Pro
   // ze které vznikne objednávka.
   const { data: resp } = await admin
     .from('request_responses')
-    .select('id, request_id, provider_id, service_id, status')
+    .select('id, request_id, provider_id, service_id, status, offer_kind, charge_halere, quote_fee_deductible')
     .eq('id', responseId)
-    .single() as { data: { id: string; request_id: string; provider_id: string; service_id: string | null; status: string } | null }
+    .single() as { data: { id: string; request_id: string; provider_id: string; service_id: string | null; status: string; offer_kind: string | null; charge_halere: number | null; quote_fee_deductible: boolean | null } | null }
   if (!resp || resp.request_id !== requestId) {
     return { success: false, error: 'Reakce k této poptávce nepatří.' }
   }
@@ -310,6 +352,10 @@ export async function selectProvider(requestId: string, responseId: string): Pro
   }
   if (!resp.service_id) {
     return { success: false, error: 'Poskytovatel u reakce nemá vybranou konkrétní nabídku.' }
+  }
+  // 3d: bez typu a částky placené přes Propojo by objednávka nešla zaplatit.
+  if ((resp.offer_kind !== 'A' && resp.offer_kind !== 'B') || !resp.charge_halere) {
+    return { success: false, error: 'Tento poskytovatel zatím neuvedl, kolik se platí přes Propojo. Napište mu v chatu, ať nabídku doplní.' }
   }
 
   // 1) Objednávka (stejný minimální tvar jako zacniDotaz, ale není to dotaz).
@@ -322,6 +368,10 @@ export async function selectProvider(requestId: string, responseId: string): Pro
       is_inquiry: false,
       location_city: req.city ?? null,
       description: req.description ?? null,
+      // Typ a částka z nabídky poskytovatele (3d) – objednávka se platí bez položky z ceníku.
+      offer_kind: resp.offer_kind,
+      agreed_charge_halere: resp.charge_halere,
+      quote_fee_deductible: resp.offer_kind === 'B' ? resp.quote_fee_deductible === true : null,
     })
     .select('id')
     .single() as { data: { id: string } | null; error: any }
