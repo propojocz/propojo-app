@@ -18,6 +18,7 @@ import { BOOKING_POLICY, policyFromSnapshot, type OfferKind } from './policy'
 import { bookingCharge, type ChargeableItem, type CommissionBreakdown } from './commission'
 import { legacyMirror } from './legacy'
 import { isPlaceKnown, type KnownPlace } from '@/lib/geo'
+import { buildStandardAccountParams } from './onboarding-prefill'
 import {
   confirmationDeadline,
   isAuthorizationTooLate,
@@ -338,17 +339,45 @@ export async function ensureStandardAccount(
   const existing = data as { stripe_account_id: string; account_type: string } | null
   if (existing && existing.account_type === 'standard') return existing.stripe_account_id
 
-  const account = await stripe.accounts.create({
+  // 3e: předvyplnit, co už víme (profil, ARES, první karta) – onboarding je pak kratší.
+  // KYC údaje jdou zapsat jen teď, před prvním odkazem na onboarding.
+  const { data: prof } = await db.from('profiles').select('phone, ico').eq('id', user.id).maybeSingle()
+  const { data: card } = await db
+    .from('services')
+    .select('category, description')
+    .eq('provider_id', user.id)
+    .eq('is_active', true)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+  const p = prof as { phone: string | null; ico: string | null } | null
+  const c = card as { category: string | null; description: string | null } | null
+
+  const minimal: Stripe.AccountCreateParams = {
     type: 'standard',
     country: 'CZ',
     email: user.email ?? undefined,
-    business_profile: {
-      name: name ?? undefined,
-      url: profilUrl(user.id),
-      product_description: POPIS_CINNOSTI,
-    },
+    business_profile: { name: name ?? undefined, url: profilUrl(user.id), product_description: POPIS_CINNOSTI },
     metadata: { supabase_user_id: user.id },
-  })
+  }
+  let account: Stripe.Account
+  try {
+    const prefilled = await buildStandardAccountParams({
+      email: user.email ?? null,
+      name,
+      phone: p?.phone ?? null,
+      ico: p?.ico ?? null,
+      category: c?.category ?? null,
+      description: c?.description ?? null,
+      url: profilUrl(user.id),
+      defaultDescription: POPIS_CINNOSTI,
+    })
+    account = await stripe.accounts.create({ ...prefilled, metadata: { supabase_user_id: user.id } })
+  } catch (err) {
+    // Stripe předvyplněný údaj odmítl (např. formát) → založit jako dřív, onboarding se doptá.
+    console.warn('[booking] předvyplnění Stripe účtu odmítnuto, zakládám bez něj:', err)
+    account = await stripe.accounts.create(minimal)
+  }
   await syncStripeAccount(db, account, user.id)
   return account.id
 }

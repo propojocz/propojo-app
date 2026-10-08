@@ -11,6 +11,21 @@ export const metadata = { title: 'Výplaty | Propojo' }
 
 interface Props { searchParams: { stav?: string } }
 
+function PrepareBox() {
+  return (
+    <div className="mb-4 rounded-xl bg-slate-50 px-4 py-3 text-xs leading-relaxed text-slate-600">
+      <p className="mb-1.5 text-sm font-bold text-slate-800">Co si připravit (asi 5 minut)</p>
+      <ul className="space-y-1">
+        <li>· <strong>Občanský průkaz nebo pas</strong> – Stripe ze zákona ověřuje totožnost (stačí vyfotit mobilem).</li>
+        <li>· <strong>IBAN</strong> účtu pro výplaty – v bankovní aplikaci u detailu účtu, začíná „CZ“ (tvar CZ12 3456 …, 24 znaků).</li>
+        <li>· <strong>Mobil</strong> na ověřovací SMS.</li>
+        <li>· IČO, název a sídlo z rejstříku ARES jsme předvyplnili – jen je potvrdíte.</li>
+        <li>· Máte už Stripe účet pod stejným e-mailem? Můžete se přihlásit, nebo zvolit „Použít jinou e-mailovou adresu“.</li>
+      </ul>
+    </div>
+  )
+}
+
 export default async function VyplatyPage({ searchParams }: Props) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -99,6 +114,7 @@ export default async function VyplatyPage({ searchParams }: Props) {
               {duvody.map((d) => <li key={d}>· {d}</li>)}
             </ul>
           )}
+          <PrepareBox />
           <ConnectButton label="Dokončit napojení" />
         </div>
       ) : (
@@ -119,10 +135,7 @@ export default async function VyplatyPage({ searchParams }: Props) {
             <li className="flex gap-2.5"><AlertTriangle className="h-4 w-4 shrink-0 text-emerald-600" /> Propojo nemá přístup k vašim bankovním údajům</li>
           </ul>
 
-          <p className="mb-4 flex items-start gap-2 rounded-xl bg-slate-50 px-4 py-3 text-xs leading-relaxed text-slate-600">
-            <Landmark className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-            <span>Budete potřebovat svůj <strong>IBAN</strong> — najdete ho ve své bankovní aplikaci u čísla účtu.</span>
-          </p>
+          <PrepareBox />
 
           <ConnectButton />
         </div>

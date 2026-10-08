@@ -77,3 +77,11 @@ Nové domény:
 Samostatný budoucí směr: nabídky pracovních míst pro řemeslníky a hledání zaměstnanců.
 
 Neimplementovat v současném MVP. Před návrhem produktu je potřeba samostatné právní posouzení režimu zprostředkování zaměstnání a přesně oddělit pouhou inzertní funkci od aktivního matchingu.
+
+---
+
+## IDEA-003 — Vložený Stripe onboarding (vlastní vzhled)
+
+**Status:** CANDIDATE / POST-MVP
+
+Dnes poskytovatel napojuje účet na stránce hostované Stripe (rozložení nejde měnit, jen logo a barvy v Stripe → Settings → Business → Branding). Stripe nabízí „embedded components“ – onboarding vložený přímo do stránky Propoja s naším vzhledem a texty. Víc práce (Account Sessions, Connect.js), přínos: plynulejší zážitek, menší odpadávání poskytovatelů. Zvážit spolu s přechodem z `type: 'standard'` na controller properties / Accounts v2 (Stripe Standard označuje za legacy).
