@@ -100,6 +100,7 @@ Právní a produktová rozhodnutí se dělají mimo repo (claude.ai projekt Prop
   - Stav „Zákazník nezastižen“: jen po validním check-inu, alespoň jeden pokus o kontakt, jednotná čekací doba 15 min (nenastavitelná providerem); Cena výjezdu včetně dopravy se pak nevrací (model §20).
 
 ## Před ostrým spuštěním (vypnutím údržby)
+- PŘIPOMENOUT MATEJOVI: produkce běží do spuštění na testovacích Stripe klíčích (rozhodnuto 8. 10. 2026). Před spuštěním přepnout ve Vercelu (Production) na ostré: `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, oba webhooky v ostrém režimu Stripe (platforma + Connected accounts → `STRIPE_WEBHOOK_SECRET`, `STRIPE_CONNECT_WEBHOOK_SECRET`), branding a Connect nastavení v ostrém režimu, případná ostrá `STRIPE_PRICE_*`; pak redeploy.
 - Hotové vrstvy 4 a 5 (refundy, no-show).
 - Odsouhlasený pokyn providera k automatickým refundům (`booking_consents`) jako podmínka přijímání rezervací.
 - Odstraněná brána předplatného.
