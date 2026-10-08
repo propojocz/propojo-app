@@ -495,14 +495,26 @@ export default function PoptavkaChat({
             </div>
           )}
 
-          {/* 3) Domluveno? Vybrat poskytovatele — hned pod chatem (jen zákazník) */}
-          {canSelect && (
+          {/* 3) Domluveno? Vybrat poskytovatele — hned pod chatem (jen zákazník).
+                 Když už je navržený termín, je hlavní akce „Vybrat a rezervovat“ – tady jen nenápadná možnost bez termínu. */}
+          {canSelect && termProposals.length > 0 && (
+            <p className="text-center text-xs text-slate-500">
+              Žádný termín nesedí?{' '}
+              <button
+                onClick={() => setConfirmOpen(true)}
+                disabled={selectBusy}
+                className="font-semibold text-emerald-700 underline hover:text-emerald-800 disabled:opacity-60"
+              >
+                Vybrat poskytovatele bez termínu
+              </button>
+              {' '}– termín pak domluvíte ve stejném chatu.
+            </p>
+          )}
+          {canSelect && termProposals.length === 0 && (
             <div className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
               <p className="text-sm font-bold text-slate-900">Domluveno?</p>
               <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                {termProposals.length > 0
-                  ? 'Nebo vyberte poskytovatele bez termínu – termín pak domluvíte ve stejném chatu.'
-                  : 'Výběrem vznikne objednávka s tímto poskytovatelem a ostatní jednání se uzavřou. Termín domluvíte ve stejném chatu.'}
+                Výběrem vznikne objednávka s tímto poskytovatelem a ostatní jednání se uzavřou. Termín domluvíte ve stejném chatu.
               </p>
               <button
                 onClick={() => setConfirmOpen(true)}

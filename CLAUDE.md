@@ -42,6 +42,7 @@ Právní a produktová rozhodnutí se dělají mimo repo (claude.ai projekt Prop
 - Veškeré UI česky, formálně (vykání).
 - Nepoužívat „záloha“ tam, kde jde o Rezervační poplatek nebo Cenu výjezdu.
 - Design: nadpisy Poppins, text DM Sans, primární emerald `#10b981`, pastelová pozadí (syté barvy jen v logu).
+  Písma (8. 10. 2026, `app/globals.css`): Poppins jen pro `h1–h3`, titulky s `font-black` / `font-extrabold` a hlavní barevná tlačítka; vše ostatní (i malá tlačítka a odkazy) DM Sans. Titulek karty piš jako `font-black`, ne `font-bold`.
 - Barvy rolí: zelená = zákazník, modrá = Propojo, oranžová = poskytovatel.
 - Časy vždy přes `lib/format.ts` (Europe/Prague natvrdo; server na Vercelu běží v UTC a `TZ` nastavit nejde).
 
@@ -100,6 +101,7 @@ Právní a produktová rozhodnutí se dělají mimo repo (claude.ai projekt Prop
   - Stav „Zákazník nezastižen“: jen po validním check-inu, alespoň jeden pokus o kontakt, jednotná čekací doba 15 min (nenastavitelná providerem); Cena výjezdu včetně dopravy se pak nevrací (model §20).
 
 ## Před ostrým spuštěním (vypnutím údržby)
+- Bezpečnostní oprava Next.js: Vercel hlásí zranitelnost `next@14.2.16` → povýšit na nejnovější 14.2.x (NE Next 15/16, NE `npm audit fix --force`), build + test. Webhook platformy má ještě subscription události – odebrat spolu s předplatným (vrstva 10).
 - PŘIPOMENOUT MATEJOVI: produkce běží do spuštění na testovacích Stripe klíčích (rozhodnuto 8. 10. 2026). Před spuštěním přepnout ve Vercelu (Production) na ostré: `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, oba webhooky v ostrém režimu Stripe (platforma + Connected accounts → `STRIPE_WEBHOOK_SECRET`, `STRIPE_CONNECT_WEBHOOK_SECRET`), branding a Connect nastavení v ostrém režimu, případná ostrá `STRIPE_PRICE_*`; pak redeploy.
 - Hotové vrstvy 4 a 5 (refundy, no-show).
 - Odsouhlasený pokyn providera k automatickým refundům (`booking_consents`) jako podmínka přijímání rezervací.

@@ -188,6 +188,11 @@ function OfferPicker({
     const to = estTo.trim() ? Math.round(Number(estTo)) : null
     if (from != null && (!Number.isFinite(from) || from <= 0)) { setErr('Odhad ceny musí být kladné číslo.'); return }
     if (to != null && (from == null || to < from)) { setErr('Horní hranice odhadu nemůže být nižší než dolní.'); return }
+    // Poplatek se z ceny zakázky odečítá → odhad zakázky nemůže být nižší než on.
+    if (from != null && (kind === 'A' || deductible) && from < chargeNum) {
+      setErr(`Odhad ceny zakázky nemůže být nižší než ${chargeNum.toLocaleString('cs-CZ')} Kč – ${kind === 'A' ? 'Rezervační poplatek' : 'Cena výjezdu'} se z ní odečítá.`)
+      return
+    }
     const e = await onSubmit(cardId, { offerKind: kind, chargeKc: chargeNum, quoteFeeDeductible: kind === 'B' && deductible, estimateFrom: from, estimateTo: to, message })
     if (e) setErr(e)
   }

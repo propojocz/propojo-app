@@ -230,6 +230,18 @@ export async function sendPriceEstimate(
   if (conv.status !== 'open') {
     return { success: false, error: 'Tahle konverzace je uzavřená.' }
   }
+  // Poplatek z nabídky se z ceny zakázky odečítá (služba vždy, výjezd podle volby) → odhad nesmí být nižší.
+  if (conv.responseId) {
+    const { data: rr } = await admin
+      .from('request_responses')
+      .select('offer_kind, charge_halere, quote_fee_deductible')
+      .eq('id', conv.responseId)
+      .maybeSingle() as { data: { offer_kind: string | null; charge_halere: number | null; quote_fee_deductible: boolean | null } | null }
+    const fee = rr?.charge_halere ? rr.charge_halere / 100 : null
+    if (fee && (rr?.offer_kind === 'A' || (rr?.offer_kind === 'B' && rr.quote_fee_deductible)) && from < fee) {
+      return { success: false, error: `Odhad nemůže být nižší než ${fee.toLocaleString('cs-CZ')} Kč – ${rr?.offer_kind === 'A' ? 'Rezervační poplatek' : 'Cena výjezdu'} se z ceny zakázky odečítá.` }
+    }
+  }
 
   const castka = to != null
     ? `${from.toLocaleString('cs-CZ')} – ${to.toLocaleString('cs-CZ')} Kč`

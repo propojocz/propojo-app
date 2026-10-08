@@ -10,7 +10,9 @@
     font-family: 'DM Sans', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  h1, h2, h3 {
+  /* Písma (sjednoceno 8. 10. 2026): Poppins = nadpisy, výrazné titulky (font-black / font-extrabold)
+     a hlavní barevná tlačítka; DM Sans = všechno ostatní včetně malých tlačítek a odkazů. */
+  h1, h2, h3, .font-black, .font-extrabold {
     font-family: 'Poppins', system-ui, sans-serif;
   }
   body {
@@ -55,8 +57,11 @@
   }
 }
 
-/* Tlačítka bez sdílené třídy (stylovaná přímo Tailwindem) — button/odkazy s vlastním pozadím */
-button, a[class*="bg-emerald"], a[class*="bg-slate-900"] {
+/* Hlavní barevná tlačítka bez sdílené třídy (stylovaná přímo Tailwindem). Malá tlačítka a odkazy
+   (Kopírovat, Upravit, Zpět…) zůstávají v písmu textu. */
+button[class*="bg-emerald-5"], a[class*="bg-emerald-5"], button[class*="bg-emerald-6"], a[class*="bg-emerald-6"],
+button[class*="bg-amber-5"], a[class*="bg-amber-5"], button[class*="bg-orange-5"], a[class*="bg-orange-5"],
+button[class*="bg-slate-900"], a[class*="bg-slate-900"] {
   font-family: 'Poppins', system-ui, sans-serif;
 }
 /* ── Mapa (Leaflet) ────────────────────────────────────────

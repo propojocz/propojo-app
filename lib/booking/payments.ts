@@ -860,11 +860,28 @@ export async function captureBooking(db: Db, order: BookingOrder, actor: Actor):
     )
     if (pi.status === 'succeeded') {
       await handleCaptured(db, order.stripe_account_id, pi)
+      // Diagnostika (8. 10. 2026): stržení ve Stripe proběhlo, ale stav občas zůstal „potvrzuje se“.
+      // Zapíšeme důvod do historie a zkusíme to hned znovu z čerstvě načteného PaymentIntentu.
+      const after = await loadBookingOrder(db, order.id)
+      if (after?.booking_state === 'capture_in_progress') {
+        await logOrderEvent(db, order.id, 'stripe_event', { type: 'system' }, {
+          kind: 'capture_not_recorded',
+          pi_status: pi.status,
+          pi_kind: pi.metadata?.kind ?? null,
+          pi_order: pi.metadata?.order_id ?? null,
+          order_pi: after.stripe_payment_intent_id,
+        })
+        return resolveCaptureInProgress(db, after)
+      }
       return { ok: true, state: 'confirmed' }
     }
     return resolveCaptureInProgress(db, order)
   } catch (err) {
     console.error('[booking] capture selhal:', err)
+    await logOrderEvent(db, order.id, 'stripe_event', { type: 'system' }, {
+      kind: 'capture_error',
+      message: String((err as { message?: string })?.message ?? err).slice(0, 300),
+    })
     return resolveCaptureInProgress(db, order)
   }
 }

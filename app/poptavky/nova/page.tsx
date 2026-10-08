@@ -12,7 +12,7 @@
 
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Loader2, CheckCircle2, Send, ArrowLeft, LogIn, Mail } from 'lucide-react'
+import { Loader2, CheckCircle2, Send, ArrowLeft, LogIn, Mail, Paperclip } from 'lucide-react'
 import Link from 'next/link'
 import { createRequest } from '@/lib/actions/requests'
 import { createClient } from '@/lib/supabase/client'
@@ -190,9 +190,16 @@ export default function NovaPoptavkaPage() {
             placeholder="Popište práci – co, jak velké, jakou máte představu…"
             className="w-full resize-none rounded-xl border-[1.5px] border-slate-200 px-4 py-3 text-[15px] outline-none transition focus:border-emerald-500"
           />
+          {/* Fotky jako příloha přímo u popisu – v telefonu nabídne galerii i fotoaparát */}
+          <div className="pt-1">
+            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+              <Paperclip className="h-3.5 w-3.5 text-slate-400" /> Přiložit fotky <span className="font-normal text-slate-400">(nepovinné – z galerie nebo fotoaparátu)</span>
+            </p>
+            <GalleryUpload value={photos} onChange={setPhotos} />
+          </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-5">
           <div className="space-y-1.5">
             <label className="text-sm font-bold text-slate-800">Obec *</label>
             <SearchAutocomplete
@@ -230,17 +237,6 @@ export default function NovaPoptavkaPage() {
             className="w-full rounded-xl border-[1.5px] border-slate-200 px-4 py-3 text-[15px] outline-none transition focus:border-emerald-500"
           />
           <p className="text-xs text-slate-400">Poskytovatel ho uvidí, až si ho vyberete. Jinak vás kontaktuje přes chat.</p>
-        </div>
-
-        {/* Fotky – přihlášený je tu vždy (nepřihlášený sem nedojde). */}
-        <div className="space-y-1.5">
-          <label className="text-sm font-bold text-slate-800">
-            Fotky <span className="font-normal text-slate-400">(nepovinné)</span>
-          </label>
-          <p className="text-xs text-slate-400">Fotka pomůže poskytovateli rychle pochopit, o co jde.</p>
-          <div className="pt-1">
-            <GalleryUpload value={photos} onChange={setPhotos} />
-          </div>
         </div>
 
         <div className="flex items-start gap-2 rounded-xl bg-blue-50 px-4 py-3 text-xs leading-relaxed text-blue-800">

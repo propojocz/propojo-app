@@ -37,7 +37,7 @@ export default async function ConnectBanner() {
           <div className="flex gap-3">
             <Landmark className="h-5 w-5 shrink-0 text-amber-600" />
             <div>
-              <p className="font-bold text-amber-900">Napojte si účet pro platby</p>
+              <p className="font-black text-amber-900">Napojte si účet pro platby</p>
               <p className="mt-1 text-sm text-amber-800">
                 Dokud nemáte napojený a ověřený Stripe účet, zákazníci si u vás nemohou rezervovat termín s platbou.
                 Napojení zabere pár minut.

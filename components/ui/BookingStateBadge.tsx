@@ -129,7 +129,7 @@ export default function BookingStateBadge({
     <div className={`flex items-start gap-3 rounded-2xl border p-4 ${tone.box}`}>
       <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${tone.icon}`} />
       <div>
-        <p className="font-bold text-slate-900">{t.title}</p>
+        <p className="font-black text-slate-900">{t.title}</p>
         <p className="mt-0.5 text-sm text-slate-600">{t.text}</p>
       </div>
     </div>
