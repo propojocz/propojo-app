@@ -102,7 +102,8 @@ export default function QuickSlotForm({
   )
 
   return (
-    <div className="rounded-2xl border border-orange-200 bg-white p-3.5 shadow-sm">
+    <div className="flex max-h-[calc(100dvh-6rem)] flex-col rounded-2xl border border-orange-200 bg-white shadow-sm">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3.5">
       <p className="flex items-center gap-1.5 text-sm font-black text-slate-900">
         <Zap className="h-4 w-4 fill-orange-400 text-orange-500" /> Vypsat volný termín
       </p>
@@ -150,8 +151,10 @@ export default function QuickSlotForm({
       )}
 
       {err && <p className="mt-2 text-xs text-red-600">{err}</p>}
+      </div>
 
-      <div className="mt-3 flex gap-2">
+      {/* Tlačítka vždy viditelná dole – posouvá se jen obsah nad nimi */}
+      <div className="flex shrink-0 gap-2 border-t border-slate-100 p-3.5">
         <button type="button" onClick={onClose} disabled={busy}
           className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60">
           Zpět

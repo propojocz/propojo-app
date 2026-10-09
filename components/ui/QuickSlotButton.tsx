@@ -26,7 +26,7 @@ export default function QuickSlotButton() {
   }, [open])
 
   const modal = open ? (
-    <div className="fixed inset-0 z-[100] flex items-start justify-center bg-slate-900/30 px-4 pt-20" onClick={() => setOpen(false)}>
+    <div className="fixed inset-0 z-[100] flex items-start justify-center bg-slate-900/30 px-4 pt-4 sm:pt-16" onClick={() => setOpen(false)}>
       <div className="w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
         <div className="mb-2 flex justify-end">
           <button type="button" onClick={() => setOpen(false)} className="rounded-full bg-white p-1.5 text-slate-500 shadow" aria-label="Zavřít">
