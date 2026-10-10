@@ -4,7 +4,7 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { MapPin, CalendarClock, Clock, Users, ChevronRight, Megaphone, Send, CheckCircle2 } from 'lucide-react'
+import { MapPin, CalendarClock, Clock, Users, ChevronRight, Megaphone, Send, CheckCircle2, RotateCcw } from 'lucide-react'
 
 export type MyRequest = {
   id: string
@@ -13,6 +13,8 @@ export type MyRequest = {
   city: string
   preferredDate: string | null
   status: string
+  /** Vypršela / uzavřená / objednávka padla před zaplacením → jde obnovit */
+  canRenew?: boolean
   createdAt: string
   activeCount: number
   isSelected: boolean
@@ -35,13 +37,17 @@ const STATUS: Record<string, { text: string; cls: string }> = {
   expired: { text: 'Vypršelo', cls: 'bg-slate-100 text-slate-500' },
 }
 
-export default function MojePoptavkyList({ items }: { items: MyRequest[] }) {
-  const [tab, setTab] = useState<'aktivni' | 'uzavrene'>('aktivni')
-
+export default function MojePoptavkyList({ items, showBoardHint = false }: {
+  items: MyRequest[]
+  /** Na /poptavky: vysvětlit, že nástěnka cizích poptávek je pro poskytovatele */
+  showBoardHint?: boolean
+}) {
   const { aktivni, uzavrene } = useMemo(() => ({
     aktivni: items.filter((i) => i.status === 'open'),
     uzavrene: items.filter((i) => i.status !== 'open'),
   }), [items])
+  // Bez aktivních poptávek rovnou historie (tam je „Obnovit poptávku“)
+  const [tab, setTab] = useState<'aktivni' | 'uzavrene'>(aktivni.length === 0 && uzavrene.length > 0 ? 'uzavrene' : 'aktivni')
 
   const shown = tab === 'aktivni' ? aktivni : uzavrene
 
@@ -50,7 +56,9 @@ export default function MojePoptavkyList({ items }: { items: MyRequest[] }) {
       <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-black text-slate-900">Moje poptávky</h1>
-          <p className="mt-0.5 text-sm text-slate-500">Poptávky, které jste zadali, a zájemci o ně.</p>
+          <p className="mt-0.5 text-sm text-slate-500">
+            Poptávky, které jste zadali, a zájemci o ně.{showBoardHint ? ' Starší poptávku můžete v Historii jedním klikem obnovit. Poptávky ostatních lidí vidí jen poskytovatelé.' : ''}
+          </p>
         </div>
         <Link
           href="/poptavky/nova"
@@ -61,7 +69,7 @@ export default function MojePoptavkyList({ items }: { items: MyRequest[] }) {
       </div>
 
       <div className="mb-4 flex gap-1.5">
-        {([['aktivni', 'Aktivní', aktivni.length], ['uzavrene', 'Uzavřené', uzavrene.length]] as const).map(([id, label, n]) => (
+        {([['aktivni', 'Aktivní', aktivni.length], ['uzavrene', 'Historie', uzavrene.length]] as const).map(([id, label, n]) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -79,10 +87,10 @@ export default function MojePoptavkyList({ items }: { items: MyRequest[] }) {
         <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-white p-12 text-center">
           <Megaphone className="mx-auto mb-3 h-10 w-10 text-slate-300" />
           <h3 className="mb-1 text-lg font-bold text-slate-800">
-            {tab === 'aktivni' ? 'Žádné aktivní poptávky' : 'Nic uzavřeného'}
+            {tab === 'aktivni' ? 'Žádné aktivní poptávky' : 'Historie je prázdná'}
           </h3>
           <p className="mx-auto mb-5 max-w-sm text-sm text-slate-500">
-            {tab === 'aktivni' ? 'Zadejte poptávku a nechte poskytovatele, ať se vám ozvou.' : 'Uzavřené a vybrané poptávky se objeví tady.'}
+            {tab === 'aktivni' ? 'Zadejte poptávku a nechte poskytovatele, ať se vám ozvou.' : 'Vypršelé, uzavřené a vyřízené poptávky se objeví tady.'}
           </p>
           {tab === 'aktivni' && (
             <Link href="/poptavky/nova" className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-600">
@@ -119,9 +127,19 @@ export default function MojePoptavkyList({ items }: { items: MyRequest[] }) {
                 )}
 
                 <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                  {r.canRenew && (
+                    <Link
+                      href={`/poptavky/nova?obnovit=${r.id}`}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 px-3.5 py-2 text-sm font-bold text-white transition hover:bg-emerald-600"
+                    >
+                      <RotateCcw className="h-4 w-4" /> Obnovit poptávku
+                    </Link>
+                  )}
                   <Link
                     href={`/dashboard/poptavky/${r.id}`}
-                    className="inline-flex items-center gap-1 rounded-xl bg-emerald-500 px-3.5 py-2 text-sm font-bold text-white transition hover:bg-emerald-600"
+                    className={r.canRenew
+                      ? 'inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50'
+                      : 'inline-flex items-center gap-1 rounded-xl bg-emerald-500 px-3.5 py-2 text-sm font-bold text-white transition hover:bg-emerald-600'}
                   >
                     Zobrazit zájemce ({r.activeCount}) <ChevronRight className="h-4 w-4" />
                   </Link>

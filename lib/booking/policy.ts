@@ -105,7 +105,7 @@ export const BOOKING_POLICY: BookingPolicy = {
     maxBaseHalere: 8900, // 89 Kč
     // Rozhodnutí Mateje 4. 10. 2026: nad 3 000 Kč navíc 2 % z části nad hranicí (např. 5 450 Kč → 89 + 49 = 138 Kč)
     surcharge: { thresholdHalere: 300000, rateBps: 200 },
-    vatRateBps: 0, // nastavit podle DPH statusu provozovatele (21 % = 2100)
+    vatRateBps: 0, // VAT-001 (model §21): na startu neplátce DPH → 0; přechod na plátce = nová verze policy (21 % = 2100)
   },
   cannotKeepExpiryHours: 24,
   providerNoShow: {

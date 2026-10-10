@@ -31,6 +31,7 @@ import {
 } from '@/lib/booking/texts'
 import { createClient } from '@/lib/supabase/server'
 import { createNotification } from '@/lib/actions/notifications'
+import { providerSeesCustomerContact } from '@/lib/booking/state'
 import { updateOrderStatus } from '@/lib/actions/orders'
 import {
   adminDb,
@@ -487,8 +488,8 @@ export async function getUpcomingBookings(): Promise<UpcomingBooking[]> {
     const atCustomer = r.service_location
       ? r.service_location === 'u_zakaznika'
       : r.services?.location_type !== 'u_poskytovatele'
-    // Přesnou adresu zákazníka poskytovatel uvidí až u předautorizované rezervace.
-    const providerSeesAddress = r.booking_state !== 'pending_payment'
+    // Přesnou adresu zákazníka poskytovatel uvidí až potvrzením rezervace (AK bod 8).
+    const providerSeesAddress = r.booking_state ? providerSeesCustomerContact(r.booking_state) : true
     const place = atCustomer
       ? (role === 'customer' || providerSeesAddress ? (r.location_address ?? r.location_city ?? null) : (r.location_city ?? null))
       : (r.services?.address ?? r.services?.city ?? null)

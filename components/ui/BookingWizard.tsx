@@ -226,7 +226,7 @@ export default function BookingWizard({
                   <div>
                     <p className="text-sm font-black">Pozor, je to daleko{movedKm != null ? ` – asi ${movedKm} km` : ''}</p>
                     <p className="mt-0.5">
-                      Adresa je jinde, než s čím poskytovatel počítal. Rezervaci proto potvrdí ručně, nejpozději 2 hodiny před začátkem –
+                      Adresa je jinde, než s čím poskytovatel počítal. Rezervaci proto potvrdí ručně – do 48 hodin od platby, nejpozději 2 hodiny před začátkem –
                       do té doby se částka jen zablokuje. Když tam nedojede, rezervaci odmítne a blokace se uvolní, nic nezaplatíte.
                       {' '}<strong>Lepší je mu nejdřív napsat.</strong>
                     </p>

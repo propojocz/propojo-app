@@ -8,7 +8,7 @@
 import type { OfferKind } from './policy'
 
 /** Verze znění rekapitulace a souhlasu. Při každé změně textů zvýšit. */
-export const RECAP_DOCUMENT_VERSION = 'recap-2026-10-06-v6'
+export const RECAP_DOCUMENT_VERSION = 'recap-2026-10-10-v7'
 
 // Podle pracovních VOP (v4.1, 3. 10. 2026), čl. 9:
 //  A služba – zákazník může od Rezervační smlouvy odstoupit do 14 dnů; nic se nezaškrtává, jen poučení.
@@ -94,7 +94,7 @@ export function cancellationRules(kind: OfferKind, autoConfirm = false): string[
         'Když poskytovatel potvrzenou rezervaci zruší nebo nedorazí, peníze se vám vrátí celé.',
       ]
     : [
-        'Částka se na kartě jen zablokuje. Strhne se až poté, co poskytovatel rezervaci potvrdí – nejpozději 2 hodiny před začátkem termínu. Když ji nepotvrdí včas, blokace se uvolní.',
+        'Částka se na kartě jen zablokuje. Strhne se až poté, co poskytovatel rezervaci potvrdí. Na potvrzení má 48 hodin od platby, nejpozději však do 2 hodin před začátkem termínu. Když ji nepotvrdí včas, blokace se uvolní a nic nezaplatíte.',
         'Než poskytovatel rezervaci potvrdí, můžete ji zrušit bez poplatku – blokace se uvolní.',
         'Když poskytovatel potvrzenou rezervaci zruší nebo nedorazí, peníze se vám vrátí celé.',
       ]

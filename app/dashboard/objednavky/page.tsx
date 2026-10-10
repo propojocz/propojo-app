@@ -55,7 +55,7 @@ function OrderCard({ o, role, otherName, todo }: { o: any; role: 'provider' | 'c
           </p>
         )}
         <div className="flex items-center gap-2 mb-1 flex-wrap">
-          <h3 className="font-bold text-slate-900">{o.services?.title ?? 'Neznámá služba'}</h3>
+          <h3 className="font-bold text-slate-900">{o.services?.title ?? 'Zakázka z poptávky'}</h3>
           {o.is_inquiry === true && o.status === 'cekajici' && !o.scheduled_at ? (
             <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
               Dotaz

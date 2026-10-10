@@ -13,6 +13,7 @@ import ProviderCancelReason from '@/components/ui/ProviderCancelReason'
 import BookingWizard from '@/components/ui/BookingWizard'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
 import { bookingStatusBadge } from '@/lib/booking/labels'
+import { providerSeesCustomerContact } from '@/lib/booking/state'
 import ConfirmCompletionButton from '@/components/ui/ConfirmCompletionButton'
 import ChatThread from '@/components/ui/ChatThread'
 import Avatar from '@/components/ui/Avatar'
@@ -289,6 +290,9 @@ export default function OrderDetailClient({
   // nekliká na tlačítko, které stejně neprojde.
   // Model v2: stav rezervace s platbou řídí booking_state (štítek nad detailem).
   const bookingState = ((order as any).booking_state ?? null) as string | null
+  // Přesná adresa a kontakt zákazníka: u modelu v2 až potvrzením rezervace (AK bod 8), u starých objednávek jako dřív.
+  // Zákazník svou adresu vidí vždy.
+  const showCustomerContact = !isProvider || (bookingState ? providerSeesCustomerContact(bookingState) : order.status !== 'cekajici')
   const v2Platba = bookingState === null || bookingState === 'pending_payment' || bookingState === 'payment_expired'
   // Rezervace s předautorizací nebo po ní: staré akce (přijmout, zrušit, změna termínu,
   // platební box) se jí netýkají – stav ukazuje BookingStateBadge, akce přijdou ve vrstvě 3.
@@ -749,14 +753,17 @@ export default function OrderDetailClient({
                       ) : null}
                     </>
                   )
-                  : order.location_address && order.status !== 'cekajici'
+                  : order.location_address && order.status !== 'cekajici' && showCustomerContact
                     ? (
                       <p className="font-medium text-slate-800">
                         {order.location_address}
                         <CopyAddressButton text={order.location_address} />
                       </p>
                     )
-                    : <p className="font-medium text-slate-800">{order.location_city ?? '—'}{order.status === 'cekajici' ? '' : ' (přesná adresa se doplní)'}</p>}
+                    : <p className="font-medium text-slate-800">
+                        {order.location_city ?? '—'}
+                        {order.status === 'cekajici' ? '' : order.location_address && !showCustomerContact ? ' (přesnou adresu uvidíte po potvrzení rezervace)' : ' (přesná adresa se doplní)'}
+                      </p>}
               </div>
             </div>
           )}
@@ -770,7 +777,7 @@ export default function OrderDetailClient({
           )}
 
           {/* Mapa pro POSKYTOVATELE — kam dojet, když zákazník vybral adresu z našeptávače */}
-          {isProvider && atCustomer && order.location_lat != null && order.location_lng != null && order.status !== 'zruseno' && order.status !== 'cekajici' && (
+          {isProvider && atCustomer && showCustomerContact && order.location_lat != null && order.location_lng != null && order.status !== 'zruseno' && order.status !== 'cekajici' && (
             <div className="mt-4">
               <ServiceMap lat={order.location_lat} lng={order.location_lng} label={order.location_address ?? 'Adresa zákazníka'} />
             </div>
@@ -1317,7 +1324,7 @@ export default function OrderDetailClient({
             </div>
           </div>
 
-          {order.status !== 'cekajici' && order.status !== 'zruseno' && otherProfile?.phone && (
+          {order.status !== 'cekajici' && order.status !== 'zruseno' && showCustomerContact && otherProfile?.phone && (
             <a href={`tel:${otherProfile.phone}`} className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600 hover:text-emerald-700">
               <Phone className="h-4 w-4" /> {otherProfile.phone}
             </a>

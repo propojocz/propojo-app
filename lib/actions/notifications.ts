@@ -108,6 +108,8 @@ export async function markAllNotificationsRead(): Promise<{ success: boolean }> 
     .update({ read_at: new Date().toISOString() })
     .eq('user_id', user.id)
     .is('read_at', null)
+    // Zprávy se označí jako přečtené až otevřením chatu (ikona zpráv)
+    .neq('type', 'new_message')
 
   if (error) {
     console.error('[markAllNotificationsRead]', error)

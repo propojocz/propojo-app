@@ -68,6 +68,12 @@ Právní a produktová rozhodnutí se dělají mimo repo (claude.ai projekt Prop
 - Vrstva 3e (8. 10. 2026, napsané, čeká na test): nový Standard účet se zakládá s předvyplněnými údaji (`lib/booking/onboarding-prefill.ts`): e-mail, telefon, IČO → `company.tax_id`, DIČ → `company.vat_id`, název a sídlo z ARES, typ podnikání podle právní formy (101 → individual, s.r.o./a.s./v.o.s./k.s./družstvo → company), MCC podle kategorie první aktivní karty, web = profil, popis z karty. Stripe je v onboardingu jen nechá potvrdit. KYC jde zapsat jen před prvním Account Linkem → týká se jen nových účtů. Když Stripe předvyplnění odmítne, účet se založí bez něj.
 - Pozn. (8. 10. 2026): Stripe označuje `type: 'standard'` za legacy (doporučuje controller properties / Accounts v2). Pro existující integraci podporované; zvážit přechod před větším rozvojem Connect.
 - Po vrstvě 3 (schváleno 7. 10. 2026): chytřejší vyhledávání (bez diakritiky, kořen slova, slovník příbuzných slov), poptávky pro poskytovatele podle vzdálenosti s filtrem, „Obnovit poptávku“ v historii zákazníka, ikona zpráv v horní liště s přehledem všech chatů. Potom „Spolupráce V1“ (`docs/spoluprace-v1.md`).
+- Část B (9.–10. 10. 2026, čeká na build a test):
+  - chytré hledání, poptávky podle vzdálenosti, „Obnovit poptávku“ (zákazník bez poskytovatelského účtu má na /poptavky své poptávky);
+  - ikona zpráv (zvoneček zprávy neukazuje), štítek „Zatím nepřijímá online rezervace“;
+  - odpověď na poptávku i bez karty (poskytovatel musí mít v profilu obec), odhad s materiálem.
+  - Chat jednání skládá domluvu (souhrn „Co je domluveno“, zákazník: kdy se hodí + rozpočet, poskytovatel: odhad + termíny, přílohy fotka/PDF). Poskytovatele jde vybrat jen s navrženým termínem a **poptávka se ostatním uzavře až zaplacením** (`lib/booking/request-selection.ts`: rozpracovaná objednávka + `order_events` 'created_from_request', uzavření v `handleAuthorized`).
+  - Podle stanoviska AK: adresu a telefon zákazníka vidí poskytovatel až po potvrzení (`providerSeesCustomerContact`), shrnutí ukazuje celou lhůtu k potvrzení (recap `recap-2026-10-10-v7`), neúspěšné stržení oznámí oběma stranám.
 - Nápady na rozvoj: `docs/IDEAS_BACKLOG.md` – nápad se tam nejdřív zapíše, neimplementuje se automaticky.
 - Mimo dosah a cena dohodou (4. 10. 2026): poptávku mimo dosah lze poslat, poskytovatel jen vidí vzdálenost a rozhodne sám. Přímá rezervace času mimo dosah zůstává blokovaná. Poskytovatel může u návrhu termínu upravit Rezervační poplatek / Cenu výjezdu (A, B; 200–20 000 Kč), zákazník ji potvrdí s termínem. SQL `docs/sql/rezervace-cena-dohodou.sql` (`order_time_proposals.charge_halere`, `price_note`, `orders.agreed_charge_halere`).
 - Započtení Ceny výjezdu volbou poskytovatele + provize s přirážkou 2 % nad 3 000 Kč (4. 10. 2026, policy `2026-10-04-v2`, shrnutí `recap-2026-10-04-v4`). SQL `docs/sql/rezervace-zapocteni-vyjezdu.sql`.
@@ -85,6 +91,8 @@ Právní a produktová rozhodnutí se dělají mimo repo (claude.ai projekt Prop
   - kratší Stripe onboarding: při zakládání Standard účtu předvyplnit e-mail, telefon, IČO, název a adresu z ARES, odvětví (MCC) podle kategorie nabídky, web = veřejný profil na Propojo, popis podnikání z nabídky. Nejdřív ověřit v dokumentaci Stripe, co jde u Standard účtu předvyplnit.
 - Pořadí vrstev, technické korekce a parametry k potvrzení: konec `docs/model-v2.md`.
 - Co je právně potvrzené a co čeká na právničku: `docs/model-v2.md` §20. U OPEN – LEGAL držet hodnoty jako parametry v `lib/booking/policy.ts`.
+- Stanovisko AK přišlo 9. 10. 2026 (body 1–14 potvrzené s upřesněním). Rozhodnutí po něm a pracovní princip: `docs/model-v2.md` §21. Platí: detail, který jen konkretizuje potvrzený princip, se zapracuje a zapíše; cokoli s novým pohybem peněz / refund triggerem / změnou vzniku smlouvy nebo odpovědnosti / omezením spotřebitele / P2B / GDPR s významným dopadem se označí LEGAL_REVIEW_NEEDED a nezamyká se. Katalog automatických refundů AUTOREF-001 až 006 je uzavřený výčet – nic nad něj nespouštět.
+- Podklad pro VOP 4.1 (pro GPT): `docs/podklad-vop-4.1-2026-10-10.md`.
 
 ## Poznámky pro další vrstvy
 - Otevřené rozhodnutí (2. 10. 2026, mimo model v2 – nevymýšlet bez rozhodnutí Mateje a právničky):
@@ -109,7 +117,8 @@ Právní a produktová rozhodnutí se dělají mimo repo (claude.ai projekt Prop
 - Hotové vrstvy 4 a 5 (refundy, no-show).
 - Odsouhlasený pokyn providera k automatickým refundům (`booking_consents`) jako podmínka přijímání rezervací.
 - Odstraněná brána předplatného.
-- Sběr údajů pro DAC7.
+- Sběr údajů pro DAC7 (včetně provizí po čtvrtletích a poskytovatelích).
+- ACCOUNTANT_PENDING (VAT-001, §21): daňový status Propojo (start = neplátce, provize bez dovětku o DPH), identifikovaná osoba, účetní provedení application fee, souhrnný měsíční doklad, sledování obratu (FIN-VAT-001).
 - Finální VOP a Privacy Policy.
 - Z pracovních VOP v4.1 (3. 10. 2026), zatím neimplementováno:
   - potvrzení potvrzené Rezervace e-mailem (trvalý nosič) s údaji poskytovatele, předmětem, termínem, poplatkem a poučením (čl. 8.3),

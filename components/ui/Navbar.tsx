@@ -5,6 +5,7 @@ import Link from 'next/link'
 import NotificationBadge from './NotificationBadge'
 import UpcomingDrawer from './UpcomingDrawer'
 import QuickSlotButton from './QuickSlotButton'
+import InboxButton from './InboxButton'
 import MobileNav from './MobileNav'
 import SuspendedTopBar from './SuspendedTopBar'
 import { getCustomerTodoCount, getProviderTodoCount } from '@/lib/actions/order-alerts'
@@ -133,6 +134,7 @@ export default async function Navbar() {
           {/* VPRAVO — zvoneček + pilulka ☰ profil */}
           <div className="flex items-center justify-end gap-1.5">
             {user && isProvider && <QuickSlotButton />}
+            {user && <InboxButton />}
             {user && <UpcomingDrawer />}
             {user && <NotificationBadge />}
             <MobileNav

@@ -1,16 +1,14 @@
 'use client'
 // components/ui/ZajemciList.tsx
-// Přehled reakcí na moji poptávku + výběr poskytovatele. Výběr běží přes existující
-// selectProvider, chat přes existující conversation route. Žádná nová logika.
+// Přehled reakcí na moji poptávku. Vybírá se v chatu s poskytovatelem, a to vždy
+// s konkrétním navrženým termínem (10. 10. 2026) – tady jen porovnání a cesta do chatu.
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import {
-  ArrowLeft, MapPin, MessageSquare, CheckCircle2, Loader2, ChevronDown, ChevronUp, ShieldCheck, Tag, Lock, Star, Coins,
+  ArrowLeft, MapPin, MessageSquare, CheckCircle2, ChevronDown, ChevronUp, ShieldCheck, Tag, Lock, Star, Coins,
 } from 'lucide-react'
 import Avatar from '@/components/ui/Avatar'
-import { selectProvider } from '@/lib/actions/requests'
 
 export type Zajemce = {
   responseId: string
@@ -43,25 +41,7 @@ export default function ZajemciList({
   primary: Zajemce[]
   secondary: Zajemce[]
 }) {
-  const router = useRouter()
-  const [busyId, setBusyId] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [showSecondary, setShowSecondary] = useState(false)
-
-  const handleSelect = async (z: Zajemce) => {
-    if (busyId) return
-    if (!z.hasService) { setError('Tento poskytovatel u reakce nemá vybranou nabídku, ze které by šla založit objednávka.'); return }
-    if (!confirm(`Vybrat poskytovatele ${z.providerName}?${z.offerLabel ? `\n${z.offerLabel}.` : ''}\nZaplatíte až po potvrzení termínu. Ostatní jednání se uzavřou.`)) return
-    setBusyId(z.responseId)
-    setError(null)
-    const res = await selectProvider(requestId, z.responseId)
-    if (res.success) {
-      router.refresh()
-    } else {
-      setError(res.error)
-      setBusyId(null)
-    }
-  }
 
   const Card = ({ z, dim = false }: { z: Zajemce; dim?: boolean }) => {
     const isSelected = z.status === 'selected'
@@ -127,20 +107,12 @@ export default function ZajemciList({
           {z.conversationId && (
             <Link
               href={`/poptavky/${requestId}/jednani/${z.conversationId}`}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+              className={!readOnly && !isLost
+                ? 'inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 px-3.5 py-2 text-sm font-bold text-white transition hover:bg-emerald-600'
+                : 'inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50'}
             >
-              <MessageSquare className="h-4 w-4" /> Otevřít chat
+              <MessageSquare className="h-4 w-4" /> {!readOnly && !isLost ? 'Domluvit a vybrat termín' : 'Otevřít chat'}
             </Link>
-          )}
-          {!readOnly && !isLost && (
-            <button
-              onClick={() => handleSelect(z)}
-              disabled={busyId === z.responseId}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 px-3.5 py-2 text-sm font-bold text-white transition hover:bg-emerald-600 disabled:opacity-60"
-            >
-              {busyId === z.responseId ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-              Vybrat poskytovatele
-            </button>
           )}
         </div>
       </article>
@@ -177,11 +149,9 @@ export default function ZajemciList({
         <p className="mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-relaxed text-slate-600">
           Nabídky můžete sbírat{expiresAt ? <> do <strong>{new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'numeric', timeZone: 'Europe/Prague' }).format(new Date(expiresAt))}</strong></> : null}.
           {' '}Porovnejte zprávy, odhad ceny, částku placenou přes Propojo a hodnocení – klidně si s každým napište.
-          {' '}<strong>Výběrem jednoho poskytovatele se ostatní jednání uzavřou.</strong>
+          {' '}Poskytovatele vyberete v chatu spolu s termínem, který vám navrhne – <strong>až zaplatíte, ostatní jednání se uzavřou.</strong>
         </p>
       )}
-
-      {error && <p className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
 
       {primary.length === 0 && secondary.length === 0 ? (
         <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-white p-12 text-center">
@@ -193,7 +163,7 @@ export default function ZajemciList({
 
           {!readOnly && (
             <p className="flex items-center justify-center gap-1.5 pt-1 text-xs text-slate-400">
-              <Lock className="h-3.5 w-3.5" /> Kontakt poskytovatele se odkryje po výběru.
+              <Lock className="h-3.5 w-3.5" /> Kontakt poskytovatele uvidíte ve shrnutí před platbou.
             </p>
           )}
 

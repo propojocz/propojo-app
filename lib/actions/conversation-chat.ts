@@ -5,10 +5,14 @@
 // což dnešní order chat (sendOrderMessage / detail objednávky) neumí — ten jede
 // jen přes order_id.
 //
-// Jakmile zákazník vybere poskytovatele, selectProvider doplní order_id na
+// Jakmile zákazník vybere termín a zaplatí, finalizeRequestSelection doplní order_id na
 // konverzaci i na tyhle zprávy, takže od té chvíle se totéž vlákno zobrazuje ve
 // stávajícím order chatu a dál se pokračuje přes sendOrderMessage. Tenhle soubor
 // se tedy používá jen ve fázi jednání.
+//
+// 10. 10. 2026: chat jednání skládá domluvu – zákazník pošle, kdy se mu to hodí, a rozpočet
+// (sendCustomerPreference), poskytovatel odhad ceny a termíny. Vybrat poskytovatele jde jen
+// s termínem (selectProviderWithTerm); poptávka se ostatním uzavře až zaplacením.
 //
 // Účastníci se ověřují V KÓDU (RLS zamčená, píše se přes service role):
 //   - poskytovatel = request_responses.provider_id
@@ -17,8 +21,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { createNotification } from './notifications'
-import { selectProvider } from './requests'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
+import { createDraftOrderFromResponse } from '@/lib/booking/request-selection'
 import { cas, terminDlouze } from '@/lib/format'
 
 function getAdminClient() {
@@ -138,8 +142,9 @@ export async function sendConversationMessage(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Nejste přihlášeni.' }
 
-  const trimmed = content.trim()
   const img = imageUrl?.trim() || null
+  // Příloha (fotka / PDF) jde poslat i bez textu
+  const trimmed = content.trim() || (img ? (/\.pdf($|\?)/i.test(img) ? 'Příloha (PDF)' : 'Fotka') : '')
   if (!trimmed) return { success: false, error: 'Napište zprávu.' }
   if (trimmed.length > 2000) return { success: false, error: 'Zpráva je příliš dlouhá.' }
 
@@ -206,10 +211,14 @@ export async function sendConversationMessage(
 // rozhodnout mezi více poskytovateli. Ukládá se jako zpráva type 'price_proposed'
 // s payloadem { kind:'price_estimate', from, to }. Termín se tu NENAVRHUJE —
 // závazný termín i platba patří až do objednávky po výběru.
+/** Materiál v odhadu ceny (nepovinné): s materiálem / bez materiálu / neuvedeno (null) */
+export type EstimateMaterial = 'with' | 'without' | null
+
 export async function sendPriceEstimate(
   conversationId: string,
   fromAmount: number,
   toAmount?: number | null,
+  material: EstimateMaterial = null,
 ): Promise<SendResult> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -246,7 +255,8 @@ export async function sendPriceEstimate(
   const castka = to != null
     ? `${from.toLocaleString('cs-CZ')} – ${to.toLocaleString('cs-CZ')} Kč`
     : `${from.toLocaleString('cs-CZ')} Kč`
-  const content = `Předběžný odhad ceny: ${castka} (nezávazné)`
+  const mat = material === 'with' ? 'with' : material === 'without' ? 'without' : null
+  const content = `Předběžný odhad ceny: ${castka} (nezávazné${mat === 'with' ? ', včetně materiálu' : mat === 'without' ? ', bez materiálu' : ''})`
 
   const { data, error } = await (admin.from('messages') as any)
     .insert({
@@ -255,7 +265,7 @@ export async function sendPriceEstimate(
       sender_id: user.id,
       content,
       type: 'price_proposed',
-      payload: { kind: 'price_estimate', from, to },
+      payload: { kind: 'price_estimate', from, to, material: mat },
     })
     .select('*')
     .single() as { data: any; error: any }
@@ -391,8 +401,9 @@ export async function proposeTermInChat(
 }
 
 /**
- * Zákazník vybere poskytovatele rovnou s termínem z chatu: vznikne objednávka (selectProvider),
- * termín se do ní vloží jako návrh a zákazník pokračuje shrnutím a platbou v objednávce.
+ * Zákazník vybere poskytovatele rovnou s termínem z chatu: vznikne rozpracovaná objednávka, termín
+ * se do ní vloží jako návrh a zákazník pokračuje shrnutím (adresa, kontakt, souhlasy) a platbou.
+ * Poptávka i ostatní jednání zůstávají otevřené až do zaplacení (finalizeRequestSelection).
  */
 export async function selectProviderWithTerm(
   conversationId: string,
@@ -420,15 +431,112 @@ export async function selectProviderWithTerm(
     return { success: false, error: 'Tento termín už nejde vybrat. Požádejte poskytovatele o nový.' }
   }
 
-  const sel = await selectProvider(conv.requestId, conv.responseId)
-  if (!sel.success || !sel.id) return { success: false, error: sel.success ? 'Objednávku se nepodařilo vytvořit.' : sel.error }
+  const draft = await createDraftOrderFromResponse(admin, {
+    requestId: conv.requestId, responseId: conv.responseId, conversationId, customerId: user.id,
+  })
+  if (!draft.ok) return { success: false, error: draft.error }
 
-  const { error } = await (admin.from('order_time_proposals') as any)
-    .insert({ order_id: sel.id, starts_at: p.starts_at, ends_at: p.ends_at })
-  if (error) {
-    console.error('[selectProviderWithTerm] návrh', error)
-    // Objednávka vznikla – termín se dá domluvit v ní.
-    return { success: true, orderId: sel.id, startsAt: '' }
+  // Návrh termínu do objednávky (u znovu použité objednávky jen když tam ještě není)
+  const { data: existing } = await admin
+    .from('order_time_proposals')
+    .select('id')
+    .eq('order_id', draft.orderId)
+    .eq('starts_at', p.starts_at)
+    .limit(1) as { data: Array<{ id: string }> | null }
+  if (!existing?.length) {
+    const { error } = await (admin.from('order_time_proposals') as any)
+      .insert({ order_id: draft.orderId, starts_at: p.starts_at, ends_at: p.ends_at })
+    if (error) {
+      console.error('[selectProviderWithTerm] návrh', error)
+      return { success: false, error: 'Termín se nepodařilo převzít. Zkuste to prosím znovu.' }
+    }
   }
-  return { success: true, orderId: sel.id, startsAt: p.starts_at }
+
+  try {
+    if (conv.providerId) {
+      await createNotification({
+        userId: conv.providerId,
+        type: 'status_change',
+        orderId: draft.orderId,
+        actorId: user.id,
+        title: 'Zákazník si vybral váš termín',
+        preview: `${terminDlouze(p.starts_at)} · teď vyplňuje adresu a platí. Rezervace vznikne zaplacením.`,
+      })
+    }
+  } catch (err) {
+    console.error('[selectProviderWithTerm] notifikace', err)
+  }
+  return { success: true, orderId: draft.orderId, startsAt: p.starts_at }
+}
+
+// ── Domluva od zákazníka: kdy se to hodí, rozpočet ─────────────────
+// Strukturovaná zpráva do chatu jednání. Poskytovatel podle ní pošle odhad a termíny; souhrn
+// „Co je domluveno“ bere vždy poslední hodnotu. Nic se tím nerezervuje ani neplatí.
+
+export type CustomerPreference =
+  | { kind: 'time_preference'; from: string; to: string | null; dayPart: 'kdykoli' | 'rano' | 'odpoledne' | 'vecer'; note?: string | null }
+  | { kind: 'budget'; from: number | null; to: number }
+
+const DAY_PARTS: Record<string, string> = {
+  kdykoli: 'kdykoli během dne', rano: 'ráno (8–12)', odpoledne: 'odpoledne (12–17)', vecer: 'večer (17–20)',
+}
+
+export async function sendCustomerPreference(conversationId: string, pref: CustomerPreference): Promise<SendResult> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+
+  const admin = getAdminClient()
+  const conv = await loadConversation(admin, conversationId)
+  if (!conv || !conv.responseId) return { success: false, error: 'Konverzace nebyla nalezena.' }
+  if (user.id !== conv.customerId) return { success: false, error: 'Tohle posílá zákazník.' }
+  if (conv.status !== 'open' || conv.orderId) return { success: false, error: 'Tahle konverzace je uzavřená.' }
+
+  let content: string
+  let payload: Record<string, unknown>
+  const den = (iso: string) => new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'numeric', timeZone: 'Europe/Prague' }).format(new Date(`${iso}T12:00:00Z`))
+  if (pref.kind === 'time_preference') {
+    const iso = /^\d{4}-\d{2}-\d{2}$/
+    if (!iso.test(pref.from) || (pref.to && !iso.test(pref.to))) return { success: false, error: 'Vyberte datum.' }
+    if (pref.to && pref.to < pref.from) return { success: false, error: 'Konec nemůže být dřív než začátek.' }
+    const part = DAY_PARTS[pref.dayPart] ?? DAY_PARTS.kdykoli
+    const note = pref.note?.trim().slice(0, 200) || null
+    content = `Hodí se mi: ${pref.to && pref.to !== pref.from ? `${den(pref.from)} – ${den(pref.to)}` : den(pref.from)}, ${part}${note ? ` (${note})` : ''}.`
+    payload = { kind: 'time_preference', from: pref.from, to: pref.to && pref.to !== pref.from ? pref.to : null, day_part: pref.dayPart, note }
+  } else {
+    const to = Math.round(Number(pref.to))
+    const from = pref.from != null ? Math.round(Number(pref.from)) : null
+    if (!Number.isFinite(to) || to <= 0) return { success: false, error: 'Zadejte rozpočet v Kč.' }
+    if (from != null && (!Number.isFinite(from) || from <= 0 || from > to)) return { success: false, error: 'Rozpočet „od“ musí být nižší než „do“.' }
+    const castka = from != null ? `${from.toLocaleString('cs-CZ')} – ${to.toLocaleString('cs-CZ')} Kč` : `do ${to.toLocaleString('cs-CZ')} Kč`
+    content = `Můj rozpočet: ${castka}.`
+    payload = { kind: 'budget', from, to }
+  }
+
+  const { data, error } = await (admin.from('messages') as any)
+    .insert({ conversation_id: conversationId, order_id: null, sender_id: user.id, content, type: 'message', payload })
+    .select('*')
+    .single() as { data: any; error: any }
+  if (error || !data) {
+    console.error('[sendCustomerPreference]', error)
+    return { success: false, error: 'Nepodařilo se odeslat.' }
+  }
+  await (admin.from('request_responses') as any)
+    .update({ last_message_at: new Date().toISOString() })
+    .eq('id', conv.responseId)
+  try {
+    if (conv.providerId) {
+      await createNotification({
+        userId: conv.providerId,
+        type: 'new_message',
+        actorId: user.id,
+        title: pref.kind === 'budget' ? 'Zákazník poslal rozpočet' : 'Zákazník napsal, kdy se mu to hodí',
+        preview: content,
+        url: `/poptavky/${conv.requestId}/jednani/${conversationId}`,
+      })
+    }
+  } catch (err) {
+    console.error('[sendCustomerPreference] notifikace', err)
+  }
+  return { success: true, id: data.id, message: data }
 }

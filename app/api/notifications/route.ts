@@ -14,6 +14,8 @@ export async function GET() {
     .from('notifications')
     .select('id, type, order_id, url, title, preview, read_at, created_at')
     .eq('user_id', user.id)
+    // Zprávy z chatů ukazuje ikona zpráv v horní liště (9. 10. 2026), ne zvoneček
+    .neq('type', 'new_message')
     .order('created_at', { ascending: false })
     .limit(15) as { data: any[] | null; error: any }
 

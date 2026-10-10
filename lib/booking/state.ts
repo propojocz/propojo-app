@@ -231,9 +231,20 @@ export function noShowResponseDeadline(
   return { deadline, remindAt: new Date(Math.max(remind, noticeSentAt.getTime())) }
 }
 
+/**
+ * Smí poskytovatel vidět přesnou adresu a kontakt zákazníka? U modelu v2 až potvrzením Rezervace
+ * (úspěšným stržením platby) – stanovisko AK bod 8. Do té doby obec a vzdálenost.
+ * Objednávky mimo model v2 (bookingState null) se řídí starým pravidlem v místě volání.
+ */
+export function providerSeesCustomerContact(bookingState: string | null | undefined): boolean {
+  return bookingState === 'confirmed' || bookingState === 'no_show_reported' || bookingState === 'no_show_disputed'
+}
+
 /** Typy záznamů v logu událostí (orders → order_events); slouží jako evidence */
 export const ORDER_EVENT_TYPES = [
   'booking_created', // payload.direct = přímá rezervace času / okna (ne domluva přes návrhy)
+  'created_from_request', // rozpracovaná objednávka z poptávky (payload.request_id, response_id, conversation_id)
+  'request_selection_finalized', // zaplaceno → poptávka uzavřena ostatním poskytovatelům
   'state_changed',
   'authorization_released', // preautorizace zrušena (payload.reason)
   'stripe_event',

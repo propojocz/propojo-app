@@ -25,7 +25,10 @@ export type BoardRequest = {
   myStatus: string | null
   myConversationId: string | null
   rank: number
+  /** V dosahu některé z mých karet (nebo stejná obec) */
   sameCity: boolean
+  /** Vzdálenost od nejbližší mé karty (vzdušnou čarou), null = nevíme */
+  distanceKm: number | null
 }
 
 type Tab = 'doporucene' | 'okoli' | 'vse' | 'zajmy'
@@ -48,12 +51,17 @@ export default function PoptavkyBoard({
   cards,
   myCards,
   isLoggedIn,
+  myCity = null,
 }: {
   cards: BoardRequest[]
   myCards: ProviderCard[]
   isLoggedIn: boolean
+  /** Obec z profilu – předvyplní „Odkud vyjíždíte“ u nabídky bez karty */
+  myCity?: string | null
 }) {
   const [tab, setTab] = useState<Tab>('doporucene')
+  // Filtr vzdálenosti (km), null = kdekoli – kdo chce jet daleko, může
+  const [maxKm, setMaxKm] = useState<number | null>(null)
   // Po reakci si držíme lokální stav (kvůli tabu Moje zájmy a počtu zájemců).
   const [local, setLocal] = useState<Record<string, { myStatus: string; myConversationId: string | null; activeCount: number }>>({})
 
@@ -72,16 +80,19 @@ export default function PoptavkyBoard({
     let list = merged
     if (tab === 'okoli') list = list.filter((c) => c.sameCity)
     if (tab === 'zajmy') list = list.filter((c) => c.myStatus)
-    if (tab === 'doporucene') {
+    if (maxKm != null && tab !== 'zajmy') list = list.filter((c) => c.distanceKm != null && c.distanceKm <= maxKm)
+    const dist = (c: BoardRequest) => (c.distanceKm ?? 99999)
+    if (tab === 'doporucene' || tab === 'okoli') {
+      // Nejdřív obor, pak nejbližší, pak nejnovější
       return [...list].sort((a, b) =>
-        a.rank !== b.rank ? a.rank - b.rank : +new Date(b.createdAt) - +new Date(a.createdAt))
+        a.rank !== b.rank ? a.rank - b.rank : dist(a) !== dist(b) ? dist(a) - dist(b) : +new Date(b.createdAt) - +new Date(a.createdAt))
     }
     return [...list].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
-  }, [merged, tab])
+  }, [merged, tab, maxKm])
 
   const tabs: Array<{ id: Tab; label: string; count?: number }> = [
     { id: 'doporucene', label: 'Doporučené' },
-    { id: 'okoli', label: 'V okolí', count: counts.okoli },
+    { id: 'okoli', label: 'V mém dosahu', count: counts.okoli },
     { id: 'vse', label: 'Všechny', count: counts.vse },
     { id: 'zajmy', label: 'Moje zájmy', count: counts.zajmy },
   ]
@@ -125,6 +136,23 @@ export default function PoptavkyBoard({
         })}
       </div>
 
+      <div className="mb-4 flex items-center gap-2 text-sm text-slate-600">
+        <MapPin className="h-4 w-4 text-slate-400" />
+        <label htmlFor="max-km">Vzdálenost:</label>
+        <select
+          id="max-km"
+          value={maxKm ?? ''}
+          onChange={(e) => setMaxKm(e.target.value ? Number(e.target.value) : null)}
+          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400"
+        >
+          <option value="">kdekoli</option>
+          <option value="10">do 10 km</option>
+          <option value="25">do 25 km</option>
+          <option value="50">do 50 km</option>
+          <option value="100">do 100 km</option>
+        </select>
+      </div>
+
       {myCards.length === 0 && isLoggedIn && (
         <div className="mb-4 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
           <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
@@ -140,12 +168,14 @@ export default function PoptavkyBoard({
         <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-white p-12 text-center">
           <Megaphone className="mx-auto mb-3 h-10 w-10 text-slate-300" />
           <h3 className="mb-1 text-lg font-bold text-slate-800">
-            {tab === 'zajmy' ? 'Zatím jste neprojevili zájem' : tab === 'okoli' ? 'Ve vašem okolí zatím nic není' : 'Zatím žádné poptávky'}
+            {tab === 'zajmy' ? 'Zatím jste neprojevili zájem' : tab === 'okoli' ? 'Ve vašem dosahu zatím nic není' : maxKm != null ? `Do ${maxKm} km zatím nic není` : 'Zatím žádné poptávky'}
           </h3>
           <p className="mx-auto max-w-sm text-sm text-slate-500">
             {tab === 'zajmy'
               ? 'Jakmile u nějaké poptávky kliknete na „Mám zájem", objeví se tady.'
-              : 'Nové poptávky se tu objeví, jakmile je někdo zadá.'}
+              : maxKm != null || tab === 'okoli'
+                ? 'Zkuste větší vzdálenost nebo záložku Všechny – někdo možná hledá i kousek dál.'
+                : 'Nové poptávky se tu objeví, jakmile je někdo zadá.'}
           </p>
         </div>
       ) : (
@@ -156,7 +186,10 @@ export default function PoptavkyBoard({
                 {req.category && (
                   <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 font-semibold text-emerald-700">{req.category}</span>
                 )}
-                <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" /> {req.city}</span>
+                <span className="inline-flex items-center gap-1">
+                  <MapPin className="h-3.5 w-3.5" /> {req.city}
+                  {req.distanceKm != null && <span className={req.sameCity ? 'font-semibold text-emerald-700' : 'text-slate-400'}>· ≈ {req.distanceKm} km</span>}
+                </span>
                 {req.preferredDate && (
                   <span className="inline-flex items-center gap-1"><CalendarClock className="h-3.5 w-3.5" /> {req.preferredDate}</span>
                 )}
@@ -197,6 +230,7 @@ export default function PoptavkyBoard({
                     initialConversationId={req.myConversationId}
                     myCards={myCards}
                     isLoggedIn={isLoggedIn}
+                    myCity={myCity}
                     onReacted={(cid) => setLocal((prev) => ({
                       ...prev,
                       [req.id]: { myStatus: 'interested', myConversationId: cid, activeCount: req.activeCount + 1 },

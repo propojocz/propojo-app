@@ -149,7 +149,8 @@ export default async function ZajemciPage({ params }: { params: { id: string } }
       completedCount: completedByProv.get(r.provider_id) ?? 0,
       rating: ratingByProv.get(r.provider_id) ?? null,
       priceEstimate: conv ? (estimateByConv.get(conv.id) ?? null) : null,
-      hasService: !!r.service_id,
+      // Vybrat jde poskytovatele s nabídkou (typ + částka); karta je nepovinná
+      hasService: (r.offer_kind === 'A' || r.offer_kind === 'B') && !!r.charge_halere,
       offerLabel: (r.offer_kind === 'A' || r.offer_kind === 'B') && r.charge_halere
         ? offerSummary(r.offer_kind, r.charge_halere / 100, r.quote_fee_deductible === true)
         : null,

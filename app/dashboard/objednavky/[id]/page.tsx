@@ -10,8 +10,9 @@ import { adminDb, loadBookingOrder, resolveCaptureInProgress, syncCheckoutOnRetu
 import ReviewForm from '@/components/ui/ReviewForm'
 import TimeProposalPanel from '@/components/ui/TimeProposalPanel'
 import { itemPriceKc } from '@/lib/booking/commission'
-import { haversineKm } from '@/lib/geo'
+import { haversineKm, KNOWN_PLACE_TOLERANCE_KM } from '@/lib/geo'
 import { getProposals } from '@/lib/actions/time-proposals'
+import { markThreadRead } from '@/lib/actions/inbox'
 import TimePreferenceForm from '@/components/ui/TimePreferenceForm'
 
 interface Props { params: { id: string }; searchParams: { platba?: string; rezervovat?: string } }
@@ -123,6 +124,8 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
 
   if (error || !order) notFound()
   if (order.customer_id !== user.id && order.provider_id !== user.id) notFound()
+  // Otevřený chat objednávky → zprávy jsou přečtené (ikona zpráv v horní liště)
+  await markThreadRead({ orderId: order.id })
 
   // Model v2: po návratu ze Stripe se na stav platby zeptáme přímo Stripe – webhook mohl
   // nedorazit nebo se zdržet. Rezervaci to posune jen podle skutečného stavu ve Stripe.
@@ -151,10 +154,14 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
 
   // Vzdálenost zákazníka mimo obvyklý dosah poskytovatele – jen informace pro poskytovatele,
   // rozhoduje on (přesná adresa, jinak obec z poptávky).
-  let outOfRange: { distanceKm: number; radiusKm: number } | null = null
+  // fromObec = objednávka bez karty: porovnává se s obcí z poptávky (dosah karty neexistuje)
+  let outOfRange: { distanceKm: number; radiusKm: number; fromObec?: string } | null = null
   if ((order as any).service_location !== 'u_poskytovatele') {
-    const { data: card } = await supabase
-      .from('services').select('location_type, city, city_lat, city_lng, radius_km').eq('id', (order as any).service_id).maybeSingle() as { data: { location_type: string | null; city: string | null; city_lat: number | null; city_lng: number | null; radius_km: number | null } | null }
+    // Objednávka z poptávky může být bez karty (obecná nabídka) – pak dosah karty neznáme
+    const { data: card } = (order as any).service_id
+      ? await supabase
+        .from('services').select('location_type, city, city_lat, city_lng, radius_km').eq('id', (order as any).service_id).maybeSingle() as { data: { location_type: string | null; city: string | null; city_lat: number | null; city_lng: number | null; radius_km: number | null } | null }
+      : { data: null }
     const atCustomer = (order as any).service_location
       ? (order as any).service_location === 'u_zakaznika'
       : card?.location_type !== 'u_poskytovatele'
@@ -177,6 +184,13 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
       if (customer && base) {
         const dist = Math.round(haversineKm(base.lat, base.lng, customer.lat, customer.lng))
         if (dist > card.radius_km) outOfRange = { distanceKm: dist, radiusKm: card.radius_km }
+      }
+    } else if (atCustomer && !card && (order as any).location_lat != null && (order as any).location_lng != null) {
+      // Bez karty: přesná adresa daleko od obce, o které se jednalo → upozornit (a automaticky se nepotvrdí)
+      const obec = await obecCoords((order as any).location_city)
+      if (obec) {
+        const dist = Math.round(haversineKm(obec.lat, obec.lng, Number((order as any).location_lat), Number((order as any).location_lng)))
+        if (dist > KNOWN_PLACE_TOLERANCE_KM) outOfRange = { distanceKm: dist, radiusKm: KNOWN_PLACE_TOLERANCE_KM, fromObec: String((order as any).location_city) }
       }
     }
   }
@@ -291,11 +305,13 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
             <p className="font-black">Pozor, je to daleko – asi {outOfRange.distanceKm} km</p>
             <p className="mt-0.5 leading-relaxed">
               {isProvider
-                ? <>Adresa je mimo váš obvyklý dosah {outOfRange.radiusKm} km (vzdušnou čarou).
+                ? <>{outOfRange.fromObec
+                      ? `Adresa je asi ${outOfRange.distanceKm} km od obce z poptávky (${outOfRange.fromObec}), vzdušnou čarou.`
+                      : `Adresa je mimo váš obvyklý dosah ${outOfRange.radiusKm} km (vzdušnou čarou).`}
                     {v2BookingState === 'awaiting_confirmation'
                       ? ' Potvrďte jen, pokud tam opravdu dojedete – jinak rezervaci odmítněte a zákazníkovi se blokace uvolní.'
                       : ' Jestli zakázku vezmete a za jakých podmínek, je na vás – domluvit se můžete ve zprávách.'}</>
-                : <>Adresa je mimo obvyklý dosah poskytovatele ({outOfRange.radiusKm} km). Rezervaci proto potvrzuje ručně – částka je zatím
+                : <>{outOfRange.fromObec ? `Adresa je daleko od obce z poptávky (${outOfRange.fromObec}).` : `Adresa je mimo obvyklý dosah poskytovatele (${outOfRange.radiusKm} km).`} Rezervaci proto potvrzuje ručně – částka je zatím
                     jen zablokovaná. Když tam nedojede, rezervaci odmítne a blokace se uvolní, nic nezaplatíte.</>}
             </p>
           </div>

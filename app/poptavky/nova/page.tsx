@@ -14,7 +14,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Loader2, CheckCircle2, Send, ArrowLeft, LogIn, Mail, Paperclip } from 'lucide-react'
 import Link from 'next/link'
-import { createRequest } from '@/lib/actions/requests'
+import { createRequest, getRequestForRenew, renewRequest } from '@/lib/actions/requests'
 import { createClient } from '@/lib/supabase/client'
 import GalleryUpload from '@/components/ui/GalleryUpload'
 import SearchAutocomplete from '@/components/ui/SearchAutocomplete'
@@ -35,6 +35,9 @@ export default function NovaPoptavkaPage() {
   const [cityGeo, setCityGeo] = useState<{ lat: number; lng: number } | null>(null)
   // Obec předvyplněná z URL – změna klíče přenačte našeptávač s novou výchozí hodnotou
   const [cityPrefill, setCityPrefill] = useState('')
+  // Obnovení staré poptávky (?obnovit=<id>): formulář se předvyplní a uloží se do stejné poptávky
+  const renewId = searchParams.get('obnovit')
+  const [renewLoaded, setRenewLoaded] = useState(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
@@ -49,6 +52,25 @@ export default function NovaPoptavkaPage() {
       if (city) setCityPrefill(city)
     }
   }, [searchParams])
+
+  useEffect(() => {
+    if (!renewId) return
+    getRequestForRenew(renewId).then((r) => {
+      if (!r) { setErrorMsg('Tuhle poptávku obnovit nejde (je pořád aktivní, nebo z ní už je objednávka).'); setState('error'); return }
+      setForm((f) => ({
+        ...f,
+        category: r.category ?? '',
+        description: r.description,
+        city: r.city,
+        phone: r.phone ?? '',
+        preferred_date: r.preferredDate ?? '',
+      }))
+      setPhotos(r.photos)
+      setCityGeo(r.cityLat != null && r.cityLng != null ? { lat: r.cityLat, lng: r.cityLng } : null)
+      setCityPrefill(r.city)
+      setRenewLoaded(true)
+    })
+  }, [renewId])
 
   // Zjistíme přihlášení – fotky umožníme jen přihlášeným. Předvyplníme e-mail.
   useEffect(() => {
@@ -71,7 +93,7 @@ export default function NovaPoptavkaPage() {
     setErrorMsg('')
     // createRequest bere stejná pole; category zůstává volný text, subcategory_id
     // zatím neřešíme (doplní se, až bude formulář krokovaný s výběrem oboru).
-    const result = await createRequest({
+    const values = {
       category: form.category || null,
       description: form.description,
       city: form.city,
@@ -81,7 +103,8 @@ export default function NovaPoptavkaPage() {
       phone: form.phone || null,
       preferred_date: form.preferred_date || null,
       photos,
-    })
+    }
+    const result = renewId && renewLoaded ? await renewRequest(renewId, values) : await createRequest(values)
     if (result.success) {
       setState('done')
     } else {
@@ -137,7 +160,7 @@ export default function NovaPoptavkaPage() {
       <div className="mx-auto max-w-lg px-4 py-16 text-center sm:px-6">
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-8">
           <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-500" />
-          <h1 className="mt-4 text-xl font-black text-emerald-900">Poptávka odeslána!</h1>
+          <h1 className="mt-4 text-xl font-black text-emerald-900">{renewId ? 'Poptávka je znovu aktivní!' : 'Poptávka odeslána!'}</h1>
           <p className="mt-2 text-sm text-emerald-700">
             Děkujeme. Vaše poptávka je teď vidět poskytovatelům ve vašem okolí — kdo bude mít zájem,
             ozve se vám přes Propojo. Kontakt uvidí až ve chvíli, kdy si někoho vyberete.
@@ -162,10 +185,11 @@ export default function NovaPoptavkaPage() {
       </Link>
 
       <div className="mb-6">
-        <h1 className="text-2xl font-black text-slate-900">Nenašli jste, koho hledáte?</h1>
+        <h1 className="text-2xl font-black text-slate-900">{renewId ? 'Obnovit poptávku' : 'Nenašli jste, koho hledáte?'}</h1>
         <p className="mt-2 text-sm text-slate-600">
-          Napište, co potřebujete. Poptávku uvidí poskytovatelé ve vašem okolí a mohou se vám ozvat —
-          pak si z těch, kdo projeví zájem, vyberete.
+          {renewId
+            ? 'Údaje jsme předvyplnili z původní poptávky – klidně je upravte (třeba termín). Po odeslání bude poptávka znovu 14 dní aktivní a dřívější zájemci dostanou vědět.'
+            : 'Napište, co potřebujete. Poptávku uvidí poskytovatelé ve vašem okolí a mohou se vám ozvat — pak si z těch, kdo projeví zájem, vyberete.'}
         </p>
       </div>
 
@@ -255,7 +279,7 @@ export default function NovaPoptavkaPage() {
           {state === 'loading' ? (
             <><Loader2 className="h-4 w-4 animate-spin" /> Odesílám…</>
           ) : (
-            <><Send className="h-4 w-4" /> Odeslat poptávku</>
+            <><Send className="h-4 w-4" /> {renewId ? 'Obnovit poptávku' : 'Odeslat poptávku'}</>
           )}
         </button>
 

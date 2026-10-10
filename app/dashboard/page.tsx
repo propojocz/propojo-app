@@ -219,7 +219,7 @@ export default async function DashboardPage() {
                 {recentOrders.map((o: any) => (
                   <Link key={o.id} href={`/dashboard/objednavky/${o.id}`} className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-slate-50">
                     <div className="flex-1 min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-800">{o.services?.title ?? 'Neznámá služba'}</p>
+                      <p className="truncate text-sm font-semibold text-slate-800">{o.services?.title ?? 'Zakázka z poptávky'}</p>
                       <p className="text-xs text-slate-400">{o.profiles?.full_name ?? 'Zákazník'} · {denKratce(o.created_at)}</p>
                     </div>
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${bookingStatusBadge(o)?.cls ?? statusColors[o.status] ?? 'bg-slate-100 text-slate-500'}`}>{bookingStatusBadge(o)?.label ?? statusLabels[o.status] ?? o.status}</span>
@@ -337,7 +337,7 @@ export default async function DashboardPage() {
             {myOrders.map((o: any) => (
               <Link key={o.id} href={`/dashboard/objednavky/${o.id}`} className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-slate-50">
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-slate-900">{o.services?.title ?? 'Neznámá služba'}</p>
+                  <p className="font-semibold text-slate-900">{o.services?.title ?? 'Zakázka z poptávky'}</p>
                   <p className="text-sm text-slate-500">
                     {o.provider_id
                       ? <ProfileNameLink id={o.provider_id}>{o.profiles?.full_name ?? 'Živnostník'}</ProfileNameLink>

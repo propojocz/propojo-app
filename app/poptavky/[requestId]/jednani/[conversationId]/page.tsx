@@ -12,6 +12,8 @@ import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import PoptavkaChat, { type ThreadItem } from '@/components/ui/PoptavkaChat'
 import { offerSummary } from '@/lib/booking/texts'
+import { markThreadRead } from '@/lib/actions/inbox'
+import { haversineKm } from '@/lib/geo'
 
 export const dynamic = 'force-dynamic'
 
@@ -55,10 +57,11 @@ export default async function JednaniPage({
 
   const { data: req } = await admin
     .from('requests')
-    .select('id, customer_id, category, city, description, preferred_date, photos, status')
+    .select('id, customer_id, category, city, city_lat, city_lng, description, preferred_date, photos, status')
     .eq('id', requestId)
     .maybeSingle() as { data: {
       id: string; customer_id: string | null; category: string | null; city: string
+      city_lat: number | null; city_lng: number | null
       description: string; preferred_date: string | null; photos: string[] | null; status: string
     } | null }
   if (!req) notFound()
@@ -68,6 +71,8 @@ export default async function JednaniPage({
   const isProvider = user.id === providerId
   const isCustomer = !!customerId && user.id === customerId
   if (!isProvider && !isCustomer) notFound()
+  // Otevřené jednání → jeho zprávy jsou přečtené (ikona zpráv v horní liště)
+  await markThreadRead({ conversationId })
 
   // Uzavřené / nevybrané konverzace jsou jen ke čtení.
   // Zamčeno jen když je konverzace zavřená (couvnutí) nebo už vznikla objednávka
@@ -151,9 +156,30 @@ export default async function JednaniPage({
     }).filter((t) => t.conversationId)
   }
 
+  // Vybrat jde poskytovatele s nabídkou (typ + částka); karta je nepovinná
+  const hasOffer = (rr.offer_kind === 'A' || rr.offer_kind === 'B') && !!rr.charge_halere
   const canSelect =
     isCustomer && conv.status === 'open' && !conv.order_id && req.status === 'open' &&
-    rr.status !== 'rejected' && !!rr.service_id
+    rr.status !== 'rejected' && hasOffer
+
+  // Vzdálenost obce poptávky od místa, odkud poskytovatel vyjíždí (karta, jinak obec z profilu)
+  let distanceKm: number | null = null
+  if (req.city_lat != null && req.city_lng != null) {
+    let base: { lat: number; lng: number } | null = null
+    if (rr.service_id) {
+      const { data: card } = await admin.from('services').select('city, city_lat, city_lng').eq('id', rr.service_id).maybeSingle() as { data: { city: string | null; city_lat: number | null; city_lng: number | null } | null }
+      if (card?.city_lat != null && card?.city_lng != null) base = { lat: Number(card.city_lat), lng: Number(card.city_lng) }
+    }
+    if (!base) {
+      const { data: prof } = await admin.from('profiles').select('city').eq('id', providerId).maybeSingle() as { data: { city: string | null } | null }
+      const name = String(prof?.city ?? '').split(',')[0].replace(/\s+\d+[a-zA-Z/\d]*$/, '').trim()
+      if (name) {
+        const { data: o } = await admin.from('obce').select('latitude, longitude').ilike('obec', name).limit(1).maybeSingle() as { data: { latitude: number; longitude: number } | null }
+        if (o) base = { lat: o.latitude, lng: o.longitude }
+      }
+    }
+    if (base) distanceKm = Math.round(haversineKm(base.lat, base.lng, Number(req.city_lat), Number(req.city_lng)))
+  }
 
   return (
     <PoptavkaChat
@@ -164,12 +190,13 @@ export default async function JednaniPage({
       readOnly={readOnly}
       orderId={conv.order_id}
       canSelect={canSelect}
-      hasServiceForOrder={!!rr.service_id}
+      hasServiceForOrder={hasOffer}
       offerKind={rr.offer_kind === 'A' || rr.offer_kind === 'B' ? rr.offer_kind : null}
       offerText={(rr.offer_kind === 'A' || rr.offer_kind === 'B') && rr.charge_halere
         ? offerSummary(rr.offer_kind, rr.charge_halere / 100, rr.quote_fee_deductible === true)
         : null}
       otherName={otherName}
+      distanceKm={distanceKm}
       request={{
         heading: req.category ?? 'Poptávka',
         category: req.category,

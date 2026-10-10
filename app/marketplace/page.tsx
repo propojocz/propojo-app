@@ -8,6 +8,8 @@
 // Karty jsou kompaktní (viz ServiceCard), takže se do jedné obrazovky vejde
 // šestkrát víc nabídek než dřív a člověk nemusí donekonečna rolovat.
 
+import { expandSearch, relevanceScore, searchPlan } from '@/lib/search'
+import { accountBlocks } from '@/lib/booking/rules'
 import { Suspense } from 'react'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
@@ -132,7 +134,20 @@ async function ServiceList({
     }
   }
 
+  // Chytřejší hledání (část B): bez diakritiky, kořen slova a příbuzná slova (lib/search.ts +
+  // DB funkce search_service_ids). Když funkce v DB ještě není (SQL nespuštěné), hledá se postaru.
+  let smartIds: string[] | null = null
   if (q) {
+    const patterns = expandSearch(q)
+    const { data: ids, error: rpcErr } = await supabase.rpc('search_service_ids' as any, { patterns } as any)
+    if (!rpcErr && Array.isArray(ids)) {
+      smartIds = (ids as any[]).map((x) => (typeof x === 'string' ? x : (x?.search_service_ids ?? x?.id))).filter(Boolean)
+    }
+  }
+
+  if (q && smartIds) {
+    query = query.in('id', smartIds.length > 0 ? smartIds : ['00000000-0000-0000-0000-000000000000'])
+  } else if (q) {
     // Hledáme kartu podle: názvu karty, popisu, názvu podkategorie A názvu ÚKONU.
     const [subcatServiceIds, itemServiceIds] = await Promise.all([
       serviceIdsBySubcatText(q),
@@ -159,6 +174,7 @@ async function ServiceList({
   )
 
   const activeSubscribers = new Set<string>()
+  const acceptsOnline = new Set<string>()
   if (candidateProviderIds.length > 0) {
     // POZOR: číst přes SERVICE ROLE (subscriptions má RLS „každý vidí jen svoje").
     const adminDb = createAdminClient(
@@ -171,6 +187,22 @@ async function ServiceList({
       .in('user_id', candidateProviderIds)
       .in('status', ['active', 'trialing'])
     for (const row of (subs ?? []) as any[]) activeSubscribers.add(row.user_id)
+
+    // Model v2: rezervovat s platbou jde jen u poskytovatele s funkčním Standard účtem.
+    const { data: accs } = await adminDb
+      .from('stripe_accounts')
+      .select('provider_id, stripe_account_id, account_type, charges_enabled, card_payments, deauthorized_at')
+      .in('provider_id', candidateProviderIds)
+    for (const a of (accs ?? []) as any[]) {
+      const blocks = accountBlocks({
+        accountId: a.stripe_account_id ?? null,
+        accountType: a.account_type ?? null,
+        deauthorizedAt: a.deauthorized_at ? new Date(a.deauthorized_at) : null,
+        chargesEnabled: a.charges_enabled === true,
+        cardPayments: a.card_payments ?? null,
+      })
+      if (blocks.length === 0) acceptsOnline.add(a.provider_id)
+    }
   }
 
   // ── HODNOCENÍ POČÍTÁME ŽIVĚ Z RECENZÍ ─────────────────────────────────
@@ -288,6 +320,22 @@ async function ServiceList({
       if (mp == null) return false
       return mp >= lo && mp <= hi
     })
+  }
+
+  // Hledání: nejrelevantnější karty dopředu (název/obor/ceník > popis, správná kategorie).
+  // Jen u výchozího řazení – když si zákazník zvolí cenu nebo hodnocení, platí jeho volba.
+  if (q && smartIds && (!sort || sort === 'volno')) {
+    const plan = searchPlan(q)
+    const score = new Map<string, number>()
+    for (const s of sorted) {
+      const items = (itemsByService[s.id] ?? []).map((i) => i.name).join(' ')
+      score.set(s.id, relevanceScore(plan, {
+        strong: [s.title, (s as any).subtitle, s.category, items].filter(Boolean).join(' '),
+        weak: (s as any).description ?? '',
+        category: s.category ?? null,
+      }))
+    }
+    sorted = [...sorted].sort((a, b) => (score.get(b.id) ?? 0) - (score.get(a.id) ?? 0))
   }
 
   // Řazení
@@ -472,6 +520,7 @@ async function ServiceList({
               itemCount={itemCountOf(service.id)}
               gallery={(service as any).gallery ?? []}
               priceItems={priceItemsOf(service.id)}
+              acceptsOnline={acceptsOnline.has(pid)}
             />
           )
         })}

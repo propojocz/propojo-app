@@ -219,8 +219,42 @@ Nerozbíjet současnou aplikaci najednou. U každé významné změny nejdřív 
 
 Parametry k potvrzení (v `lib/booking/policy.ts`): předstih rezervace 60 min, max. nepřesnost polohy 200 m, připomínka 24 h před koncem lhůty, DPH 0, dokud se neuplatní.
 
-## 20. Stav právního potvrzení (k 30. 9. 2026)
-Podklad se 14 body byl odeslán právničce, odpověď zatím nepřišla.
+## 20. Stav právního potvrzení (k 30. 9. 2026, doplněno 10. 10. 2026)
+Podklad se 14 body byl odeslán právničce 25. 9. 2026.
+
+### Stanovisko AK 8.–9. 10. 2026 (`Propojo_body_k_potvrzeni_VOP4_stanovisko_AK_261009.docx`)
+Body 1–14 potvrzené, většinou „upravit takto“ (upřesnění textu VOP, ne změna modelu). Změny se zapracují do VOP 4.1;
+podklad pro to včetně změn po 25. 9., které AK neviděla: `docs/podklad-vop-4.1-2026-10-10.md`.
+
+Dopady na kód (mimo samotný text VOP):
+- Hned (rozpor s tím, co je postavené):
+  - přesnou adresu (a kontakt) Zákazníka vidí Poskytovatel až po potvrzení Rezervace (`booking_state = confirmed`), do té doby obec + vzdálenost (bod 8). Dnes se ukazuje od `status != cekajici`, tedy už při čekání na potvrzení;
+  - shrnutí před platbou: lhůta k potvrzení celá („do 48 h, nejpozději 2 h před začátkem“), dnes jen „nejpozději 2 h před začátkem“ (bod 3, čl. 7.8);
+  - o neúspěšném capture dostanou oznámení obě strany (bod 3) – ověřit, že i Poskytovatel.
+- Vrstva 4 (refundy):
+  - katalog pokynu: a) zrušení Poskytovatelem, b) „nemohu dodržet“ + odmítnutí/nečinnost, c) uznané/nerozporované nedostavení, d) zrušení Zákazníkem v hranicích §8, e) capture ve Stripe po uplynutí lhůty k potvrzení (smlouva nevzniká → refund), f) nepředaná Závazná nabídka (pokud zavedeme);
+  - souhlas = samostatné pole + uložené znění, verze podmínek, verze katalogu a čas; rozšíření katalogu = nový výslovný souhlas;
+  - v textu souhlasu: u d) nese Poskytovatel refund celé částky i ztrátu poplatku Stripe a provize;
+  - refund zadat bez zbytečného odkladu; selže-li, oznámit Zákazníkovi i Poskytovateli;
+  - ověřit v Test mode refund direct charge z platformy přes API u Standard účtu;
+  - capture v Dashboardu: jiná/částečná částka je porušení – detekovat (`amount_received` ≠ blokovaná částka), zapsat a upozornit; capture po lhůtě → případ e);
+  - potvrzení Rezervace e-mailem (čl. 8.3) i při capture ve Stripe a při automatickém potvrzení.
+- Odstoupení (čl. 9.1): samostatná funkce dostupná celých 14 dní i po předání nabídky; „Zrušit rezervaci“ nesmí být jediná cesta. Zbytky starých storno úrovní z webu a UI odstranit (`/storno`, texty).
+- Vrstva 5 (no-show, check-in):
+  - 72 h běží od odeslání výzvy, připomínka před koncem;
+  - rozporuje-li Poskytovatel, upozornit Zákazníka, že nárok uplatní přímo u něj;
+  - souřadnice a přesnost check-inu smazat po termín + 48 h + 72 h + ~30 dní, trvale jen výsledek (platný/neplatný, čas, vzdálenost zaokrouhlená na 10 m); při rozporovaném hlášení uchovat se záznamem;
+  - informační věta s odkazem na Zásady u check-inu (Poskytovatel) a u hlášení nedostavení (Zákazník).
+- Změna termínu: připomínka v polovině lhůty (u krátkých hodinu před koncem). „Navrhnout alternativní termín“ nic nemění, Poskytovatel zůstává vázán původním termínem.
+- Vrstva 6 (Model B): plný paušál za marný výjezd / zákazník nezastižen jen u termínů mimo 14denní lhůtu; jinak bez automatiky.
+- Vrstva 7 (Model C): lhůta pro Závaznou nabídku = povinný údaj Nabídky, výchozí 5, max. 10 pracovních dní, konec přiměřeně před termínem zhotovení. Volitelně proces „nabídku jsem neobdržel“ (výzva, 72 h, nečinnost → refund).
+- Vrstva 8 (řazení, Trust Ramp): spolehlivost jen z objektivních událostí (rozporované hlášení samo pořadí nesnižuje); omezení distribuce jako sankce oznámit a odůvodnit na trvalém nosiči; u ukončení 30 dní.
+- Vrstva 9 (hodnocení): u hodnocení vysvětlit, co se ověřuje (potvrzená rezervace) a co ne (že plnění proběhlo); nikde „ověřené zkušenosti zákazníků“ apod.; ponechat časový odstup po termínu; systémový štítek „zákazník hlásí nedostavení“ v první verzi ne.
+- Povinnost udržovat Stripe účet funkční trvá do konce poslední lhůty, ve které může nastat automatický refund.
+- DAC7: evidovat i provize po čtvrtletích a poskytovatelích od prvního dne (`commission_ledger`).
+- P2B čl. 9: Poskytovatel vidí své check-iny, hlášení a reakce.
+- Změna parametrů v `lib/booking/policy.ts`, které jsou v příloze „Technická pravidla Platformy“, = změna podmínek (15 dní předem poskytovatelům, 30 dní zákazníkům).
+
 Pravidlo pro vývoj:
 - CONFIRMED = implementovat natvrdo.
 - OPEN – LEGAL = implementovat, ale lhůty, částky a hranice držet jako parametry (`lib/booking/policy.ts`) a automatické pohyby peněz nechat vypínatelné. Po odpovědi právničky se mění parametry, ne architektura.
@@ -282,3 +316,78 @@ Pracovní směr níže zůstává jen jako výchozí bod pro budoucí návrh.
 - Otevřené: postup u již captured původní rezervace; druhá application fee vs. výjimka z pravidla, že provize původní Rezervace při provider cancellation zůstává.
 - Stará handoff logika v kódu se nepoužívá a neobnovuje.
 - Po odpovědi právničky: aktualizovat tento bod a bod 14 OPEN – LEGAL, doplnit stavový model, rozepsat scénáře HANDOFF-* (`docs/bulletproof/SCENARIOS.md`), teprve potom implementační plán.
+
+## 21. Registr rozhodnutí po stanovisku AK (10. 10. 2026)
+Stavy: LOCKED FOR MVP = platí, implementovat; ACCOUNTANT_PENDING = potvrdí účetní / daňový poradce;
+LEGAL_REVIEW_NEEDED = nová věc, kterou uvidí právnička při finální revizi (sami ji nezamykáme).
+
+### Pracovní princip (Matej, 10. 10. 2026)
+Právnička nastavila mantinely, uvnitř nich produkt dokončíme a vše nové transparentně zapíšeme do dokumentů.
+Při finální revizi uvidí hotový systém. Žádná další kola otázek kvůli detailům.
+- **Bez nového právního kola** jde zapracovat detail, který jen technicky konkretizuje potvrzený princip:
+  - názvy stavů a polí, audit metadata, retry, webhook reconciliation, idempotence;
+  - konkrétní notifikace, layout UI, interní bezpečnost, přesnější popis potvrzeného procesu;
+  - další ochranný mechanismus, který nezhoršuje postavení zákazníka ani poskytovatele.
+
+  Takovou změnu zapsat do dokumentů tam, kde je relevantní.
+- **LEGAL_REVIEW_NEEDED** (nezamykat, jen zvýraznit) je každá věc, která:
+  - vytváří nový pohyb peněz nebo nový automatický refund trigger;
+  - mění okamžik vzniku smlouvy nebo odpovědnost Propojo / poskytovatele / zákazníka;
+  - přidává nový typ smlouvy nebo omezuje práva spotřebitele;
+  - přidává nové nakládání s osobními údaji s významným dopadem;
+  - mění řazení nebo sankce tak, že to může být omezení podle P2B;
+  - mění role Stripe a platebních stran, nebo přibližuje Propojo k rozhodování sporů.
+- VOP: pracuje se jen z VOP 4.1 (poslední verze určená AK), zachovat její strukturu, pojmy a odkazy, změny v režimu sledování změn. Žádná „VOP 5“. Pracovní technické dokumenty nejsou nadřazené VOP 4.1 + stanovisku AK.
+
+### VAT-001 – DPH na startu · LOCKED FOR MVP
+- Propojo s.r.o. je na startu MVP plánováno jako **neplátce DPH**.
+- Provize se uvádí **bez dovětku o DPH** („bez DPH“, „+ DPH“ ani „včetně DPH“ neuvádět): 10 % z Rezervačního poplatku nebo Ceny výjezdu, min. 29 Kč, max. 89 Kč, + 2 % z části nad 3 000 Kč.
+- Application fee = skutečná částka provize, bez připočtení DPH. Příklady: 200 Kč → 29 Kč, 590 Kč → 59 Kč, 1 500 Kč → 89 Kč.
+- Kód: `BOOKING_POLICY.commission.vatRateBps = 0`. Přechod na plátce = nová verze policy se sazbou. Provize už dnes ukládá základ, DPH a celkem odděleně (`orders.commission_base_halere` / `commission_vat_halere` / `application_fee_halere` / `vat_rate_bps`, `commission_ledger.base_halere` / `vat_halere` / `fee_halere`), takže platební logika se přepisovat nebude. Plný VAT engine se teď nestaví.
+- ACCOUNTANT_PENDING:
+  - potvrzení daňového statusu před spuštěním;
+  - zda a kdy vznikne režim identifikované osoby;
+  - účetní provedení application fee;
+  - náležitosti a lhůta měsíčního souhrnného dokladu;
+  - DAC7 evidence provizí;
+  - sledování obratu pro budoucí plátcovství (FIN-VAT-001).
+
+### REF-OFFER-001 – nepředaná Závazná nabídka · LOCKED FOR MVP
+Platí pro **Model C** a pro **Model A tam, kde má poskytovatel povinnost předat Závaznou nabídku v textové podobě**.
+U Modelu A je to údaj Nabídky, ne všechny služby; navrhnout v plánu vrstvy 7. Stejný princip jako no-show (§7).
+
+1. **Lhůta k předání:** z konkrétní Rezervace / Nabídky, ne globálně. Údaj Nabídky, výchozí 5 a nejvýš 10 pracovních dní (parametr). Končí přiměřenou dobu před termínem zhotovení (parametr, TECH_PENDING).
+2. **„Závazná nabídka předána“:** poskytovatel ji označí; ukládá se objednávka, poskytovatel, čas, aktér a zdroj (+ audit v `order_events`).
+   Jen evidence: neznamená, že Propojo obsah ověřilo, že ho zákazník přijal, že vznikla Hlavní smlouva, ani žádný pohyb peněz.
+3. **Po marném uplynutí lhůty:** nic automaticky. Zákazník dostane možnost **„Nabídku jsem neobdržel“**; teprve jeho kliknutí založí hlášení (jeden aktivní případ na objednávku). Hlášení před uplynutím lhůty nejde.
+4. **Výzva poskytovateli:** v aplikaci, e-mailem (případně push), připomínka před koncem lhůty. **72 h od odeslání výzvy zaznamenaného systémem.**
+5. **Výsledky:**
+   - uzná → plný refund podle pokynu;
+   - rozporuje (i tím, že po hlášení označí nabídku jako předanou) → **stop automatiky**, zákazník dostane informaci, že nárok řeší přímo s poskytovatelem; Propojo nerozhoduje;
+   - nereaguje 72 h → plný refund podle pokynu.
+6. Provize vznikla capturem a při refundu se nevrací; poskytovatel nese plný refund, provizi i náklady Stripe.
+7. GDPR: hlášení, reakce, systémové časy a spouštěč refundu – stejný režim jako no-show (3 roky od události, §20 / bod 13 AK).
+
+### Katalog automatických refundů (pokyn poskytovatele) · LOCKED FOR MVP
+Pokyn poskytovatele musí katalog obsahovat **už od první ostré verze**. Rozšíření = nová verze pokynu + nový výslovný souhlas.
+Žádný otevřený souhlas typu „s refundy, které Propojo zavede“. Rozsah spouštěčů nesmí být širší, než je zde.
+
+| ID | spouštěč |
+|---|---|
+| AUTOREF-001 | Poskytovatel zruší Rezervaci |
+| AUTOREF-002 | „Původní termín nemohu dodržet“ + zákazník nový termín odmítne nebo návrh expiruje |
+| AUTOREF-003 | Nedostavení poskytovatele: souhlasí / nereaguje ve lhůtě (rozporuje = stop) |
+| AUTOREF-004 | Zrušení zákazníkem v objektivních hranicích §8 |
+| AUTOREF-005 | Capture provedený po uplynutí lhůty k potvrzení (Rezervační smlouva nevznikla) |
+| AUTOREF-006 | Nepředaná Závazná nabídka: hlášení zákazníka + poskytovatel uzná nebo 72 h nereaguje |
+
+- **Souhlas při onboardingu** (samostatné zaškrtávací pole, formulované jako příkaz poskytovatele, aby Propojo jeho jménem zadalo Stripe plný refund v těchto případech) ukládá:
+  - poskytovatele;
+  - verzi pokynu;
+  - text nebo jeho hash;
+  - verzi katalogu;
+  - verzi podmínek;
+  - čas souhlasu.
+- **Stavy refundu:** zadáno → čeká → vráceno / selhalo (podle webhooků `refund.*`, nikdy podle samotného API volání).
+  - UI rozlišuje „Vrácení částky bylo zahájeno.“ a „Částka byla vrácena.“
+  - Selže-li refund: oznámit oběma stranám; povinnost vrátit částku zůstává poskytovateli.

@@ -60,6 +60,8 @@ interface ServiceCardProps {
   gallery?: string[]
   /** Pár úkonů z ceníku — ukážou se místo fotky, když karta žádnou nemá. */
   priceItems?: CardPriceItem[]
+  /** Poskytovatel má funkční Stripe účet (model v2) – jinak „Zatím nepřijímá online rezervace“ */
+  acceptsOnline?: boolean
 }
 
 const DEFAULT_META = { label: 'Služba', emoji: '🔧' }
@@ -91,6 +93,7 @@ export default function ServiceCard({
   service, index = 0, categoryName, subcatNames = [], hasFreeSlot = false,
   nextFreeSlot = null, freeSlots = [], isFavorited = false, isLoggedIn = false, preview = false,
   minItemPrice = null, minItemUnit = null, itemCount = 0, gallery = [], priceItems = [],
+  acceptsOnline = true,
 }: ServiceCardProps) {
   const meta = (CATEGORY_META as Record<string, { label: string; emoji: string }>)[service.category] ?? DEFAULT_META
   const p = service.profiles as any
@@ -133,10 +136,11 @@ export default function ServiceCard({
   }
 
   // ── Volné termíny ──────────────────────────────────────────
-  const terminy = freeSlots.length > 0
+  // Bez funkčního Stripe účtu se termín rezervovat nedá – volné termíny proto neukazujeme.
+  const terminy = !acceptsOnline ? [] : freeSlots.length > 0
     ? freeSlots
     : (nextFreeSlot ? [nextFreeSlot] : [])
-  const maVolno = terminy.length > 0 || hasFreeSlot
+  const maVolno = acceptsOnline && (terminy.length > 0 || hasFreeSlot)
   const dalsi = Math.max(0, terminy.length - 1)
 
   // Cena
@@ -337,6 +341,9 @@ export default function ServiceCard({
               <p className="text-[13px] font-bold leading-none text-slate-700">Cena dohodou</p>
               <p className="mt-0.5 text-[10.5px] text-slate-400">Podle rozsahu práce</p>
             </>
+          )}
+          {!acceptsOnline && (
+            <p className="mt-1 text-[10.5px] font-semibold leading-tight text-amber-700">Zatím nepřijímá online rezervace</p>
           )}
         </div>
 

@@ -74,7 +74,14 @@ export default async function PoptavkaDetailPage({
 
   // Karty poskytovatele (pro picker) — jen když je přihlášený a není to jeho poptávka.
   let myCards: PickerCard[] = []
+  // Reagovat smí jen poskytovatel (i bez karty) – zákazník jde na registraci poskytovatele
+  let isProvider = false
+  let myCity: string | null = null
   if (user && !isOwner) {
+    const { data: prof } = await admin
+      .from('profiles').select('is_provider, city').eq('id', user.id).maybeSingle() as { data: { is_provider: boolean | null; city: string | null } | null }
+    isProvider = prof?.is_provider === true
+    myCity = prof?.city ?? null
     const { data: cards } = await admin
       .from('services')
       .select('id, title, category, subcategory_id')
@@ -155,6 +162,8 @@ export default async function PoptavkaDetailPage({
                 initialConversationId={myConversationId}
                 myCards={myCards}
                 isLoggedIn={!!user}
+                isProvider={isProvider}
+                myCity={myCity}
                 block
               />
               <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-slate-400">

@@ -10,6 +10,7 @@
 // 3d (7. 10. 2026): odpověď = nabídka. Po výběru karty poskytovatel zvolí typ (služba /
 // výjezd a nacenění), částku placenou přes Propojo (min. 200 Kč), případně nezávazný
 // odhad ceny zakázky a zprávu. Zákazník nabídky porovná; po výběru se z nich platí.
+// 9. 10. 2026: reagovat jde i bez karty (obecná nabídka) – objednávka pak vznikne bez karty.
 
 import { useState } from 'react'
 import Link from 'next/link'
@@ -18,6 +19,7 @@ import { ChevronRight, Loader2, Check, X, Star, ArrowLeft } from 'lucide-react'
 import { expressInterest } from '@/lib/actions/requests'
 import { sendConversationMessage, sendPriceEstimate } from '@/lib/actions/conversation-chat'
 import { computeCommission } from '@/lib/booking/commission'
+import SearchAutocomplete from '@/components/ui/SearchAutocomplete'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
 
 export type PickerCard = {
@@ -33,13 +35,17 @@ type OfferInput = {
   quoteFeeDeductible: boolean
   estimateFrom: number | null
   estimateTo: number | null
+  /** Materiál v odhadu (nepovinné) */
+  estimateMaterial: 'with' | 'without' | null
   message: string
+  /** Bez karty: obec, odkud poskytovatel vyjíždí (uloží se do profilu) */
+  baseCity: string | null
 }
 
 export default function InterestAction({
   requestId, category, subcategoryId, isFull,
   initialMyStatus = null, initialConversationId = null,
-  myCards, isLoggedIn, block = false, onReacted,
+  myCards, isLoggedIn, isProvider = true, myCity = null, block = false, onReacted,
 }: {
   requestId: string
   category: string | null
@@ -49,6 +55,10 @@ export default function InterestAction({
   initialConversationId?: string | null
   myCards: PickerCard[]
   isLoggedIn: boolean
+  /** Reagovat smí jen poskytovatel; zákazník jde na registraci poskytovatele */
+  isProvider?: boolean
+  /** Obec z profilu – předvyplní „Odkud vyjíždíte“ u nabídky bez karty */
+  myCity?: string | null
   block?: boolean
   onReacted?: (conversationId: string | null) => void
 }) {
@@ -59,17 +69,17 @@ export default function InterestAction({
   const [pickerOpen, setPickerOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const react = async (cardId: string, offer: OfferInput): Promise<string | null> => {
+  const react = async (cardId: string | null, offer: OfferInput): Promise<string | null> => {
     setBusy(true)
     setError(null)
-    const res = await expressInterest(requestId, cardId, { offerKind: offer.offerKind, chargeKc: offer.chargeKc, quoteFeeDeductible: offer.quoteFeeDeductible })
+    const res = await expressInterest(requestId, cardId, { offerKind: offer.offerKind, chargeKc: offer.chargeKc, quoteFeeDeductible: offer.quoteFeeDeductible }, offer.baseCity)
     if (!res.success) {
       setBusy(false)
       return res.error
     }
     // Odhad ceny a zpráva jdou do chatu jednání (zákazník je uvidí i v přehledu zájemců).
     if (res.conversationId) {
-      if (offer.estimateFrom) await sendPriceEstimate(res.conversationId, offer.estimateFrom, offer.estimateTo)
+      if (offer.estimateFrom) await sendPriceEstimate(res.conversationId, offer.estimateFrom, offer.estimateTo, offer.estimateMaterial)
       if (offer.message.trim()) await sendConversationMessage(res.conversationId, offer.message.trim())
     }
     setBusy(false)
@@ -83,7 +93,7 @@ export default function InterestAction({
 
   const onInterest = () => {
     if (!isLoggedIn) { router.push(`/prihlasit?next=/poptavky/${requestId}`); return }
-    if (myCards.length === 0) { router.push('/pridat-sluzbu'); return }
+    if (!isProvider) { router.push('/pridat-sluzbu'); return }
     // Vždy vědomý výběr — i u jediné karty. Tiché dosazení dřív vedlo k tomu, že
     // se do reakce (a pak do objednávky) dostala karta, co s poptávkou nesouvisí.
     setError(null)
@@ -137,6 +147,7 @@ export default function InterestAction({
           category={category}
           subcategoryId={subcategoryId}
           cards={myCards}
+          myCity={myCity}
           busy={busy}
           editing={reacted}
           onSubmit={react}
@@ -147,31 +158,39 @@ export default function InterestAction({
   )
 }
 
+const NO_CARD = '__bez_karty__'
+
 function OfferPicker({
-  category, subcategoryId, cards, busy, editing, onSubmit, onClose,
+  category, subcategoryId, cards, myCity, busy, editing, onSubmit, onClose,
 }: {
   category: string | null
   subcategoryId: string | null
   cards: PickerCard[]
+  myCity: string | null
   busy: boolean
   editing: boolean
-  onSubmit: (cardId: string, offer: OfferInput) => Promise<string | null>
+  onSubmit: (cardId: string | null, offer: OfferInput) => Promise<string | null>
   onClose: () => void
 }) {
-  const [cardId, setCardId] = useState<string | null>(cards.length === 1 ? cards[0].id : null)
+  // NO_CARD = obecná nabídka bez karty; null = ještě nevybráno
+  const [cardId, setCardId] = useState<string | null>(cards.length === 0 ? NO_CARD : null)
   const [kind, setKind] = useState<'A' | 'B' | null>(null)
   const [charge, setCharge] = useState('')
   const [deductible, setDeductible] = useState(false)
   const [estFrom, setEstFrom] = useState('')
   const [estTo, setEstTo] = useState('')
+  const [estMaterial, setEstMaterial] = useState<'with' | 'without' | null>(null)
   const [message, setMessage] = useState('')
+  const [baseCity, setBaseCity] = useState(myCity ?? '')
   const [err, setErr] = useState<string | null>(null)
 
   const isRecommended = (c: PickerCard) =>
     (!!subcategoryId && c.subcategoryId === subcategoryId) ||
     (!!category && !!c.category && c.category.toLowerCase() === category.toLowerCase())
   const ordered = [...cards].sort((a, b) => Number(isRecommended(b)) - Number(isRecommended(a)))
-  const card = cards.find((c) => c.id === cardId) ?? null
+  const card = cardId === NO_CARD
+    ? { id: NO_CARD, title: 'Bez karty – obecná nabídka', category: null, subcategoryId: null }
+    : cards.find((c) => c.id === cardId) ?? null
 
   const minKc = BOOKING_POLICY.minChargeHalere / 100
   const chargeNum = Number(charge)
@@ -182,6 +201,7 @@ function OfferPicker({
   const submit = async () => {
     setErr(null)
     if (!cardId) { setErr('Vyberte nabídku.'); return }
+    if (cardId === NO_CARD && !baseCity.trim()) { setErr('Vyberte obec, ze které vyjíždíte.'); return }
     if (!kind) { setErr('Vyberte, jestli jde o službu, nebo výjezd a nacenění.'); return }
     if (!Number.isInteger(chargeNum) || chargeNum < minKc) { setErr(`Částka musí být celé číslo, nejméně ${minKc} Kč.`); return }
     const from = estFrom.trim() ? Math.round(Number(estFrom)) : null
@@ -193,7 +213,7 @@ function OfferPicker({
       setErr(`Odhad ceny zakázky nemůže být nižší než ${chargeNum.toLocaleString('cs-CZ')} Kč – ${kind === 'A' ? 'Rezervační poplatek' : 'Cena výjezdu'} se z ní odečítá.`)
       return
     }
-    const e = await onSubmit(cardId, { offerKind: kind, chargeKc: chargeNum, quoteFeeDeductible: kind === 'B' && deductible, estimateFrom: from, estimateTo: to, message })
+    const e = await onSubmit(cardId === NO_CARD ? null : cardId, { offerKind: kind, chargeKc: chargeNum, quoteFeeDeductible: kind === 'B' && deductible, estimateFrom: from, estimateTo: to, estimateMaterial: from != null ? estMaterial : null, message, baseCity: cardId === NO_CARD ? baseCity.trim() : null })
     if (e) setErr(e)
   }
 
@@ -222,9 +242,20 @@ function OfferPicker({
         {!card ? (
           <>
             <p className="mb-3 text-xs text-slate-500">
-              Vyberte kartu, která poptávce odpovídá. Zákazník ji uvidí u vaší nabídky.
+              Vyberte kartu, která poptávce odpovídá, nebo reagujte bez karty. Zákazník kartu uvidí u vaší nabídky.
             </p>
-            {!ordered.some(isRecommended) && (
+            <button
+              onClick={() => setCardId(NO_CARD)}
+              disabled={busy}
+              className="mb-3 flex w-full items-center justify-between gap-3 rounded-xl border-2 border-dashed border-slate-300 px-4 py-3 text-left transition hover:bg-slate-50 disabled:opacity-60"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-slate-900">Bez karty – obecná nabídka</p>
+                <p className="text-xs text-slate-500">Zákazník uvidí vaše jméno a profil, částku nastavíte v dalším kroku</p>
+              </div>
+              <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+            </button>
+            {cards.length > 0 && !ordered.some(isRecommended) && (
               <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-[11.5px] leading-relaxed text-amber-700">
                 Žádná vaše nabídka oborem přesně nesedí k této poptávce. Reagovat můžete,
                 ale ověřte, že vybraná nabídka dává smysl — zákazník ji uvidí.
@@ -260,10 +291,26 @@ function OfferPicker({
           </>
         ) : (
           <div className="space-y-3">
-            {cards.length > 1 && (
+            {cards.length > 0 && (
               <button type="button" onClick={() => setCardId(null)} className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-700">
                 <ArrowLeft className="h-3.5 w-3.5" /> {card.title}
               </button>
+            )}
+
+            {cardId === NO_CARD && (
+              <div>
+                <p className="mb-1 text-xs font-semibold text-slate-600">Odkud vyjíždíte (obec) *</p>
+                <SearchAutocomplete
+                  mode="obce"
+                  defaultValue={myCity ?? ''}
+                  placeholder="Začněte psát a vyberte obec…"
+                  onPickObec={(o) => { setBaseCity(o.obec); setErr(null) }}
+                  onFreeText={(t) => setBaseCity(t)}
+                />
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                  Podle ní zákazník uvidí vzdálenost a pozná se, když bude adresa daleko. Uloží se do vašeho profilu.
+                </p>
+              </div>
             )}
 
             <div>
@@ -310,6 +357,20 @@ function OfferPicker({
                   className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-emerald-400" />
                 <input type="number" min={1} value={estTo} onChange={(e) => setEstTo(e.target.value)} placeholder="do (Kč)"
                   className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-emerald-400" />
+              </div>
+              <div className="mt-2 flex gap-1.5">
+                {([['with', 'včetně materiálu'], ['without', 'bez materiálu']] as const).map(([v, label]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setEstMaterial(estMaterial === v ? null : v)}
+                    className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition ${
+                      estMaterial === v ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
 

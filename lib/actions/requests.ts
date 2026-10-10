@@ -145,6 +145,8 @@ export async function expressInterest(
   serviceId?: string | null,
   /** Typ a částka placená přes Propojo – povinné u nové odpovědi, u existující ji upraví */
   offer?: ResponseOffer | null,
+  /** Bez karty: obec, odkud poskytovatel vyjíždí (jinak se vezme z profilu) */
+  baseCity?: string | null,
 ): Promise<InterestResult> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -155,11 +157,26 @@ export async function expressInterest(
   // Poskytovatel? (jen poskytovatel může reagovat)
   const { data: profile } = await admin
     .from('profiles')
-    .select('is_provider')
+    .select('is_provider, city')
     .eq('id', user.id)
-    .single() as { data: { is_provider: boolean } | null }
+    .single() as { data: { is_provider: boolean; city: string | null } | null }
   if (!profile?.is_provider) {
     return { success: false, error: 'Reagovat na poptávky mohou jen poskytovatelé.' }
+  }
+  // Bez karty (obecná nabídka) musí být známo, odkud poskytovatel vyjíždí – kvůli vzdálenosti
+  // a automatickému potvrzení (10. 10. 2026). Obec z profilu se musí najít v seznamu obcí.
+  if (!serviceId && offer) {
+    const obec = String(baseCity?.trim() || profile.city || '').split(',')[0].replace(/\s+\d+[a-zA-Z/\d]*$/, '').trim()
+    const { data: found } = obec
+      ? await admin.from('obce').select('obec').ilike('obec', obec).limit(1).maybeSingle() as { data: { obec: string } | null }
+      : { data: null }
+    if (!found) {
+      return { success: false, error: 'Vyberte ze seznamu obec, ze které vyjíždíte.' }
+    }
+    // Nová obec z formuláře → do profilu (odtud se počítá vzdálenost)
+    if (baseCity?.trim() && found.obec !== profile.city) {
+      await (admin.from('profiles') as any).update({ city: found.obec }).eq('id', user.id)
+    }
   }
 
   // Poptávka musí existovat, být otevřená, nevypršelá a ne vlastní.
@@ -192,7 +209,7 @@ export async function expressInterest(
     if (offer && (ACTIVE_STATUSES as readonly string[]).includes(existing.status)) {
       if (!offerCheck.ok) return { success: false, error: offerCheck.error }
       await (admin.from('request_responses') as any)
-        .update({ offer_kind: offerCheck.kind, charge_halere: offerCheck.halere, quote_fee_deductible: offerCheck.deductible, ...(serviceId ? { service_id: serviceId } : {}), updated_at: new Date().toISOString() })
+        .update({ offer_kind: offerCheck.kind, charge_halere: offerCheck.halere, quote_fee_deductible: offerCheck.deductible, service_id: serviceId ?? null, updated_at: new Date().toISOString() })
         .eq('id', existing.id)
     }
     // Aktivní = beze změny (idempotentní). Dřív odmítnutý zájem znovu otevřeme.
@@ -305,142 +322,10 @@ export async function withdrawInterest(responseId: string): Promise<ActionResult
   return { success: true, id: responseId }
 }
 
-// ── Výběr poskytovatele → vznik objednávky ───────────────────
-// Zákazník zvolí jednu reakci. Vznikne skutečná objednávka (stejný tvar jako
-// zacniDotaz — status 'cekajici', bez termínu a platby), na její konverzaci se
-// doplní order_id a stejně tak na její dosavadní zprávy, takže celá domluva se
-// objeví ve stávajícím order chatu. Ostatní reakce → 'not_selected', jejich
-// konverzace se zavřou. Od téhle chvíle běží existující order flow.
-export async function selectProvider(requestId: string, responseId: string): Promise<ActionResult> {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
-
-  const admin = getAdminClient()
-  const now = new Date().toISOString()
-
-  // Poptávka + vlastnictví. Anonymní poptávku (bez customer_id) zatím vybrat nelze
-  // — chyběl by přihlášený zákazník i cíl objednávky; řešilo by se odkazem s tokenem.
-  const { data: req } = await admin
-    .from('requests')
-    .select('id, customer_id, status, description, city')
-    .eq('id', requestId)
-    .single() as { data: { id: string; customer_id: string | null; status: string; description: string; city: string } | null }
-  if (!req) return { success: false, error: 'Poptávka nebyla nalezena.' }
-  if (!req.customer_id) {
-    return { success: false, error: 'Výběr poskytovatele u anonymní poptávky zatím není možný.' }
-  }
-  if (req.customer_id !== user.id) {
-    return { success: false, error: 'Tahle poptávka není vaše.' }
-  }
-  if (req.status !== 'open') {
-    return { success: false, error: 'U téhle poptávky už je rozhodnuto.' }
-  }
-
-  // Vybraná reakce musí patřit k poptávce, být ve hře a mít u sebe nabídku,
-  // ze které vznikne objednávka.
-  const { data: resp } = await admin
-    .from('request_responses')
-    .select('id, request_id, provider_id, service_id, status, offer_kind, charge_halere, quote_fee_deductible')
-    .eq('id', responseId)
-    .single() as { data: { id: string; request_id: string; provider_id: string; service_id: string | null; status: string; offer_kind: string | null; charge_halere: number | null; quote_fee_deductible: boolean | null } | null }
-  if (!resp || resp.request_id !== requestId) {
-    return { success: false, error: 'Reakce k této poptávce nepatří.' }
-  }
-  if (resp.status === 'rejected') {
-    return { success: false, error: 'Tento poskytovatel už není ve hře.' }
-  }
-  if (!resp.service_id) {
-    return { success: false, error: 'Poskytovatel u reakce nemá vybranou konkrétní nabídku.' }
-  }
-  // 3d: bez typu a částky placené přes Propojo by objednávka nešla zaplatit.
-  if ((resp.offer_kind !== 'A' && resp.offer_kind !== 'B') || !resp.charge_halere) {
-    return { success: false, error: 'Tento poskytovatel zatím neuvedl, kolik se platí přes Propojo. Napište mu v chatu, ať nabídku doplní.' }
-  }
-
-  // 1) Objednávka (stejný minimální tvar jako zacniDotaz, ale není to dotaz).
-  const { data: order, error: ordErr } = await (admin.from('orders') as any)
-    .insert({
-      service_id: resp.service_id,
-      provider_id: resp.provider_id,
-      customer_id: req.customer_id,
-      status: 'cekajici',
-      is_inquiry: false,
-      location_city: req.city ?? null,
-      description: req.description ?? null,
-      // Typ a částka z nabídky poskytovatele (3d) – objednávka se platí bez položky z ceníku.
-      offer_kind: resp.offer_kind,
-      agreed_charge_halere: resp.charge_halere,
-      quote_fee_deductible: resp.offer_kind === 'B' ? resp.quote_fee_deductible === true : null,
-    })
-    .select('id')
-    .single() as { data: { id: string } | null; error: any }
-  if (ordErr || !order) {
-    console.error('[selectProvider] order', ordErr)
-    return { success: false, error: 'Nepodařilo se vytvořit objednávku.' }
-  }
-  const orderId = order.id
-
-  // 2) Konverzaci vybrané reakce napojíme na objednávku a doplníme order_id i na
-  //    její dosavadní zprávy — tím je celá domluva vidět ve stávajícím order chatu.
-  const { data: conv } = await admin
-    .from('conversations')
-    .select('id')
-    .eq('request_response_id', responseId)
-    .maybeSingle() as { data: { id: string } | null }
-  if (conv) {
-    await (admin.from('conversations') as any).update({ order_id: orderId }).eq('id', conv.id)
-    await (admin.from('messages') as any)
-      .update({ order_id: orderId })
-      .eq('conversation_id', conv.id)
-      .is('order_id', null)
-    // Systémový předěl v historii — jasně odděluje „ještě vybírám" od „objednáno".
-    // Má i order_id, takže se ukáže i v timeline objednávky.
-    await (admin.from('messages') as any).insert({
-      conversation_id: conv.id,
-      order_id: orderId,
-      sender_id: user.id,
-      type: 'order_created',
-      content: 'Poskytovatel byl vybrán — vznikla objednávka. Nyní můžete potvrdit termín a pokračovat k realizaci.',
-    })
-  }
-
-  // 3) Stav poptávky a reakcí.
-  await (admin.from('requests') as any)
-    .update({ status: 'selected', selected_response_id: responseId, updated_at: now })
-    .eq('id', requestId)
-  await (admin.from('request_responses') as any)
-    .update({ status: 'selected', updated_at: now })
-    .eq('id', responseId)
-  // Ostatní, které byly ve hře, → not_selected (rejected necháváme být).
-  await (admin.from('request_responses') as any)
-    .update({ status: 'not_selected', updated_at: now })
-    .eq('request_id', requestId)
-    .neq('id', responseId)
-    .in('status', ACTIVE_STATUSES as unknown as string[])
-
-  // Konverzace nevybraných NECHÁVÁME OTEVŘENÉ — není důvod je zamykat; zákazník
-  // i poskytovatel do nich mohou dál nahlédnout. Vybraný pokračuje v objednávce.
-
-  // 5) Poskytovateli dát vědět (objednávka teď existuje, notifikace přes orderId).
-  try {
-    await createNotification({
-      userId: resp.provider_id,
-      type: 'status_change',
-      orderId,
-      actorId: user.id,
-      title: 'Zákazník vás vybral',
-      preview: req.description?.slice(0, 80) ?? null,
-    })
-  } catch (e) {
-    console.error('[selectProvider] notifikace', e)
-  }
-
-  revalidatePath('/poptavky')
-  revalidatePath('/dashboard/objednavky')
-  revalidatePath(`/dashboard/objednavky/${orderId}`)
-  return { success: true, id: orderId }
-}
+// ── Výběr poskytovatele ──────────────────────────────────────
+// 10. 10. 2026: vybrat poskytovatele bez termínu už nejde. Zákazník vybírá v chatu jednání
+// „Vybrat a rezervovat“ u navrženého termínu (selectProviderWithTerm v conversation-chat.ts)
+// a poptávka se ostatním uzavře až zaplacením (lib/booking/request-selection.ts).
 
 // ID konverzace patřící k reakci.
 async function conversationIdOf(admin: any, responseId: string): Promise<string | null> {
@@ -460,4 +345,155 @@ async function countActive(admin: any, requestId: string): Promise<number> {
     .eq('request_id', requestId)
     .in('status', ACTIVE_STATUSES as unknown as string[])
   return count ?? 0
+}
+
+// ── Obnovení poptávky (část B, 9. 10. 2026) ──────────────────
+// Zákazník může znovu otevřít poptávku, která vypršela, je uzavřená, nebo z ní vybraná
+// objednávka padla před zaplacením. Údaje jde změnit; poptávka se otevře na 14 dní a zájemci,
+// kteří dřív „nebyli vybráni“, se vrátí do hry (ten, se kterým to nevyšlo, ne).
+
+const RENEW_DAYS = 14
+
+export type RenewableRequest = {
+  id: string
+  category: string | null
+  description: string
+  city: string
+  cityLat: number | null
+  cityLng: number | null
+  preferredDate: string | null
+  phone: string | null
+  photos: string[]
+}
+
+/** Lze poptávku obnovit? (vypršela / uzavřená / objednávka padla před zaplacením) */
+async function renewCheck(admin: ReturnType<typeof getAdminClient>, req: any): Promise<{ ok: true } | { ok: false; error: string }> {
+  const expired = req.expires_at && new Date(req.expires_at).getTime() < Date.now()
+  if (req.status === 'open' && !expired) return { ok: false, error: 'Poptávka je pořád aktivní.' }
+  if (req.status === 'selected' && req.selected_response_id) {
+    const { data: conv } = await admin
+      .from('conversations').select('order_id').eq('request_response_id', req.selected_response_id).maybeSingle() as { data: { order_id: string | null } | null }
+    if (conv?.order_id) {
+      const { data: ord } = await admin
+        .from('orders').select('status, booking_state').eq('id', conv.order_id).maybeSingle() as { data: { status: string; booking_state: string | null } | null }
+      const failed = ord && ord.status === 'zruseno' && ord.booking_state !== 'confirmed'
+      if (!failed) return { ok: false, error: 'Z poptávky už je objednávka. Obnovit jde jen tehdy, když objednávka padla před zaplacením.' }
+    }
+  }
+  return { ok: true }
+}
+
+export async function getRequestForRenew(requestId: string): Promise<RenewableRequest | null> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+  const admin = getAdminClient()
+  const { data: req } = await admin
+    .from('requests')
+    .select('id, customer_id, status, expires_at, selected_response_id, category, description, city, city_lat, city_lng, preferred_date, phone, photos')
+    .eq('id', requestId)
+    .maybeSingle() as { data: any }
+  if (!req || req.customer_id !== user.id) return null
+  if (!(await renewCheck(admin, req)).ok) return null
+  return {
+    id: req.id,
+    category: req.category,
+    description: req.description,
+    city: req.city,
+    cityLat: req.city_lat ?? null,
+    cityLng: req.city_lng ?? null,
+    preferredDate: req.preferred_date ?? null,
+    phone: req.phone ?? null,
+    photos: req.photos ?? [],
+  }
+}
+
+export async function renewRequest(requestId: string, values: CreateRequestValues): Promise<ActionResult> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+
+  const parsed = createSchema.safeParse(values)
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: 'Formulář obsahuje chyby.',
+      fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]>,
+    }
+  }
+  const d = parsed.data
+  const admin = getAdminClient()
+
+  const { data: req } = await admin
+    .from('requests')
+    .select('id, customer_id, status, expires_at, selected_response_id, category')
+    .eq('id', requestId)
+    .maybeSingle() as { data: any }
+  if (!req || req.customer_id !== user.id) return { success: false, error: 'Poptávka nebyla nalezena.' }
+  const check = await renewCheck(admin, req)
+  if (!check.ok) return { success: false, error: check.error }
+
+  let cityLat = d.city_lat ?? null
+  let cityLng = d.city_lng ?? null
+  if (cityLat == null || cityLng == null) {
+    const { data: obec } = await admin
+      .from('obce').select('latitude, longitude').ilike('obec', d.city.trim()).limit(1).maybeSingle() as { data: { latitude: number; longitude: number } | null }
+    if (!obec) return { success: false, error: 'Vyberte prosím obec ze seznamu.' }
+    cityLat = obec.latitude
+    cityLng = obec.longitude
+  }
+
+  const now = new Date()
+  const { error } = await (admin.from('requests') as any)
+    .update({
+      category: d.category?.trim() || null,
+      subcategory_id: d.subcategory_id ?? null,
+      description: d.description.trim(),
+      photos: d.photos ?? [],
+      city: d.city.trim(),
+      city_lat: cityLat,
+      city_lng: cityLng,
+      preferred_date: d.preferred_date?.trim() || null,
+      needed_at: d.needed_at || null,
+      phone: d.phone?.trim() || null,
+      status: 'open',
+      selected_response_id: null,
+      expires_at: new Date(now.getTime() + RENEW_DAYS * 24 * 3600_000).toISOString(),
+      updated_at: now.toISOString(),
+    })
+    .eq('id', requestId)
+  if (error) {
+    console.error('[renewRequest]', error)
+    return { success: false, error: 'Poptávku se nepodařilo obnovit.' }
+  }
+
+  // Dřív nevybraní zájemci zpět do hry + oznámení; ten, se kterým to nevyšlo, zůstává mimo.
+  const { data: back } = await (admin.from('request_responses') as any)
+    .update({ status: 'interested', updated_at: now.toISOString() })
+    .eq('request_id', requestId)
+    .eq('status', 'not_selected')
+    .select('id, provider_id') as { data: Array<{ id: string; provider_id: string }> | null }
+  if (req.selected_response_id) {
+    await (admin.from('request_responses') as any)
+      .update({ status: 'not_selected', updated_at: now.toISOString() })
+      .eq('id', req.selected_response_id)
+  }
+  for (const r of back ?? []) {
+    try {
+      await createNotification({
+        userId: r.provider_id,
+        type: 'status_change',
+        actorId: user.id,
+        title: 'Poptávka je znovu aktivní',
+        preview: `${d.category?.trim() || 'Poptávka'} · ${d.city.trim()} – zákazník ji obnovil, můžete se znovu ozvat.`,
+        url: `/poptavky/${requestId}`,
+      })
+    } catch (e) {
+      console.error('[renewRequest] notifikace', e)
+    }
+  }
+
+  revalidatePath('/poptavky')
+  revalidatePath('/dashboard/poptavky')
+  return { success: true, id: requestId }
 }

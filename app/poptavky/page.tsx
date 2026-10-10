@@ -15,6 +15,9 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Link from 'next/link'
 import { Megaphone, Lock } from 'lucide-react'
 import PoptavkyBoard, { type BoardRequest, type ProviderCard } from '@/components/ui/PoptavkyBoard'
+import { haversineKm } from '@/lib/geo'
+import MojePoptavkyList from '@/components/ui/MojePoptavkyList'
+import { loadMyRequests } from '@/lib/my-requests'
 
 export const metadata = { title: 'Poptávky | Propojo' }
 export const dynamic = 'force-dynamic'
@@ -36,10 +39,16 @@ export default async function PoptavkyPage() {
   // Nástěnka visících poptávek je jen pro poskytovatele (= platící). Zákazník
   // poptávky nepotřebuje procházet — zadává je a spravuje v /dashboard/poptavky.
   let isProvider = false
+  let myCity: string | null = null
   if (user) {
     const { data: profile } = await admin
-      .from('profiles').select('is_provider').eq('id', user.id).maybeSingle() as { data: { is_provider: boolean } | null }
+      .from('profiles').select('is_provider, city').eq('id', user.id).maybeSingle() as { data: { is_provider: boolean; city: string | null } | null }
     isProvider = profile?.is_provider === true
+    myCity = profile?.city ?? null
+  }
+  // Přihlášený zákazník (ne poskytovatel) tu má své poptávky – aktivní i historii s „Obnovit“.
+  if (user && !isProvider) {
+    return <MojePoptavkyList items={await loadMyRequests(user.id)} showBoardHint />
   }
   if (!isProvider) {
     return <PoptavkyGate isLoggedIn={!!user} />
@@ -48,13 +57,13 @@ export default async function PoptavkyPage() {
   // Otevřené, nevypršelé poptávky.
   const { data: reqs } = await admin
     .from('requests')
-    .select('id, category, subcategory_id, city, description, preferred_date, photos, created_at')
+    .select('id, category, subcategory_id, city, city_lat, city_lng, description, preferred_date, photos, created_at')
     .eq('status', 'open')
     .gt('expires_at', new Date().toISOString())
     .order('created_at', { ascending: false })
     .limit(100) as { data: Array<{
       id: string; category: string | null; subcategory_id: string | null
-      city: string; description: string; preferred_date: string | null
+      city: string; city_lat: number | null; city_lng: number | null; description: string; preferred_date: string | null
       photos: string[] | null; created_at: string
     }> | null }
   const requests = reqs ?? []
@@ -75,19 +84,37 @@ export default async function PoptavkyPage() {
   const mySubcatSet = new Set<string>()
   const myCatSet = new Set<string>()
   const myCitySet = new Set<string>()
+  // Výchozí místa mých karet (souřadnice + dosah) – pro vzdálenost k poptávce
+  const myBases: Array<{ lat: number; lng: number; radiusKm: number | null }> = []
+  const obceCache = new Map<string, { lat: number; lng: number } | null>()
+  // Souřadnice obce podle názvu (text může mít i číslo domu, „Prostřední Bečva 14“)
+  const obecCoords = async (text: string | null | undefined) => {
+    const name = String(text ?? '').split(',')[0].replace(/\s+\d+[a-zA-Z/\d]*$/, '').trim()
+    if (!name) return null
+    if (obceCache.has(name)) return obceCache.get(name)!
+    const { data } = await admin.from('obce').select('latitude, longitude').ilike('obec', name).limit(1).maybeSingle() as { data: { latitude: number; longitude: number } | null }
+    const v = data ? { lat: data.latitude, lng: data.longitude } : null
+    obceCache.set(name, v)
+    return v
+  }
   if (user) {
     const { data: cards } = await admin
       .from('services')
-      .select('id, title, category, subcategory_id, city')
+      .select('id, title, category, subcategory_id, city, city_lat, city_lng, radius_km')
       .eq('provider_id', user.id)
       .eq('is_active', true) as { data: Array<{
         id: string; title: string | null; category: string | null
         subcategory_id: string | null; city: string | null
+        city_lat: number | null; city_lng: number | null; radius_km: number | null
       }> | null }
     myCards = (cards ?? []).map((c) => ({
       id: c.id, title: c.title ?? 'Nabídka', category: c.category, subcategoryId: c.subcategory_id,
     }))
     for (const c of cards ?? []) {
+      const base = c.city_lat != null && c.city_lng != null
+        ? { lat: Number(c.city_lat), lng: Number(c.city_lng) }
+        : await obecCoords(c.city)
+      if (base) myBases.push({ ...base, radiusKm: c.radius_km ?? null })
       if (c.subcategory_id) mySubcatSet.add(c.subcategory_id)
       if (c.category) myCatSet.add(c.category.toLowerCase())
       if (c.city) myCitySet.add(c.city.toLowerCase())
@@ -114,14 +141,37 @@ export default async function PoptavkyPage() {
   }
 
   // Sestavení karet pro nástěnku + doporučené řazení.
+  // Obec z profilu (odkud vyjíždím) – vzdálenost i bez karty, dosah z ní neplyne
+  if (myCity) {
+    const home = await obecCoords(myCity)
+    if (home) myBases.push({ ...home, radiusKm: null })
+  }
+
+  // Vzdálenost poptávky od nejbližší mé karty a jestli je v dosahu některé z nich
+  const distanceOf = new Map<string, { km: number | null; inRange: boolean }>()
+  for (const r of requests) {
+    const at = r.city_lat != null && r.city_lng != null ? { lat: Number(r.city_lat), lng: Number(r.city_lng) } : await obecCoords(r.city)
+    let km: number | null = null
+    let inRange = false
+    if (at) {
+      for (const b of myBases) {
+        const d = haversineKm(b.lat, b.lng, at.lat, at.lng)
+        if (km == null || d < km) km = d
+        if (b.radiusKm && d <= b.radiusKm) inRange = true
+      }
+    }
+    distanceOf.set(r.id, { km: km != null ? Math.round(km) : null, inRange })
+  }
+
   const cards: BoardRequest[] = requests.map((r) => {
     const rs = responses.filter((x) => x.request_id === r.id)
     const activeCount = rs.filter((x) => ACTIVE.has(x.status)).length
     const mine = user ? rs.find((x) => x.provider_id === user.id) : undefined
     const sameSub = r.subcategory_id ? mySubcatSet.has(r.subcategory_id) : false
     const sameCat = r.category ? myCatSet.has(r.category.toLowerCase()) : false
-    const sameCity = r.city ? myCitySet.has(r.city.toLowerCase()) : false
-    // Řazení: 0 shoda oboru i města, 1 obor, 2 kategorie, 3 ostatní.
+    const dist = distanceOf.get(r.id) ?? { km: null, inRange: false }
+    const sameCity = dist.inRange || (r.city ? myCitySet.has(r.city.toLowerCase()) : false)
+    // Řazení (Doporučené): 0 obor + v dosahu, 1 obor, 2 kategorie, 3 ostatní; uvnitř podle vzdálenosti.
     const rank = sameSub && sameCity ? 0 : sameSub ? 1 : sameCat ? 2 : 3
     return {
       id: r.id,
@@ -138,6 +188,7 @@ export default async function PoptavkyPage() {
       myConversationId: mine ? (convByResponse.get(mine.id) ?? null) : null,
       rank,
       sameCity,
+      distanceKm: dist.km,
     }
   })
 
@@ -146,6 +197,7 @@ export default async function PoptavkyPage() {
       cards={cards}
       myCards={myCards}
       isLoggedIn={!!user}
+      myCity={myCity}
     />
   )
 }

@@ -5,20 +5,23 @@
 // se zpětným odkazem, rail je skrytý (seznam je na /poptavky).
 //
 // Před výběrem poskytovatele se objednávka NEVYTVÁŘÍ — píše se přes
-// sendConversationMessage (conversation_id). Zákazník může poskytovatele vybrat
-// odsud; teprve tím vznikne objednávka a přejde se do standardního order flow.
+// sendConversationMessage (conversation_id).
+//
+// 10. 10. 2026 (Matej): chat skládá domluvu. Zákazník pošle, kdy se mu to hodí, a rozpočet,
+// poskytovatel odhad ceny a termíny; obě strany můžou přiložit fotku nebo PDF. Nahoře je souhrn
+// „Co je domluveno“. Vybrat poskytovatele jde jen s navrženým termínem („Vybrat a rezervovat“)
+// → shrnutí s adresou → platba; poptávka se ostatním uzavře až zaplacením.
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  Send, Loader2, ArrowLeft, MapPin, CalendarClock, Tag, Lock, ImagePlus, X,
-  Tags, Coins, Info, CheckCircle2, MessagesSquare, CalendarDays,
+  Send, Loader2, ArrowLeft, MapPin, CalendarClock, Tag, Lock, Paperclip, X, FileText,
+  Coins, CheckCircle2, MessagesSquare, CalendarDays, Wallet, ClipboardList,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { sendConversationMessage, sendPriceEstimate, proposeTermInChat, selectProviderWithTerm } from '@/lib/actions/conversation-chat'
+import { sendConversationMessage, sendPriceEstimate, proposeTermInChat, selectProviderWithTerm, sendCustomerPreference } from '@/lib/actions/conversation-chat'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
-import { selectProvider } from '@/lib/actions/requests'
 import ChatThread from '@/components/ui/ChatThread'
 
 export type ThreadItem = {
@@ -42,7 +45,7 @@ type RequestCtx = {
 export default function PoptavkaChat({
   conversationId, requestId, responseId,
   isProvider, readOnly, orderId, canSelect, hasServiceForOrder, offerText = null, offerKind = null,
-  otherName, request, threads, initialMessages, myUserId, senderNames,
+  otherName, distanceKm = null, request, threads, initialMessages, myUserId, senderNames,
 }: {
   conversationId: string
   requestId: string
@@ -57,6 +60,8 @@ export default function PoptavkaChat({
   /** Typ nabídky: B = termín je okno příjezdu, A = délka služby */
   offerKind?: 'A' | 'B' | null
   otherName: string
+  /** Vzdálenost obce poptávky od místa, odkud poskytovatel vyjíždí (vzdušnou čarou) */
+  distanceKm?: number | null
   request: RequestCtx
   threads: ThreadItem[]
   initialMessages: any[]
@@ -70,11 +75,19 @@ export default function PoptavkaChat({
   const [chatImage, setChatImage] = useState<string | null>(null)
   const [imgUploading, setImgUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [selectBusy, setSelectBusy] = useState(false)
-  const [confirmOpen, setConfirmOpen] = useState(false)
   const [estimateOpen, setEstimateOpen] = useState(false)
+  // Zákazník: kdy se to hodí + rozpočet
+  const [prefOpen, setPrefOpen] = useState<'time' | 'budget' | null>(null)
+  const [prefFrom, setPrefFrom] = useState('')
+  const [prefTo, setPrefTo] = useState('')
+  const [prefPart, setPrefPart] = useState<'kdykoli' | 'rano' | 'odpoledne' | 'vecer'>('kdykoli')
+  const [prefNote, setPrefNote] = useState('')
+  const [budFrom, setBudFrom] = useState('')
+  const [budTo, setBudTo] = useState('')
+  const [prefBusy, setPrefBusy] = useState(false)
   const [estFrom, setEstFrom] = useState('')
   const [estTo, setEstTo] = useState('')
+  const [estMaterial, setEstMaterial] = useState<'with' | 'without' | null>(null)
   const [estBusy, setEstBusy] = useState(false)
   // Návrh termínu v jednání (poskytovatel) a „Vybrat a rezervovat“ (zákazník)
   const [termOpen, setTermOpen] = useState(false)
@@ -93,7 +106,7 @@ export default function PoptavkaChat({
 
   const handleSend = async () => {
     const content = text.trim()
-    if (!content || sending || readOnly) return
+    if ((!content && !chatImage) || sending || readOnly) return
     setSending(true)
     setError(null)
     const res = await sendConversationMessage(conversationId, content, chatImage)
@@ -108,8 +121,9 @@ export default function PoptavkaChat({
   }
 
   const handleChatImage = async (file: File) => {
-    if (!file.type.startsWith('image/')) return
-    if (file.size > 5 * 1024 * 1024) { alert('Obrázek je příliš velký (max 5 MB).'); return }
+    const isPdf = file.type === 'application/pdf'
+    if (!file.type.startsWith('image/') && !isPdf) { setError('Přiložit jde fotka nebo PDF.'); return }
+    if (file.size > 5 * 1024 * 1024) { setError('Soubor je příliš velký (max 5 MB).'); return }
     setImgUploading(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -120,6 +134,9 @@ export default function PoptavkaChat({
     if (!upErr && data) {
       const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(data.path)
       setChatImage(publicUrl)
+    } else {
+      console.error('[PoptavkaChat] příloha', upErr)
+      setError('Přílohu se nepodařilo nahrát.')
     }
     setImgUploading(false)
     if (fileRef.current) fileRef.current.value = ''
@@ -131,14 +148,55 @@ export default function PoptavkaChat({
     if (estBusy) return
     setEstBusy(true)
     setError(null)
-    const res = await sendPriceEstimate(conversationId, Number(estFrom), estTo === '' ? null : Number(estTo))
+    const res = await sendPriceEstimate(conversationId, Number(estFrom), estTo === '' ? null : Number(estTo), estMaterial)
     if (res.success) {
       setMessages((prev) => [...prev, res.message])
-      setEstFrom(''); setEstTo(''); setEstimateOpen(false)
+      setEstimateOpen(false)
     } else {
       setError(res.error)
     }
     setEstBusy(false)
+  }
+
+  // Poslední odeslaný odhad – po otevření se předvyplní, stačí ho potvrdit nebo upravit
+  const lastEstimate = [...messages].reverse().find((m) => m?.sender_id === myUserId && m?.payload?.kind === 'price_estimate')?.payload as
+    { from?: number; to?: number | null; material?: 'with' | 'without' | null } | undefined
+  const toggleEstimate = () => {
+    if (!estimateOpen && lastEstimate?.from) {
+      setEstFrom(String(lastEstimate.from))
+      setEstTo(lastEstimate.to ? String(lastEstimate.to) : '')
+      setEstMaterial(lastEstimate.material ?? null)
+    }
+    setEstimateOpen((v) => !v)
+    setTermOpen(false)
+  }
+
+  // Zákazník: poslední „kdy se mi to hodí“ a rozpočet – předvyplní se, stačí upravit
+  const lastOf = (kind: string, mine: boolean) =>
+    [...messages].reverse().find((m) => m?.payload?.kind === kind && (mine ? m.sender_id === myUserId : m.sender_id !== myUserId))
+  const togglePref = (which: 'time' | 'budget') => {
+    if (prefOpen !== which) {
+      const t = lastOf('time_preference', true)?.payload
+      if (which === 'time' && t) { setPrefFrom(t.from ?? ''); setPrefTo(t.to ?? ''); setPrefPart(t.day_part ?? 'kdykoli'); setPrefNote(t.note ?? '') }
+      const b = lastOf('budget', true)?.payload
+      if (which === 'budget' && b) { setBudFrom(b.from ? String(b.from) : ''); setBudTo(b.to ? String(b.to) : '') }
+    }
+    setPrefOpen((v) => (v === which ? null : which))
+  }
+  const handlePref = async () => {
+    if (prefBusy) return
+    setError(null)
+    setPrefBusy(true)
+    const res = prefOpen === 'time'
+      ? await sendCustomerPreference(conversationId, { kind: 'time_preference', from: prefFrom, to: prefTo || null, dayPart: prefPart, note: prefNote || null })
+      : await sendCustomerPreference(conversationId, { kind: 'budget', from: budFrom ? Number(budFrom) : null, to: Number(budTo) })
+    setPrefBusy(false)
+    if (res.success) {
+      setMessages((prev) => [...prev, res.message])
+      setPrefOpen(null)
+    } else {
+      setError(res.error)
+    }
   }
 
   const handleProposeTerm = async () => {
@@ -171,9 +229,15 @@ export default function PoptavkaChat({
     }
   }
 
+  // Souhrn „Co je domluveno“: poslední odhad (poskytovatel), rozpočet a kdy se to hodí (zákazník)
+  const lastEstimateMsg = [...messages].reverse().find((m) => m?.payload?.kind === 'price_estimate')
+  const lastBudgetMsg = [...messages].reverse().find((m) => m?.payload?.kind === 'budget')
+  const lastTimeMsg = [...messages].reverse().find((m) => m?.payload?.kind === 'time_preference')
+
   // Aktuální návrhy termínu od poskytovatele (ještě je jde vybrat)
   const termProposals = messages
-    .filter((m) => m?.payload?.kind === 'term_proposal' && m.sender_id !== myUserId)
+    // Termín navrhuje jen poskytovatel (hlídá server) – vidí ho obě strany
+    .filter((m) => m?.payload?.kind === 'term_proposal')
     .filter((m) => new Date(m.payload.starts_at).getTime() > Date.now() + BOOKING_POLICY.minLeadMinutes * 60_000)
     .sort((a, b) => new Date(a.payload.starts_at).getTime() - new Date(b.payload.starts_at).getTime())
   const fmtTerm = (p: any) => {
@@ -182,20 +246,6 @@ export default function PoptavkaChat({
     const od = new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(d)
     const doo = new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(p.ends_at))
     return p.arrival_window ? `${den} ${od}–${doo}` : `${den} ${od}`
-  }
-
-  const handleSelect = async () => {
-    if (selectBusy) return
-    setSelectBusy(true)
-    setError(null)
-    const res = await selectProvider(requestId, responseId)
-    if (res.success && res.id) {
-      router.push(`/dashboard/objednavky/${res.id}`)
-    } else {
-      setError(res.success ? 'Objednávku se nepodařilo vytvořit.' : res.error)
-      setSelectBusy(false)
-      setConfirmOpen(false)
-    }
   }
 
   return (
@@ -297,24 +347,99 @@ export default function PoptavkaChat({
                 <CalendarDays className="h-3.5 w-3.5" /> Navrhnout termín
               </button>
             )}
+            {!isProvider && !readOnly && !orderId && (
+              <div className="flex shrink-0 gap-1.5">
+                <button
+                  onClick={() => togglePref('time')}
+                  className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-100"
+                >
+                  <CalendarDays className="h-3.5 w-3.5" /> Kdy se mi to hodí
+                </button>
+                <button
+                  onClick={() => togglePref('budget')}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                >
+                  <Wallet className="h-3.5 w-3.5" /> Rozpočet
+                </button>
+              </div>
+            )}
             {isProvider && !readOnly && (
               <button
-                onClick={() => setEstimateOpen((v) => !v)}
+                onClick={toggleEstimate}
                 className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
               >
-                <Coins className="h-3.5 w-3.5" /> Poslat odhad ceny
+                <Coins className="h-3.5 w-3.5" /> {lastEstimate ? 'Upravit odhad ceny' : 'Poslat odhad ceny'}
               </button>
             )}
           </div>
 
-          {/* Nabídka poskytovatele – kolik se platí přes Propojo a jestli se to odečte */}
-          <div className={`mx-5 mt-4 rounded-xl border px-4 py-2.5 text-sm ${offerText ? 'border-sky-200 bg-sky-50 text-sky-900' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
-            {offerText
-              ? <><b>Nabídka:</b> {offerText}. Platí se přes Propojo až po potvrzení termínu.</>
-              : isProvider
-                ? 'Zatím jste neuvedli, kolik zákazník zaplatí přes Propojo. Doplňte to u poptávky přes „Upravit nabídku“.'
-                : 'Poskytovatel zatím neuvedl, kolik se platí přes Propojo.'}
-          </div>
+          {/* Co je domluveno – poslední hodnota každé položky z chatu */}
+          {!orderId && (
+            <div className="mx-5 mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <p className="mb-2.5 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">
+                <ClipboardList className="h-3.5 w-3.5" /> Co je domluveno
+              </p>
+              <dl className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
+                <dt className="text-slate-500">Místo</dt>
+                <dd className="text-slate-900">
+                  {request.city}
+                  {distanceKm != null && <span className="text-slate-500"> · ≈ {distanceKm} km {isProvider ? 'od vás' : 'od poskytovatele'}</span>}
+                  <span className="block text-xs text-slate-500">
+                    {isProvider
+                      ? 'Přesnou adresu zákazník zadá před platbou, uvidíte ji po potvrzení rezervace.'
+                      : 'Přesnou adresu zadáte ve shrnutí před platbou. Poskytovatel ji uvidí po potvrzení rezervace.'}
+                  </span>
+                </dd>
+                <dt className="text-slate-500">Nabídka</dt>
+                <dd className={offerText ? 'font-semibold text-slate-900' : 'text-amber-700'}>
+                  {offerText
+                    ? <>{offerText} <span className="font-normal text-slate-500">· platí se přes Propojo při rezervaci</span></>
+                    : isProvider ? 'Doplňte u poptávky přes „Upravit nabídku“, kolik zákazník zaplatí přes Propojo.' : 'Poskytovatel zatím neuvedl, kolik se platí přes Propojo.'}
+                </dd>
+                <dt className="text-slate-500">Odhad ceny</dt>
+                <dd className={lastEstimateMsg ? 'text-slate-900' : 'text-slate-400'}>
+                  {lastEstimateMsg ? String(lastEstimateMsg.content).replace(/^Předběžný odhad ceny:\s*/, '') : 'zatím neposlán'}
+                </dd>
+                <dt className="text-slate-500">Rozpočet zákazníka</dt>
+                <dd className={lastBudgetMsg ? 'text-slate-900' : 'text-slate-400'}>
+                  {lastBudgetMsg ? String(lastBudgetMsg.content).replace(/^Můj rozpočet:\s*/, '').replace(/\.$/, '') : 'neuveden'}
+                </dd>
+                <dt className="text-slate-500">Kdy se hodí</dt>
+                <dd className={lastTimeMsg ? 'text-slate-900' : 'text-slate-400'}>
+                  {lastTimeMsg ? String(lastTimeMsg.content).replace(/^Hodí se mi:\s*/, '').replace(/\.$/, '') : request.preferredDate ?? 'neuvedeno'}
+                </dd>
+                <dt className="text-slate-500">Navržené termíny</dt>
+                <dd>
+                  {termProposals.length === 0 ? (
+                    <span className="text-slate-400">{isProvider ? 'zatím žádný – navrhněte termín' : 'zatím žádný – poskytovatel ho navrhne'}</span>
+                  ) : canSelect ? (
+                    <div className="space-y-1.5">
+                      {termProposals.map((m) => (
+                        <button
+                          key={m.id}
+                          onClick={() => handleBookTerm(m.id)}
+                          disabled={!!bookBusy}
+                          className="flex w-full items-center justify-between gap-3 rounded-xl bg-emerald-500 px-3.5 py-2.5 text-left text-sm font-bold text-white transition hover:bg-emerald-600 disabled:opacity-60"
+                        >
+                          <span className="flex items-center gap-2">
+                            {bookBusy === m.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarDays className="h-4 w-4" />}
+                            Vybrat a rezervovat · {fmtTerm(m.payload)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-slate-900">{termProposals.map((m) => fmtTerm(m.payload)).join(', ')}</span>
+                  )}
+                </dd>
+              </dl>
+              <p className="mt-3 border-t border-slate-200 pt-2.5 text-xs leading-relaxed text-slate-500">
+                {isProvider
+                  ? 'Zákazník vybere termín, vyplní adresu a zaplatí – tím vznikne rezervace. Přesnou adresu a kontakt uvidíte po potvrzení rezervace.'
+                  : 'Až bude všechno sedět, vyberte termín. Následuje shrnutí s adresou a kontaktem poskytovatele a platba. Ostatní jednání se uzavřou až po zaplacení.'}
+              </p>
+            </div>
+          )}
 
           {/* Vybráno → odkaz na objednávku */}
           {orderId && (
@@ -324,16 +449,50 @@ export default function PoptavkaChat({
             </div>
           )}
 
-          {/* Předběžná domluva — jasně: zatím to není objednávka. */}
-          {!orderId && !readOnly && (
-            <div className="mx-5 mt-4 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-800">
-              <Info className="mt-0.5 h-4 w-4 shrink-0" />
-              <div>
-                <b className="block text-[13px]">Předběžná domluva</b>
-                {isProvider
-                  ? 'Zákazník si zatím vybírá. Domluvte se, pošlete odhad ceny a navrhněte termín – zákazník pak jedním klikem vybere vás i termín a zaplatí.'
-                  : 'Tohle zatím není objednávka. Až vám poskytovatel navrhne termín, můžete ho rovnou vybrat a zaplatit – nebo si poskytovatele vyberte a termín domluvte potom.'}
-              </div>
+          {/* Composer zákazníka: kdy se to hodí / rozpočet */}
+          {prefOpen && !isProvider && !readOnly && (
+            <div className="mx-5 mt-3 rounded-xl border border-emerald-200 bg-emerald-50/50 p-3">
+              {prefOpen === 'time' ? (
+                <>
+                  <p className="mb-2 text-xs font-semibold text-slate-600">Kdy se vám to hodí</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input type="date" value={prefFrom} onChange={(e) => setPrefFrom(e.target.value)}
+                      className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" aria-label="Od" />
+                    <span className="text-slate-400">–</span>
+                    <input type="date" value={prefTo} min={prefFrom || undefined} onChange={(e) => setPrefTo(e.target.value)}
+                      className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" aria-label="Do (nepovinné)" />
+                    <select value={prefPart} onChange={(e) => setPrefPart(e.target.value as typeof prefPart)}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-600 outline-none focus:border-emerald-400">
+                      <option value="kdykoli">kdykoli</option>
+                      <option value="rano">ráno (8–12)</option>
+                      <option value="odpoledne">odpoledne (12–17)</option>
+                      <option value="vecer">večer (17–20)</option>
+                    </select>
+                  </div>
+                  <input value={prefNote} onChange={(e) => setPrefNote(e.target.value)} maxLength={200}
+                    placeholder="Poznámka (nepovinné), např. ne ve středu"
+                    className="mt-2 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" />
+                </>
+              ) : (
+                <>
+                  <p className="mb-2 text-xs font-semibold text-slate-600">Rozpočet na zakázku (nezávazný)</p>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <input type="number" min={1} value={budFrom} onChange={(e) => setBudFrom(e.target.value)} placeholder="od (nepovinné)"
+                      className="w-32 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" />
+                    <span className="text-slate-400">–</span>
+                    <input type="number" min={1} value={budTo} onChange={(e) => setBudTo(e.target.value)} placeholder="do"
+                      className="w-28 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" />
+                    <span className="text-sm text-slate-500">Kč</span>
+                  </div>
+                </>
+              )}
+              <button
+                onClick={handlePref}
+                disabled={prefBusy || (prefOpen === 'time' ? !prefFrom : !budTo)}
+                className="mt-2 inline-flex items-center gap-1 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50"
+              >
+                {prefBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Poslat
+              </button>
             </div>
           )}
 
@@ -376,7 +535,9 @@ export default function PoptavkaChat({
           {/* Composer odhadu ceny (jen poskytovatel) */}
           {estimateOpen && isProvider && !readOnly && (
             <div className="mx-5 mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <p className="mb-2 text-xs font-semibold text-slate-600">Nezávazný odhad ceny</p>
+              <p className="mb-2 text-xs font-semibold text-slate-600">
+                Nezávazný odhad ceny{lastEstimate ? ' – předvyplněný posledním odhadem, potvrďte nebo upravte' : ''}
+              </p>
               <div className="flex flex-wrap items-center gap-2">
                 <div className="flex items-center gap-1.5">
                   <input
@@ -390,6 +551,16 @@ export default function PoptavkaChat({
                   />
                   <span className="text-sm text-slate-500">Kč</span>
                 </div>
+                <select
+                  value={estMaterial ?? ''}
+                  onChange={(e) => setEstMaterial(e.target.value === 'with' ? 'with' : e.target.value === 'without' ? 'without' : null)}
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-600 outline-none focus:border-emerald-400"
+                  aria-label="Materiál"
+                >
+                  <option value="">materiál neuvádět</option>
+                  <option value="with">včetně materiálu</option>
+                  <option value="without">bez materiálu</option>
+                </select>
                 <button
                   onClick={handleEstimate}
                   disabled={estBusy || !estFrom}
@@ -422,8 +593,10 @@ export default function PoptavkaChat({
             <div className="border-t border-slate-100 p-3">
               {chatImage && (
                 <div className="mb-2 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-1.5">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={chatImage} alt="Náhled" className="h-12 w-12 rounded object-cover" />
+                  {/\.pdf($|\?)/i.test(chatImage)
+                    ? <span className="inline-flex items-center gap-1.5 px-1.5 text-sm text-slate-700"><FileText className="h-4 w-4 text-red-500" /> PDF příloha</span>
+                    // eslint-disable-next-line @next/next/no-img-element
+                    : <img src={chatImage} alt="Náhled" className="h-12 w-12 rounded object-cover" />}
                   <button onClick={() => setChatImage(null)} className="flex h-6 w-6 items-center justify-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-600">
                     <X className="h-4 w-4" />
                   </button>
@@ -434,17 +607,17 @@ export default function PoptavkaChat({
                 <input
                   ref={fileRef}
                   type="file"
-                  accept="image/jpeg,image/png,image/webp"
+                  accept="image/jpeg,image/png,image/webp,application/pdf"
                   className="hidden"
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) handleChatImage(f) }}
                 />
                 <button
                   onClick={() => fileRef.current?.click()}
                   disabled={imgUploading || sending}
-                  title="Přidat fotku"
+                  title="Přiložit fotku nebo PDF"
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50 disabled:opacity-40"
                 >
-                  {imgUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+                  {imgUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
                 </button>
                 <input
                   ref={inputRef}
@@ -456,118 +629,29 @@ export default function PoptavkaChat({
                 />
                 <button
                   onClick={handleSend}
-                  disabled={sending || !text.trim()}
+                  disabled={sending || (!text.trim() && !chatImage)}
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white transition hover:bg-emerald-600 disabled:opacity-40"
                 >
                   {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </button>
               </div>
               <p className="mt-2 flex items-center gap-1.5 px-1 text-[11px] text-slate-400">
-                <Lock className="h-3 w-3" /> Kontaktní údaje {isProvider ? 'zákazníka' : ''} se odkryjí až po výběru.
+                <Lock className="h-3 w-3" /> {isProvider
+                  ? 'Adresu a kontakt zákazníka uvidíte po potvrzení rezervace.'
+                  : 'Kontakt poskytovatele uvidíte ve shrnutí před platbou.'}
               </p>
             </div>
           )}
           </section>
 
-          {/* 3a) Termíny navržené v chatu → vybrat poskytovatele i termín jedním klikem (jen zákazník) */}
-          {canSelect && termProposals.length > 0 && (
-            <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50/60 p-5 shadow-sm">
-              <p className="text-sm font-bold text-slate-900">Navržené termíny</p>
-              <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                Kliknutím vyberete tohoto poskytovatele i termín a pokračujete ke shrnutí a platbě. Ostatní jednání se uzavřou.
-              </p>
-              <div className="mt-3 space-y-2">
-                {termProposals.map((m) => (
-                  <button
-                    key={m.id}
-                    onClick={() => handleBookTerm(m.id)}
-                    disabled={!!bookBusy}
-                    className="flex w-full items-center justify-between gap-3 rounded-xl bg-emerald-500 px-4 py-3 text-left text-sm font-bold text-white transition hover:bg-emerald-600 disabled:opacity-60"
-                  >
-                    <span className="flex items-center gap-2">
-                      {bookBusy === m.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarDays className="h-4 w-4" />}
-                      Vybrat a rezervovat · {fmtTerm(m.payload)}
-                    </span>
-                    {offerText && <span className="shrink-0 text-xs font-semibold text-emerald-50">{offerText.split(' · ')[0]}</span>}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 3) Domluveno? Vybrat poskytovatele — hned pod chatem (jen zákazník).
-                 Když už je navržený termín, je hlavní akce „Vybrat a rezervovat“ – tady jen nenápadná možnost bez termínu. */}
-          {canSelect && termProposals.length > 0 && (
-            <p className="text-center text-xs text-slate-500">
-              Žádný termín nesedí?{' '}
-              <button
-                onClick={() => setConfirmOpen(true)}
-                disabled={selectBusy}
-                className="font-semibold text-emerald-700 underline hover:text-emerald-800 disabled:opacity-60"
-              >
-                Vybrat poskytovatele bez termínu
-              </button>
-              {' '}– termín pak domluvíte ve stejném chatu.
-            </p>
-          )}
-          {canSelect && termProposals.length === 0 && (
-            <div className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
-              <p className="text-sm font-bold text-slate-900">Domluveno?</p>
-              <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                Výběrem vznikne objednávka s tímto poskytovatelem a ostatní jednání se uzavřou. Termín domluvíte ve stejném chatu.
-              </p>
-              <button
-                onClick={() => setConfirmOpen(true)}
-                disabled={selectBusy}
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-600 disabled:opacity-60"
-              >
-                {selectBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                Vybrat poskytovatele{offerText ? ` · ${offerText.split(' · ')[0]}` : ''}
-              </button>
-            </div>
-          )}
           {!isProvider && !canSelect && !orderId && !hasServiceForOrder && (
             <p className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500">
-              Poskytovatel u této reakce zatím nemá vybranou konkrétní nabídku, ze které by šla založit objednávka.
+              Poskytovatel zatím neuvedl, kolik se platí přes Propojo. Napište mu, ať nabídku doplní.
             </p>
           )}
         </div>
       </div>
 
-      {/* Potvrzovací modal výběru poskytovatele */}
-      {confirmOpen && (
-        <div className="fixed inset-0 z-[9990] flex items-end justify-center sm:items-center">
-          <button aria-label="Zavřít" onClick={() => !selectBusy && setConfirmOpen(false)} className="absolute inset-0 bg-slate-950/40" />
-          <div className="relative w-full max-w-md rounded-t-3xl bg-white p-6 shadow-2xl sm:rounded-3xl">
-            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50">
-              <CheckCircle2 className="h-6 w-6 text-emerald-600" />
-            </div>
-            <h2 className="text-center text-lg font-black text-slate-900">Vybrat tohoto poskytovatele?</h2>
-            <p className="mx-auto mt-2 text-center text-sm leading-relaxed text-slate-600">
-              {offerText && <><b className="text-slate-900">{offerText}.</b><br /></>}
-              Vznikne objednávka a celá domluva se do ní přenese. Zaplatíte až po potvrzení termínu.
-              Ostatní jednání u této poptávky se uzavřou.
-            </p>
-            <div className="mt-6 flex flex-col gap-2">
-              <button
-                onClick={handleSelect}
-                disabled={selectBusy}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-600 disabled:opacity-60"
-              >
-                {selectBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                Ano, vybrat a vytvořit objednávku
-              </button>
-              <button
-                onClick={() => setConfirmOpen(false)}
-                disabled={selectBusy}
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-40"
-              >
-                Ještě ne
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

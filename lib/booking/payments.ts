@@ -19,6 +19,7 @@ import { bookingCharge, type ChargeableItem, type CommissionBreakdown } from './
 import { legacyMirror } from './legacy'
 import { isPlaceKnown, type KnownPlace } from '@/lib/geo'
 import { buildStandardAccountParams } from './onboarding-prefill'
+import { finalizeRequestSelection, requestStillAvailable } from './request-selection'
 import {
   confirmationDeadline,
   isAuthorizationTooLate,
@@ -542,6 +543,8 @@ export async function handleAuthorized(db: Db, accountId: string, pi: Stripe.Pay
   } else if (!order.scheduled_at || !order.scheduled_end) {
     reasons.push('chybí termín')
   }
+  // Objednávka z poptávky: poptávku mezitím nesmí vyřídit jiná platba (jiný poskytovatel)
+  if (!(await requestStillAvailable(db, order.id))) reasons.push('poptávka už je vyřízená')
 
   const nazev = orderName(order)
 
@@ -595,6 +598,13 @@ export async function handleAuthorized(db: Db, accountId: string, pi: Stripe.Pay
   if (!authorized.ok) {
     if (claimedSlotId) await releaseSlotAndMerge(db, claimedSlotId, order.id)
     return
+  }
+
+  // Zaplaceno → poptávka (pokud z ní objednávka vznikla) se uzavře ostatním poskytovatelům
+  try {
+    await finalizeRequestSelection(db, order.id)
+  } catch (err) {
+    console.error('[booking] uzavření poptávky:', err)
   }
 
   // Preautorizace dorazila po začátku termínu → potvrdit už nejde, hned uvolnit (korekce 3).
@@ -799,6 +809,10 @@ export async function handleAuthorizationCanceled(db: Db, pi: Stripe.PaymentInte
   if (!r.ok) return
 
   const nazev = orderName(order)
+  if (event === 'capture_failed') {
+    await notifyCaptureFailed(order)
+    return
+  }
   await notify({
     userId: order.customer_id,
     type: 'status_change',
@@ -806,6 +820,30 @@ export async function handleAuthorizationCanceled(db: Db, pi: Stripe.PaymentInte
     actorId: order.provider_id,
     title: event === 'external_cancel' ? 'Poskytovatel rezervaci nepotvrdil' : 'Rezervace nebyla potvrzena',
     preview: `${nazev} · platbu jsme uvolnili, peníze nebyly strženy.`,
+  })
+}
+
+/**
+ * Stržení blokované částky se nepodařilo → potvrzení se nepovažuje za učiněné a Rezervační smlouva
+ * nevznikla. Oznámení dostanou obě strany (stanovisko AK bod 3).
+ */
+async function notifyCaptureFailed(order: BookingOrder) {
+  const nazev = orderName(order)
+  await notify({
+    userId: order.customer_id,
+    type: 'status_change',
+    orderId: order.id,
+    actorId: order.provider_id,
+    title: 'Rezervaci se nepodařilo potvrdit',
+    preview: `${nazev} · platbu nešlo strhnout, rezervace nevznikla a peníze nebyly strženy.`,
+  })
+  await notify({
+    userId: order.provider_id,
+    type: 'status_change',
+    orderId: order.id,
+    actorId: order.customer_id,
+    title: 'Rezervace nevznikla – platbu nešlo strhnout',
+    preview: `${nazev} · potvrzení se nepovedlo dokončit, rezervace neplatí. Termín je znovu volný.`,
   })
 }
 
@@ -836,9 +874,11 @@ export async function resolveCaptureInProgress(db: Db, order: BookingOrder): Pro
       return { ok: true, state: 'confirmed' }
     case 'processing':
       return { ok: true, state: 'pending' }
-    case 'canceled':
-      await applyTransition(db, order, 'capture_failed', { type: 'system' }, { payload: { payment_intent: pi.id } })
+    case 'canceled': {
+      const r = await applyTransition(db, order, 'capture_failed', { type: 'system' }, { payload: { payment_intent: pi.id } })
+      if (r.ok) await notifyCaptureFailed(order)
       return { ok: false, error: 'Platbu už nelze strhnout, rezervace není potvrzená.' }
+    }
     default:
       return { ok: true, state: 'pending' }
   }

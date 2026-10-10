@@ -48,7 +48,10 @@ export default function ChatThread({
               <div className="max-w-[85%] rounded-2xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-900">
                 {m.image_url && (
                   <a href={m.image_url} target="_blank" rel="noopener noreferrer" className="block">
-                    <img src={m.image_url} alt="Příloha" className="mb-1.5 max-h-60 w-full rounded-lg object-cover" />
+                    {/\.pdf($|\?)/i.test(m.image_url)
+                      ? <span className="mb-1.5 inline-flex items-center gap-1.5 rounded-lg bg-white/90 px-2.5 py-1.5 text-sm font-semibold text-slate-700 underline">📄 Otevřít PDF</span>
+                      // eslint-disable-next-line @next/next/no-img-element
+                      : <img src={m.image_url} alt="Příloha" className="mb-1.5 max-h-60 w-full rounded-lg object-cover" />}
                   </a>
                 )}
                 {m.content && <p className="whitespace-pre-wrap break-words">{m.content}</p>}
@@ -68,7 +71,10 @@ export default function ChatThread({
             <div className={`max-w-[75%] rounded-2xl px-4 py-2 text-sm ${mine ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-800'}`}>
               {m.image_url && (
                 <a href={m.image_url} target="_blank" rel="noopener noreferrer" className="block">
-                  <img src={m.image_url} alt="Příloha" className="mb-1.5 max-h-60 w-full rounded-lg object-cover" />
+                  {/\.pdf($|\?)/i.test(m.image_url)
+                      ? <span className="mb-1.5 inline-flex items-center gap-1.5 rounded-lg bg-white/90 px-2.5 py-1.5 text-sm font-semibold text-slate-700 underline">📄 Otevřít PDF</span>
+                      // eslint-disable-next-line @next/next/no-img-element
+                      : <img src={m.image_url} alt="Příloha" className="mb-1.5 max-h-60 w-full rounded-lg object-cover" />}
                 </a>
               )}
               {m.content && <p className="whitespace-pre-wrap break-words">{m.content}</p>}
