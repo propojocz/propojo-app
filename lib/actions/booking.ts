@@ -55,7 +55,7 @@ function revalidateOrder(orderId: string) {
 }
 
 function orderName(order: BookingOrder): string {
-  return order.service_items?.name || order.services?.title || 'Objednávka'
+  return order.service_items?.name || order.services?.title || (order.offer_kind === 'B' ? 'Výjezd a nacenění' : order.offer_kind === 'A' ? 'Služba' : 'Objednávka')
 }
 
 async function loadForUser(orderId: string) {

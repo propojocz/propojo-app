@@ -97,7 +97,8 @@ export async function loadBookingOrder(db: Db, orderId: string): Promise<Booking
 }
 
 function orderName(order: BookingOrder): string {
-  return order.service_items?.name || order.services?.title || 'Rezervace'
+  // Objednávka z poptávky bez karty nemá název položky ani karty → podle typu nabídky
+  return order.service_items?.name || order.services?.title || (order.offer_kind === 'B' ? 'Výjezd a nacenění' : order.offer_kind === 'A' ? 'Služba' : 'Rezervace')
 }
 
 async function notify(params: Parameters<typeof createNotification>[0]) {

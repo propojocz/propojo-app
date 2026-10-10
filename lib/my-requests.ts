@@ -3,6 +3,7 @@
 // pro zákazníka, 9. 10. 2026). Čte se přes service role – volat jen s ověřeným userId.
 
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { draftOrdersBy } from '@/lib/booking/request-selection'
 import type { MyRequest } from '@/components/ui/MojePoptavkyList'
 
 const ACTIVE = new Set(['interested', 'negotiating'])
@@ -52,6 +53,8 @@ export async function loadMyRequests(userId: string): Promise<MyRequest[]> {
     for (const o of ords ?? []) if (o.status === 'zruseno' && o.booking_state !== 'confirmed') orderFailed.add(o.id)
   }
   const now = Date.now()
+  // Vybraný termín, ale nezaplaceno → odkaz „Dokončit rezervaci“
+  const drafts = await draftOrdersBy(admin, 'request_id', requests.filter((r) => r.status === 'open').map((r) => r.id))
 
   return requests.map((r) => ({
     id: r.id,
@@ -68,5 +71,6 @@ export async function loadMyRequests(userId: string): Promise<MyRequest[]> {
     activeCount: responses.filter((x) => x.request_id === r.id && ACTIVE.has(x.status)).length,
     isSelected: !!r.selected_response_id,
     orderId: orderByReq.get(r.id) ?? null,
+    draftOrderId: drafts.get(r.id) ?? null,
   }))
 }

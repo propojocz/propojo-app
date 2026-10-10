@@ -14,6 +14,7 @@ import PoptavkaChat, { type ThreadItem } from '@/components/ui/PoptavkaChat'
 import { offerSummary } from '@/lib/booking/texts'
 import { markThreadRead } from '@/lib/actions/inbox'
 import { haversineKm } from '@/lib/geo'
+import { draftOrdersBy } from '@/lib/booking/request-selection'
 
 export const dynamic = 'force-dynamic'
 
@@ -162,6 +163,11 @@ export default async function JednaniPage({
     isCustomer && conv.status === 'open' && !conv.order_id && req.status === 'open' &&
     rr.status !== 'rejected' && hasOffer
 
+  // Zákazník už vybral termín, ale nezaplatil → odkaz na rozpracovanou rezervaci
+  const draftOrderId = isCustomer && !conv.order_id
+    ? ((await draftOrdersBy(admin as any, 'response_id', [rr.id])).get(rr.id) ?? null)
+    : null
+
   // Vzdálenost obce poptávky od místa, odkud poskytovatel vyjíždí (karta, jinak obec z profilu)
   let distanceKm: number | null = null
   if (req.city_lat != null && req.city_lng != null) {
@@ -197,6 +203,7 @@ export default async function JednaniPage({
         : null}
       otherName={otherName}
       distanceKm={distanceKm}
+      draftOrderId={draftOrderId}
       request={{
         heading: req.category ?? 'Poptávka',
         category: req.category,

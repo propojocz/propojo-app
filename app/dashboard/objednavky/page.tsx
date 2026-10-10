@@ -1,5 +1,7 @@
 // app/dashboard/objednavky/page.tsx
 import { createClient } from '@/lib/supabase/server'
+import { adminDb } from '@/lib/booking/payments'
+import { draftOrdersBy } from '@/lib/booking/request-selection'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { CalendarDays, AlertCircle } from 'lucide-react'
@@ -37,6 +39,17 @@ function customerTodo(o: any): string | null {
   }
   if (o.status === 'ceka_potvrzeni') return 'Potvrďte dokončení a ohodnoťte'
   return null
+}
+
+// Poptávky, ze kterých vznikly nezaplacené objednávky bez položky z ceníku (kandidáti na rozpracovanou rezervaci)
+async function requestIdsOfDrafts(orders: any[]): Promise<string[]> {
+  const ids = orders
+    .filter((o) => o.status !== 'zruseno' && !o.service_item_id && (o.booking_state == null || o.booking_state === 'payment_expired' || o.booking_state === 'pending_payment'))
+    .map((o) => o.id)
+  if (ids.length === 0) return []
+  const { data } = await adminDb()
+    .from('order_events').select('payload').eq('type', 'created_from_request').in('order_id', ids)
+  return Array.from(new Set(((data ?? []) as Array<{ payload: any }>).map((e) => e.payload?.request_id).filter(Boolean)))
 }
 
 function OrderCard({ o, role, otherName, todo }: { o: any; role: 'provider' | 'customer'; otherName: string; todo?: string | null }) {
@@ -130,10 +143,16 @@ export default async function ObjednavkyPage() {
   const provOrders = asProvider ?? []
   const custOrdersRaw = asCustomer ?? []
 
+  // Rozpracovaná rezervace z poptávky (vybraný termín, nezaplaceno) – jinak by zapadla mezi ostatní
+  const drafts = new Set<string>(
+    Array.from((await draftOrdersBy(adminDb(), 'request_id', await requestIdsOfDrafts(custOrdersRaw))).values()),
+  )
+  const todoOf = (o: any): string | null => (drafts.has(o.id) ? 'Dokončete rezervaci: adresa a platba' : customerTodo(o))
+
   // Rozdělíme: co po mně něco chce (platba, potvrzení) jde NAHORU. Bez toho
   // zákazník po rezervaci odejde a objednávku pak nenajde.
-  const custTodo = custOrdersRaw.filter((o: any) => customerTodo(o) !== null)
-  const custOstatni = custOrdersRaw.filter((o: any) => customerTodo(o) === null)
+  const custTodo = custOrdersRaw.filter((o: any) => todoOf(o) !== null)
+  const custOstatni = custOrdersRaw.filter((o: any) => todoOf(o) === null)
 
   const nothing = provOrders.length === 0 && custOrdersRaw.length === 0
 
@@ -168,7 +187,7 @@ export default async function ObjednavkyPage() {
               </p>
             </div>
             {custTodo.map((o: any) => (
-              <OrderCard key={o.id} o={o} role="customer" otherName={nameMap[o.provider_id] ?? 'Živnostník'} todo={customerTodo(o)} />
+              <OrderCard key={o.id} o={o} role="customer" otherName={nameMap[o.provider_id] ?? 'Živnostník'} todo={todoOf(o)} />
             ))}
           </section>
         )}

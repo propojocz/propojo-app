@@ -57,12 +57,12 @@ export default async function PoptavkyPage() {
   // Otevřené, nevypršelé poptávky.
   const { data: reqs } = await admin
     .from('requests')
-    .select('id, category, subcategory_id, city, city_lat, city_lng, description, preferred_date, photos, created_at')
+    .select('id, customer_id, category, subcategory_id, city, city_lat, city_lng, description, preferred_date, photos, created_at')
     .eq('status', 'open')
     .gt('expires_at', new Date().toISOString())
     .order('created_at', { ascending: false })
     .limit(100) as { data: Array<{
-      id: string; category: string | null; subcategory_id: string | null
+      id: string; customer_id: string | null; category: string | null; subcategory_id: string | null
       city: string; city_lat: number | null; city_lng: number | null; description: string; preferred_date: string | null
       photos: string[] | null; created_at: string
     }> | null }
@@ -185,6 +185,8 @@ export default async function PoptavkyPage() {
       activeCount,
       isFull: activeCount >= 5,
       myStatus: mine?.status ?? null,
+      // Vlastní poptávka (účet je zákazník i poskytovatel) – místo „Mám zájem“ odkaz na zájemce
+      isMine: !!user && r.customer_id === user.id,
       myConversationId: mine ? (convByResponse.get(mine.id) ?? null) : null,
       rank,
       sameCity,

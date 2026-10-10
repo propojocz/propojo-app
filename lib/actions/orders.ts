@@ -603,22 +603,25 @@ export async function setOrderAddress(
   const trimmed = address.trim()
   if (trimmed.length < 5) return { success: false, error: 'Zadejte prosím úplnou adresu (ulice a číslo).' }
 
-  const { data: order } = await supabase
+  // Čtení i zápis přes service role po kontrole vlastnictví v kódu (10. 10. 2026): přes RLS se
+  // objednávka z poptávky bez karty (service_id null) nenašla → „Objednávka nenalezena“.
+  const admin = getAdminClient()
+  const { data: order } = await admin
     .from('orders')
     .select('customer_id, status, booking_state')
     .eq('id', orderId)
-    .single() as { data: { customer_id: string; status: string; booking_state: string | null } | null }
+    .maybeSingle() as { data: { customer_id: string; status: string; booking_state: string | null } | null }
 
   if (!order) return { success: false, error: 'Objednávka nenalezena.' }
   if (order.customer_id !== user.id) {
-    return { success: false, error: 'Adresu může doplnit jen zákazník objednávky.' }
+    return { success: false, error: 'Jste přihlášeni jako jiný účet než zákazník této objednávky (např. v jiné záložce). Obnovte stránku (F5) a zkontrolujte, pod kým jste přihlášeni.' }
   }
   // Model v2: po zahájení platby se adresa nemění (předautorizace i check-in se k ní vážou).
   if (order.booking_state != null && order.booking_state !== 'payment_expired') {
     return { success: false, error: 'Adresu už nelze změnit. Pokud je potřeba jiná, objednávku zrušte a objednejte znovu.' }
   }
 
-  const { error } = await (supabase.from('orders') as any)
+  const { error } = await (admin.from('orders') as any)
     .update({
       location_address: trimmed,
       location_lat: coords?.lat ?? null,

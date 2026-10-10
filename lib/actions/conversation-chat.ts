@@ -452,20 +452,8 @@ export async function selectProviderWithTerm(
     }
   }
 
-  try {
-    if (conv.providerId) {
-      await createNotification({
-        userId: conv.providerId,
-        type: 'status_change',
-        orderId: draft.orderId,
-        actorId: user.id,
-        title: 'Zákazník si vybral váš termín',
-        preview: `${terminDlouze(p.starts_at)} · teď vyplňuje adresu a platí. Rezervace vznikne zaplacením.`,
-      })
-    }
-  } catch (err) {
-    console.error('[selectProviderWithTerm] notifikace', err)
-  }
+  // Poskytovatel dostane oznámení „Zákazník vybral termín — čeká na platbu“ až při přijetí termínu ve shrnutí
+  // (acceptProposal) – tady by bylo duplicitní.
   return { success: true, orderId: draft.orderId, startsAt: p.starts_at }
 }
 

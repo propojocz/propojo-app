@@ -24,7 +24,7 @@ import {
 const HOUR = 3_600_000
 
 function nazev(order: BookingOrder): string {
-  return order.service_items?.name || order.services?.title || 'Rezervace'
+  return order.service_items?.name || order.services?.title || (order.offer_kind === 'B' ? 'Výjezd a nacenění' : order.offer_kind === 'A' ? 'Služba' : 'Rezervace')
 }
 
 async function notify(params: Parameters<typeof createNotification>[0]) {

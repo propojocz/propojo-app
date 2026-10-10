@@ -45,7 +45,7 @@ type RequestCtx = {
 export default function PoptavkaChat({
   conversationId, requestId, responseId,
   isProvider, readOnly, orderId, canSelect, hasServiceForOrder, offerText = null, offerKind = null,
-  otherName, distanceKm = null, request, threads, initialMessages, myUserId, senderNames,
+  otherName, distanceKm = null, draftOrderId = null, request, threads, initialMessages, myUserId, senderNames,
 }: {
   conversationId: string
   requestId: string
@@ -62,6 +62,8 @@ export default function PoptavkaChat({
   otherName: string
   /** Vzdálenost obce poptávky od místa, odkud poskytovatel vyjíždí (vzdušnou čarou) */
   distanceKm?: number | null
+  /** Zákazník už vybral termín, ale nezaplatil – rozpracovaná rezervace */
+  draftOrderId?: string | null
   request: RequestCtx
   threads: ThreadItem[]
   initialMessages: any[]
@@ -372,6 +374,16 @@ export default function PoptavkaChat({
               </button>
             )}
           </div>
+
+          {draftOrderId && !isProvider && (
+            <Link
+              href={`/dashboard/objednavky/${draftOrderId}`}
+              className="mx-5 mt-4 flex items-center justify-between gap-2 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900 transition hover:bg-amber-100"
+            >
+              Máte vybraný termín – dokončete rezervaci (adresa a platba)
+              <ArrowLeft className="h-4 w-4 shrink-0 rotate-180" />
+            </Link>
+          )}
 
           {/* Co je domluveno – poslední hodnota každé položky z chatu */}
           {!orderId && (

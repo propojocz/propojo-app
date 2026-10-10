@@ -103,6 +103,7 @@ export default function BookingStateBadge({
   authorizedAt = null,
   confirmedAt = null,
   cancelReason = null,
+  farNote = null,
 }: {
   state: string | null
   isProvider: boolean
@@ -114,6 +115,8 @@ export default function BookingStateBadge({
   /** Kdy se platba strhla (null = nic strženo) */
   confirmedAt?: string | null
   cancelReason?: string | null
+  /** Zákazník, čekající rezervace s adresou daleko: sloučí se sem místo samostatného oranžového boxu */
+  farNote?: string | null
 }) {
   if (!state) return null
   const t = texty(state, isProvider, confirmDeadlineAt ? datumCas(confirmDeadlineAt) : null, paymentReturned, {
@@ -122,7 +125,8 @@ export default function BookingStateBadge({
     cancelReason,
   })
   if (!t) return null
-  const tone = TONE[t.tone]
+  const far = farNote && state === 'awaiting_confirmation' ? farNote : null
+  const tone = far ? { box: 'border-2 border-orange-400 bg-orange-50', icon: 'text-orange-600' } : TONE[t.tone]
   const Icon = t.tone === 'ok' ? CheckCircle2 : t.tone === 'warn' ? AlertTriangle : t.tone === 'off' ? XCircle : state === 'pending_payment' ? CreditCard : Clock
 
   return (
@@ -131,6 +135,12 @@ export default function BookingStateBadge({
       <div>
         <p className="font-black text-slate-900">{t.title}</p>
         <p className="mt-0.5 text-sm text-slate-600">{t.text}</p>
+        {far && (
+          <p className="mt-2 flex items-start gap-1.5 text-sm text-orange-900">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-orange-600" />
+            <span>{far}</span>
+          </p>
+        )}
       </div>
     </div>
   )

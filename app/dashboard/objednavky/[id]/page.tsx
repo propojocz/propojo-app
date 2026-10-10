@@ -7,6 +7,7 @@ import OrderDetailClient from './OrderDetailClient'
 import BookingStateBadge from '@/components/ui/BookingStateBadge'
 import BookingProviderActions from '@/components/ui/BookingProviderActions'
 import { adminDb, loadBookingOrder, resolveCaptureInProgress, syncCheckoutOnReturn } from '@/lib/booking/payments'
+import { finalizeRequestSelection } from '@/lib/booking/request-selection'
 import ReviewForm from '@/components/ui/ReviewForm'
 import TimeProposalPanel from '@/components/ui/TimeProposalPanel'
 import { itemPriceKc } from '@/lib/booking/commission'
@@ -126,6 +127,11 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
   if (order.customer_id !== user.id && order.provider_id !== user.id) notFound()
   // Otevřený chat objednávky → zprávy jsou přečtené (ikona zpráv v horní liště)
   await markThreadRead({ orderId: order.id })
+  // Pojistka: zaplacená objednávka z poptávky → poptávka musí být ostatním uzavřená (kdyby to
+  // při zpracování platby neproběhlo, např. starší nasazená verze). Opakování nic nezdvojí.
+  if (['awaiting_confirmation', 'capture_in_progress', 'confirmed'].includes((order as any).booking_state ?? '')) {
+    try { await finalizeRequestSelection(adminDb(), order.id) } catch (err) { console.error('[objednávka] uzavření poptávky', err) }
+  }
 
   // Model v2: po návratu ze Stripe se na stav platby zeptáme přímo Stripe – webhook mohl
   // nedorazit nebo se zdržet. Rezervaci to posune jen podle skutečného stavu ve Stripe.
@@ -294,11 +300,14 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
         authorizedAt={(order as any).authorized_at ?? null}
         confirmedAt={(order as any).confirmed_at ?? null}
         cancelReason={(order as any).cancel_reason ?? null}
+        farNote={!isProvider && outOfRange
+          ? `Pozor, je to daleko – asi ${outOfRange.distanceKm} km ${outOfRange.fromObec ? `od obce z poptávky (${outOfRange.fromObec})` : 'mimo obvyklý dosah poskytovatele'}. Proto rezervaci potvrzuje ručně. Když tam nedojede, odmítne ji a blokace se uvolní, nic nezaplatíte.`
+          : null}
       />}
 
       {/* Vzdálenost mimo obvyklý dosah – výrazně pro poskytovatele; zákazníkovi jen u čekající rezervace */}
       {outOfRange && !['confirmed', 'declined', 'expired', 'cancelled', 'capture_failed'].includes(v2BookingState ?? '') && order.status !== 'zruseno' && order.status !== 'dokonceno'
-        && (isProvider || v2BookingState === 'awaiting_confirmation') && (
+        && isProvider && (
         <div className="flex items-start gap-3 rounded-2xl border-2 border-orange-400 bg-orange-50 px-4 py-3.5 text-sm text-orange-950">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-orange-600" />
           <div>

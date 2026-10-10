@@ -29,6 +29,8 @@ export type BoardRequest = {
   sameCity: boolean
   /** Vzdálenost od nejbližší mé karty (vzdušnou čarou), null = nevíme */
   distanceKm: number | null
+  /** Moje vlastní poptávka (účet je zákazník i poskytovatel) */
+  isMine?: boolean
 }
 
 type Tab = 'doporucene' | 'okoli' | 'vse' | 'zajmy'
@@ -113,6 +115,12 @@ export default function PoptavkyBoard({
           <Send className="h-4 w-4" /> Zadat vlastní poptávku
         </Link>
       </div>
+      {isLoggedIn && (
+        <p className="-mt-2 mb-4 text-sm text-slate-500">
+          Poptávky, které jste zadali vy:{' '}
+          <Link href="/dashboard/poptavky" className="font-semibold text-emerald-700 hover:underline">Moje zadané poptávky</Link>
+        </p>
+      )}
 
       <div className="mb-4 flex flex-wrap gap-1.5">
         {tabs.map((t) => {
@@ -221,6 +229,14 @@ export default function PoptavkyBoard({
                   >
                     Detail
                   </Link>
+                  {req.isMine ? (
+                    <Link
+                      href={`/dashboard/poptavky/${req.id}`}
+                      className="inline-flex items-center gap-1 rounded-xl bg-sky-50 px-3.5 py-2 text-sm font-bold text-sky-700 transition hover:bg-sky-100"
+                    >
+                      Vaše poptávka · zájemci
+                    </Link>
+                  ) : (
                   <InterestAction
                     requestId={req.id}
                     category={req.category}
@@ -236,6 +252,7 @@ export default function PoptavkyBoard({
                       [req.id]: { myStatus: 'interested', myConversationId: cid, activeCount: req.activeCount + 1 },
                     }))}
                   />
+                  )}
                 </div>
               </div>
             </article>

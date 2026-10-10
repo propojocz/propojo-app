@@ -113,6 +113,35 @@ export async function createDraftOrderFromResponse(
   return { ok: true, orderId }
 }
 
+/**
+ * Rozpracované objednávky z poptávky (zákazník vybral termín, ale ještě nezaplatil).
+ * Klíč = id poptávky / reakce, hodnota = id nejnovější takové objednávky. Pro odkazy „Dokončit rezervaci“.
+ */
+export async function draftOrdersBy(db: Db, key: 'request_id' | 'response_id', ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  if (ids.length === 0) return out
+  const { data: ev } = await db
+    .from('order_events')
+    .select('order_id, payload, occurred_at')
+    .eq('type', 'created_from_request')
+    .in(`payload->>${key}`, ids)
+    .order('occurred_at', { ascending: false })
+  const events = (ev ?? []) as Array<{ order_id: string; payload: any }>
+  if (events.length === 0) return out
+  const { data: ords } = await db
+    .from('orders')
+    .select('id, status, booking_state')
+    .in('id', Array.from(new Set(events.map((e) => e.order_id))))
+  const open = new Set(((ords ?? []) as Array<{ id: string; status: string; booking_state: string | null }>)
+    .filter((o) => o.status !== 'zruseno' && (o.booking_state === null || o.booking_state === 'payment_expired' || o.booking_state === 'pending_payment'))
+    .map((o) => o.id))
+  for (const e of events) {
+    const k = e.payload?.[key]
+    if (k && open.has(e.order_id) && !out.has(k)) out.set(k, e.order_id)
+  }
+  return out
+}
+
 /** Smí se platba této objednávky přijmout? (Poptávku mezitím nevyřídila jiná platba.) */
 export async function requestStillAvailable(db: Db, orderId: string): Promise<boolean> {
   const link = await requestLinkOf(db, orderId)
