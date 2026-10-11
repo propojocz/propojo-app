@@ -13,7 +13,8 @@ import { revalidatePath } from 'next/cache'
 import { headers } from 'next/headers'
 import { createDepositCheckout } from '@/lib/actions/deposit'
 import { bookingCharge, isOfferKind, itemPriceKc } from '@/lib/booking/commission'
-import { isPlaceKnown, type KnownPlace } from '@/lib/geo'
+import { haversineKm, isPlaceKnown, KNOWN_PLACE_TOLERANCE_KM, type KnownPlace } from '@/lib/geo'
+import { requestLinkOf } from '@/lib/booking/request-selection'
 import {
   OFFER_KIND_TITLE,
   PAYMENT_NOTE,
@@ -191,6 +192,10 @@ export async function declineBooking(orderId: string, reason?: string | null): P
 
 export type BookingRecap = {
   orderId: string
+  /** Obec z objednávky / poptávky – předvyplní se k adrese, zákazník doplní ulici */
+  cityHint: string | null
+  /** Nezávazný odhad ceny zakázky od poskytovatele („2 500 – 5 000 Kč (nezávazné)“), null = žádný */
+  estimateText: string | null
   /** Karta nabídky – návrat k výběru termínu po vypršení zámku */
   serviceId: string | null
   offerKindTitle: string
@@ -314,7 +319,22 @@ export async function getBookingRecap(
       .limit(1)
       .maybeSingle()
     const p = prev as { location_address: string; location_lat: number; location_lng: number } | null
-    if (p) suggestedAddress = { text: p.location_address, lat: p.location_lat, lng: p.location_lng }
+    // Jen když leží v obci, o které se jednalo – jinak by se nabídla adresa z úplně jiného místa
+    // (poptávka v Rožnově, minulá objednávka v Dolní Bečvě). Pak se předvyplní jen obec.
+    const near = !knownPlace.obec || (p && haversineKm(knownPlace.obec.lat, knownPlace.obec.lng, p.location_lat, p.location_lng) <= KNOWN_PLACE_TOLERANCE_KM)
+    if (p && near) suggestedAddress = { text: p.location_address, lat: p.location_lat, lng: p.location_lng }
+  }
+
+  // Nezávazný odhad ceny zakázky od poskytovatele (poslední z chatu jednání / objednávky) – ať ho zákazník
+  // vidí i ve shrnutí. Přes Propojo se platí jen poplatek výše.
+  let estimateText: string | null = null
+  {
+    const link = await requestLinkOf(db, orderId)
+    let q = db.from('messages').select('content, created_at').eq('payload->>kind', 'price_estimate').order('created_at', { ascending: false }).limit(1)
+    q = link?.conversationId ? q.or(`order_id.eq.${orderId},conversation_id.eq.${link.conversationId}`) : q.eq('order_id', orderId)
+    const { data: est } = await q
+    const e = ((est ?? []) as Array<{ content: string }>)[0]
+    if (e) estimateText = String(e.content).replace(/^Předběžný odhad ceny:\s*/, '')
   }
 
   // Kontakt poskytovatele: telefon z karty nebo profilu, e-mail z účtu.
@@ -370,6 +390,8 @@ export async function getBookingRecap(
       addressRequiresCoords: charge.offerKind === 'B',
       address: o.location_address ? { text: o.location_address, lat: o.location_lat, lng: o.location_lng } : null,
       suggestedAddress,
+      cityHint: atCustomer ? (o.location_city ?? null) : null,
+      estimateText,
       placeText: atCustomer ? null : (o.services?.address ?? o.services?.city ?? null),
       provider: {
         id: order.provider_id,

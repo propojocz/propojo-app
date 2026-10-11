@@ -68,6 +68,11 @@ const createSchema = z.object({
   email: z.string().email('Neplatný e-mail.').nullable().optional(),
   phone: z.string().max(40).nullable().optional(),
   photos: z.array(z.string()).max(12).optional(),
+  // Nepovinný nezávazný rozpočet zákazníka (11. 10. 2026)
+  budget_from_kc: z.number().int().positive().max(10_000_000).nullable().optional(),
+  budget_to_kc: z.number().int().positive().max(10_000_000).nullable().optional(),
+}).refine((v) => !v.budget_from_kc || !v.budget_to_kc || v.budget_from_kc <= v.budget_to_kc, {
+  message: 'Rozpočet „od“ nemůže být vyšší než „do“.', path: ['budget_to_kc'],
 })
 
 export type CreateRequestValues = z.infer<typeof createSchema>
@@ -119,6 +124,8 @@ export async function createRequest(values: CreateRequestValues): Promise<Action
     city_lng: cityLng,
     preferred_date: d.preferred_date?.trim() || null,
     needed_at: d.needed_at || null,
+    budget_from_kc: d.budget_from_kc ?? null,
+    budget_to_kc: d.budget_to_kc ?? null,
     // status ('open') i expires_at (now + 14 dní) řeší default v DB
   }
 
@@ -362,6 +369,8 @@ export type RenewableRequest = {
   cityLat: number | null
   cityLng: number | null
   preferredDate: string | null
+  budgetFrom: number | null
+  budgetTo: number | null
   phone: string | null
   photos: string[]
 }
@@ -390,7 +399,7 @@ export async function getRequestForRenew(requestId: string): Promise<RenewableRe
   const admin = getAdminClient()
   const { data: req } = await admin
     .from('requests')
-    .select('id, customer_id, status, expires_at, selected_response_id, category, description, city, city_lat, city_lng, preferred_date, phone, photos')
+    .select('id, customer_id, status, expires_at, selected_response_id, category, description, city, city_lat, city_lng, preferred_date, phone, photos, budget_from_kc, budget_to_kc')
     .eq('id', requestId)
     .maybeSingle() as { data: any }
   if (!req || req.customer_id !== user.id) return null
@@ -403,6 +412,8 @@ export async function getRequestForRenew(requestId: string): Promise<RenewableRe
     cityLat: req.city_lat ?? null,
     cityLng: req.city_lng ?? null,
     preferredDate: req.preferred_date ?? null,
+    budgetFrom: req.budget_from_kc ?? null,
+    budgetTo: req.budget_to_kc ?? null,
     phone: req.phone ?? null,
     photos: req.photos ?? [],
   }
@@ -455,6 +466,8 @@ export async function renewRequest(requestId: string, values: CreateRequestValue
       city_lng: cityLng,
       preferred_date: d.preferred_date?.trim() || null,
       needed_at: d.needed_at || null,
+      budget_from_kc: d.budget_from_kc ?? null,
+      budget_to_kc: d.budget_to_kc ?? null,
       phone: d.phone?.trim() || null,
       status: 'open',
       selected_response_id: null,

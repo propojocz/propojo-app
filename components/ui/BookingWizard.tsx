@@ -9,7 +9,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
-import { AlertTriangle, CalendarDays, Info, Loader2, MapPin, ShieldCheck, User, X } from 'lucide-react'
+import { AlertTriangle, CalendarDays, Coins, Info, Loader2, MapPin, ShieldCheck, User, X } from 'lucide-react'
 import AddressInput from '@/components/ui/AddressInput'
 import { getBookingRecap, startBookingPayment, type BookingRecap } from '@/lib/actions/booking'
 import { acceptProposal } from '@/lib/actions/time-proposals'
@@ -52,7 +52,8 @@ export default function BookingWizard({
       if (!res.success) { setLoadError(res.error); return }
       setRecap(res.recap)
       const a = res.recap.address ?? res.recap.suggestedAddress
-      setAddrText(a?.text ?? '')
+      // Bez adresy: předvyplnit obec, o které se jednalo – zákazník doplní ulici a číslo
+      setAddrText(a?.text ?? (res.recap.cityHint ? `${res.recap.cityHint}, ` : ''))
       setAddrCoords({ lat: a?.lat ?? null, lng: a?.lng ?? null })
       setEditAddress(res.recap.atCustomer && !a)
     })
@@ -186,7 +187,7 @@ export default function BookingWizard({
                       <div className="min-w-0 flex-1">
                         <AddressInput
                           defaultValue={addrText}
-                          placeholder={recap.arrivalWindow ? 'Kam má poskytovatel přijet? Vyberte ze seznamu…' : 'Adresa – vyberte ze seznamu…'}
+                          placeholder={recap.cityHint ? `${recap.cityHint} – doplňte ulici a číslo, vyberte ze seznamu…` : recap.arrivalWindow ? 'Kam má poskytovatel přijet? Vyberte ze seznamu…' : 'Adresa – vyberte ze seznamu…'}
                           onPick={(a) => { setAddrText(a.address); setAddrCoords({ lat: a.lat, lng: a.lng }); setError('') }}
                           onFreeText={(t) => { setAddrText(t); setAddrCoords({ lat: null, lng: null }) }}
                         />
@@ -203,6 +204,16 @@ export default function BookingWizard({
                     <span>{recap.placeText ?? '—'}</span>
                   )}
                 </div>
+
+                {recap.estimateText && (
+                  <p className="flex items-start gap-2 px-3.5 py-2.5 text-slate-700">
+                    <Coins className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                    <span>
+                      Odhad ceny zakázky: {recap.estimateText}
+                      <span className="block text-xs text-slate-400">Cenu zakázky si domluvíte s poskytovatelem – přes Propojo platíte jen částku níže.</span>
+                    </span>
+                  </p>
+                )}
 
                 <p className="flex items-start gap-2 px-3.5 py-2.5 text-slate-700">
                   <User className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />

@@ -70,6 +70,8 @@ export default function InterestAction({
   const [error, setError] = useState<string | null>(null)
 
   const react = async (cardId: string | null, offer: OfferInput): Promise<string | null> => {
+    // Úprava už odeslané nabídky zůstává na místě; nová nabídka vede do chatu
+    const editingOffer = !!myStatus && myStatus !== 'rejected'
     setBusy(true)
     setError(null)
     const res = await expressInterest(requestId, cardId, { offerKind: offer.offerKind, chargeKc: offer.chargeKc, quoteFeeDeductible: offer.quoteFeeDeductible }, offer.baseCity)
@@ -87,6 +89,11 @@ export default function InterestAction({
     setMyStatus('interested')
     setConvId(res.conversationId)
     onReacted?.(res.conversationId)
+    // Nová nabídka → rovnou do chatu se zákazníkem (navrhnout termín, domluvit se)
+    if (res.conversationId && !editingOffer) {
+      router.push(`/poptavky/${requestId}/jednani/${res.conversationId}`)
+      return null
+    }
     router.refresh()
     return null
   }

@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { MapPin, CalendarClock, Clock, Tag, Users, ArrowLeft, Lock, ChevronRight } from 'lucide-react'
 import InterestAction, { type PickerCard } from '@/components/ui/InterestAction'
+import { rozpocetText } from '@/lib/format'
 
 export const dynamic = 'force-dynamic'
 export const metadata = { title: 'Detail poptávky | Propojo' }
@@ -44,11 +45,12 @@ export default async function PoptavkaDetailPage({
 
   const { data: req } = await admin
     .from('requests')
-    .select('id, customer_id, category, subcategory_id, city, description, preferred_date, photos, status, created_at, expires_at')
+    .select('id, customer_id, category, subcategory_id, city, description, preferred_date, photos, status, created_at, expires_at, budget_from_kc, budget_to_kc')
     .eq('id', requestId)
     .maybeSingle() as { data: {
       id: string; customer_id: string | null; category: string | null; subcategory_id: string | null
       city: string; description: string; preferred_date: string | null; photos: string[] | null
+      budget_from_kc: number | null; budget_to_kc: number | null
       status: string; created_at: string; expires_at: string
     } | null }
   if (!req) notFound()
@@ -117,6 +119,9 @@ export default async function PoptavkaDetailPage({
             <span className="inline-flex items-center gap-1.5"><Tag className="h-4 w-4 text-slate-400" /> {req.category}</span>
           )}
           <span className="inline-flex items-center gap-1.5"><MapPin className="h-4 w-4 text-slate-400" /> {req.city}</span>
+          {rozpocetText(req.budget_from_kc, req.budget_to_kc) && (
+            <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">💰 Rozpočet {rozpocetText(req.budget_from_kc, req.budget_to_kc)}</span>
+          )}
           {req.preferred_date && (
             <span className="inline-flex items-center gap-1.5"><CalendarClock className="h-4 w-4 text-slate-400" /> {req.preferred_date}</span>
           )}

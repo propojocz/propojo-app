@@ -165,3 +165,13 @@ export function casNaMinuty(t: string): number {
   const [h, m] = t.slice(0, 5).split(':').map(Number)
   return (h || 0) * 60 + (m || 0)
 }
+
+/** Rozpočet zákazníka u poptávky: „4 000 – 5 500 Kč“, „do 5 500 Kč“, „od 4 000 Kč“; null = neuveden */
+export function rozpocetText(from: number | null | undefined, to: number | null | undefined): string | null {
+  const f = from && from > 0 ? from : null
+  const t = to && to > 0 ? to : null
+  if (f && t) return `${f.toLocaleString('cs-CZ')} – ${t.toLocaleString('cs-CZ')} Kč`
+  if (t) return `do ${t.toLocaleString('cs-CZ')} Kč`
+  if (f) return `od ${f.toLocaleString('cs-CZ')} Kč`
+  return null
+}

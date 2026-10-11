@@ -28,7 +28,12 @@ export default function NovaPoptavkaPage() {
     city: '',
     email: '',
     phone: '',
-    preferred_date: '',
+    preferred_date: '', // poznámka k termínu (volný text)
+    when_from: '',
+    when_to: '',
+    when_part: 'kdykoli',
+    budget_from: '',
+    budget_to: '',
   })
   const [photos, setPhotos] = useState<string[]>([])
   // Poloha obce – podle ní poptávku uvidí hlavně poskytovatelé v okolí (3d, 7. 10. 2026)
@@ -64,6 +69,8 @@ export default function NovaPoptavkaPage() {
         city: r.city,
         phone: r.phone ?? '',
         preferred_date: r.preferredDate ?? '',
+        budget_from: r.budgetFrom ? String(r.budgetFrom) : '',
+        budget_to: r.budgetTo ? String(r.budgetTo) : '',
       }))
       setPhotos(r.photos)
       setCityGeo(r.cityLat != null && r.cityLng != null ? { lat: r.cityLat, lng: r.cityLng } : null)
@@ -88,6 +95,18 @@ export default function NovaPoptavkaPage() {
 
   const set = (key: string, value: string) => setForm((f) => ({ ...f, [key]: value }))
 
+  // „Kdy se vám to hodí“ → jeden čitelný text do poptávky (např. „12. 10. – 15. 10., odpoledne · ne ve středu“)
+  const DAY_PART: Record<string, string> = { kdykoli: '', rano: 'ráno', odpoledne: 'odpoledne', vecer: 'večer' }
+  const whenText = (): string => {
+    const den = (iso: string) => new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'numeric', timeZone: 'Europe/Prague' }).format(new Date(`${iso}T12:00:00Z`))
+    const dates = form.when_from
+      ? (form.when_to && form.when_to !== form.when_from ? `${den(form.when_from)} – ${den(form.when_to)}` : den(form.when_from))
+      : ''
+    const part = DAY_PART[form.when_part] ?? ''
+    const head = [dates, part].filter(Boolean).join(', ')
+    return [head, form.preferred_date.trim()].filter(Boolean).join(' · ')
+  }
+
   const handleSubmit = async () => {
     setState('loading')
     setErrorMsg('')
@@ -101,7 +120,10 @@ export default function NovaPoptavkaPage() {
       city_lng: cityGeo?.lng ?? null,
       email: form.email || null,
       phone: form.phone || null,
-      preferred_date: form.preferred_date || null,
+      preferred_date: whenText() || null,
+      needed_at: form.when_from || null,
+      budget_from_kc: form.budget_from ? Math.round(Number(form.budget_from)) : null,
+      budget_to_kc: form.budget_to ? Math.round(Number(form.budget_to)) : null,
       photos,
     }
     const result = renewId && renewLoaded ? await renewRequest(renewId, values) : await createRequest(values)
@@ -238,15 +260,44 @@ export default function NovaPoptavkaPage() {
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-bold text-slate-800">
-              Kdy by se hodilo? <span className="font-normal text-slate-400">(nepovinné)</span>
+              Kdy se vám to hodí? <span className="font-normal text-slate-400">(nepovinné)</span>
             </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <input type="date" value={form.when_from} onChange={(e) => set('when_from', e.target.value)} aria-label="Od"
+                className="rounded-xl border-[1.5px] border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500" />
+              <span className="text-slate-400">–</span>
+              <input type="date" value={form.when_to} min={form.when_from || undefined} onChange={(e) => set('when_to', e.target.value)} aria-label="Do"
+                className="rounded-xl border-[1.5px] border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500" />
+              <select value={form.when_part} onChange={(e) => set('when_part', e.target.value)}
+                className="rounded-xl border-[1.5px] border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500">
+                <option value="kdykoli">kdykoli</option>
+                <option value="rano">ráno</option>
+                <option value="odpoledne">odpoledne</option>
+                <option value="vecer">večer</option>
+              </select>
+            </div>
             <input
               value={form.preferred_date}
               onChange={(e) => set('preferred_date', e.target.value)}
-              placeholder="Např. do konce měsíce"
-              className="w-full rounded-xl border-[1.5px] border-slate-200 px-4 py-3 text-[15px] outline-none transition focus:border-emerald-500"
+              placeholder="Poznámka, např. do konce měsíce, ne ve středu"
+              className="w-full rounded-xl border-[1.5px] border-slate-200 px-4 py-2.5 text-sm outline-none transition focus:border-emerald-500"
             />
           </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-sm font-bold text-slate-800">
+            Rozpočet <span className="font-normal text-slate-400">(nepovinné, nezávazné)</span>
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <input type="number" min={1} inputMode="numeric" value={form.budget_from} onChange={(e) => set('budget_from', e.target.value)} placeholder="od"
+              className="w-32 rounded-xl border-[1.5px] border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500" />
+            <span className="text-slate-400">–</span>
+            <input type="number" min={1} inputMode="numeric" value={form.budget_to} onChange={(e) => set('budget_to', e.target.value)} placeholder="do"
+              className="w-32 rounded-xl border-[1.5px] border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-500" />
+            <span className="text-sm text-slate-500">Kč</span>
+          </div>
+          <p className="text-[11px] text-slate-400">Pomůže poskytovatelům poslat odpovídající nabídku. Přes Propojo platíte jen rezervační poplatek nebo cenu výjezdu, cenu zakázky si domluvíte s poskytovatelem.</p>
         </div>
 
         <div className="space-y-1.5">

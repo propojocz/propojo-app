@@ -18,6 +18,8 @@ export type BoardRequest = {
   city: string
   description: string
   preferredDate: string | null
+  /** Nezávazný rozpočet zákazníka („do 5 500 Kč“), null = neuveden */
+  budget?: string | null
   photos: string[]
   createdAt: string
   activeCount: number
@@ -198,6 +200,9 @@ export default function PoptavkyBoard({
                   <MapPin className="h-3.5 w-3.5" /> {req.city}
                   {req.distanceKm != null && <span className={req.sameCity ? 'font-semibold text-emerald-700' : 'text-slate-400'}>· ≈ {req.distanceKm} km</span>}
                 </span>
+                {req.budget && (
+                  <span className="inline-flex items-center gap-1 font-semibold text-slate-700">💰 {req.budget}</span>
+                )}
                 {req.preferredDate && (
                   <span className="inline-flex items-center gap-1"><CalendarClock className="h-3.5 w-3.5" /> {req.preferredDate}</span>
                 )}
