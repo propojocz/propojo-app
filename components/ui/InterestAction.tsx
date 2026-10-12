@@ -12,14 +12,16 @@
 // odhad ceny zakázky a zprávu. Zákazník nabídky porovná; po výběru se z nich platí.
 // 9. 10. 2026: reagovat jde i bez karty (obecná nabídka) – objednávka pak vznikne bez karty.
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ChevronRight, Loader2, Check, X, Star, ArrowLeft } from 'lucide-react'
 import { expressInterest } from '@/lib/actions/requests'
-import { sendConversationMessage, sendPriceEstimate } from '@/lib/actions/conversation-chat'
+import { sendConversationMessage, sendPriceEstimate, sendProviderAvailability } from '@/lib/actions/conversation-chat'
+import GalleryUpload from '@/components/ui/GalleryUpload'
 import { computeCommission } from '@/lib/booking/commission'
 import SearchAutocomplete from '@/components/ui/SearchAutocomplete'
+import AddressInput from '@/components/ui/AddressInput'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
 
 export type PickerCard = {
@@ -27,7 +29,12 @@ export type PickerCard = {
   title: string
   category: string | null
   subcategoryId: string | null
+  /** Typ místa karty (u_zakaznika / u_poskytovatele) a adresa provozovny – předvyplní „Kde to proběhne“ */
+  locationType?: string | null
+  address?: { text: string; lat: number | null; lng: number | null } | null
 }
+
+type Place = 'u_zakaznika' | 'u_poskytovatele'
 
 type OfferInput = {
   offerKind: 'A' | 'B'
@@ -40,12 +47,20 @@ type OfferInput = {
   message: string
   /** Bez karty: obec, odkud poskytovatel vyjíždí (uloží se do profilu) */
   baseCity: string | null
+  /** Kdy může (nepovinné) */
+  availFrom: string | null
+  availTo: string | null
+  /** Fotky podobné práce (nepovinné) */
+  photos: string[]
+  /** Kde služba proběhne + adresa provozovny */
+  place: Place
+  placeAddress: { text: string; lat: number | null; lng: number | null } | null
 }
 
 export default function InterestAction({
   requestId, category, subcategoryId, isFull,
   initialMyStatus = null, initialConversationId = null,
-  myCards, isLoggedIn, isProvider = true, myCity = null, block = false, onReacted,
+  myCards, isLoggedIn, isProvider = true, myCity = null, placePref = null, block = false, onReacted,
 }: {
   requestId: string
   category: string | null
@@ -59,6 +74,8 @@ export default function InterestAction({
   isProvider?: boolean
   /** Obec z profilu – předvyplní „Odkud vyjíždíte“ u nabídky bez karty */
   myCity?: string | null
+  /** Kde to zákazník chce (z poptávky) – předvyplní „Kde to proběhne“ */
+  placePref?: string | null
   block?: boolean
   onReacted?: (conversationId: string | null) => void
 }) {
@@ -74,7 +91,10 @@ export default function InterestAction({
     const editingOffer = !!myStatus && myStatus !== 'rejected'
     setBusy(true)
     setError(null)
-    const res = await expressInterest(requestId, cardId, { offerKind: offer.offerKind, chargeKc: offer.chargeKc, quoteFeeDeductible: offer.quoteFeeDeductible }, offer.baseCity)
+    const res = await expressInterest(requestId, cardId, {
+      offerKind: offer.offerKind, chargeKc: offer.chargeKc, quoteFeeDeductible: offer.quoteFeeDeductible,
+      place: offer.place, placeAddress: offer.place === 'u_poskytovatele' ? offer.placeAddress : null,
+    }, offer.baseCity)
     if (!res.success) {
       setBusy(false)
       return res.error
@@ -82,6 +102,8 @@ export default function InterestAction({
     // Odhad ceny a zpráva jdou do chatu jednání (zákazník je uvidí i v přehledu zájemců).
     if (res.conversationId) {
       if (offer.estimateFrom) await sendPriceEstimate(res.conversationId, offer.estimateFrom, offer.estimateTo, offer.estimateMaterial)
+      if (offer.availFrom) await sendProviderAvailability(res.conversationId, offer.availFrom, offer.availTo)
+      for (const url of offer.photos.slice(0, MAX_OFFER_PHOTOS)) await sendConversationMessage(res.conversationId, 'Podobná práce', url)
       if (offer.message.trim()) await sendConversationMessage(res.conversationId, offer.message.trim())
     }
     setBusy(false)
@@ -155,6 +177,7 @@ export default function InterestAction({
           subcategoryId={subcategoryId}
           cards={myCards}
           myCity={myCity}
+          placePref={placePref}
           busy={busy}
           editing={reacted}
           onSubmit={react}
@@ -166,14 +189,17 @@ export default function InterestAction({
 }
 
 const NO_CARD = '__bez_karty__'
+// Fotky podobné práce k nabídce – pár ukázek, ne galerie
+const MAX_OFFER_PHOTOS = 4
 
 function OfferPicker({
-  category, subcategoryId, cards, myCity, busy, editing, onSubmit, onClose,
+  category, subcategoryId, cards, myCity, placePref, busy, editing, onSubmit, onClose,
 }: {
   category: string | null
   subcategoryId: string | null
   cards: PickerCard[]
   myCity: string | null
+  placePref: string | null
   busy: boolean
   editing: boolean
   onSubmit: (cardId: string | null, offer: OfferInput) => Promise<string | null>
@@ -189,6 +215,14 @@ function OfferPicker({
   const [estMaterial, setEstMaterial] = useState<'with' | 'without' | null>(null)
   const [message, setMessage] = useState('')
   const [baseCity, setBaseCity] = useState(myCity ?? '')
+  const [availFrom, setAvailFrom] = useState('')
+  const [availTo, setAvailTo] = useState('')
+  const [photos, setPhotos] = useState<string[]>([])
+  const [photosUploading, setPhotosUploading] = useState(false)
+  // Kde to proběhne: podle karty, bez karty podle přání zákazníka
+  const [place, setPlace] = useState<Place>('u_zakaznika')
+  const [placeAddr, setPlaceAddr] = useState<{ text: string; lat: number | null; lng: number | null } | null>(null)
+  const [placeKey, setPlaceKey] = useState(0)
   const [err, setErr] = useState<string | null>(null)
 
   const isRecommended = (c: PickerCard) =>
@@ -198,6 +232,16 @@ function OfferPicker({
   const card = cardId === NO_CARD
     ? { id: NO_CARD, title: 'Bez karty – obecná nabídka', category: null, subcategoryId: null }
     : cards.find((c) => c.id === cardId) ?? null
+
+  // Při výběru karty předvyplnit místo a adresu provozovny
+  useEffect(() => {
+    if (!cardId) return
+    const c = cards.find((x) => x.id === cardId)
+    if (c?.locationType === 'u_poskytovatele') { setPlace('u_poskytovatele'); setPlaceAddr(c.address ?? null) }
+    else if (c) { setPlace('u_zakaznika'); setPlaceAddr(null) }
+    else { setPlace(placePref === 'u_poskytovatele' ? 'u_poskytovatele' : 'u_zakaznika'); setPlaceAddr(null) }
+    setPlaceKey((k) => k + 1)
+  }, [cardId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const minKc = BOOKING_POLICY.minChargeHalere / 100
   const chargeNum = Number(charge)
@@ -209,6 +253,10 @@ function OfferPicker({
     setErr(null)
     if (!cardId) { setErr('Vyberte nabídku.'); return }
     if (cardId === NO_CARD && !baseCity.trim()) { setErr('Vyberte obec, ze které vyjíždíte.'); return }
+    if (place === 'u_poskytovatele' && (!placeAddr?.text || !/\d/.test(placeAddr.text) || placeAddr.lat == null || placeAddr.lng == null)) {
+      setErr('Vyberte ze seznamu přesnou adresu, kde služba proběhne (ulice a číslo).')
+      return
+    }
     if (!kind) { setErr('Vyberte, jestli jde o službu, nebo výjezd a nacenění.'); return }
     if (!Number.isInteger(chargeNum) || chargeNum < minKc) { setErr(`Částka musí být celé číslo, nejméně ${minKc} Kč.`); return }
     const from = estFrom.trim() ? Math.round(Number(estFrom)) : null
@@ -220,7 +268,7 @@ function OfferPicker({
       setErr(`Odhad ceny zakázky nemůže být nižší než ${chargeNum.toLocaleString('cs-CZ')} Kč – ${kind === 'A' ? 'Rezervační poplatek' : 'Cena výjezdu'} se z ní odečítá.`)
       return
     }
-    const e = await onSubmit(cardId === NO_CARD ? null : cardId, { offerKind: kind, chargeKc: chargeNum, quoteFeeDeductible: kind === 'B' && deductible, estimateFrom: from, estimateTo: to, estimateMaterial: from != null ? estMaterial : null, message, baseCity: cardId === NO_CARD ? baseCity.trim() : null })
+    const e = await onSubmit(cardId === NO_CARD ? null : cardId, { offerKind: kind, chargeKc: chargeNum, quoteFeeDeductible: kind === 'B' && deductible, estimateFrom: from, estimateTo: to, estimateMaterial: from != null ? estMaterial : null, message, baseCity: cardId === NO_CARD ? baseCity.trim() : null, availFrom: availFrom || null, availTo: availTo || null, photos, place, placeAddress: placeAddr })
     if (e) setErr(e)
   }
 
@@ -321,6 +369,41 @@ function OfferPicker({
             )}
 
             <div>
+              <p className="mb-1.5 text-xs font-semibold text-slate-600">Kde to proběhne *</p>
+              <div className="grid grid-cols-2 gap-2">
+                {([['u_zakaznika', 'U zákazníka', 'přijedu na adresu zákazníka'], ['u_poskytovatele', 'U mě', 'v mé provozovně / salonu']] as const).map(([v, title, sub]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => { setPlace(v); setErr(null) }}
+                    className={`rounded-xl border-2 px-3 py-2.5 text-left transition ${place === v ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 hover:bg-slate-50'}`}
+                  >
+                    <b className="block text-[13px] text-slate-900">{title}</b>
+                    <span className="block text-[11px] leading-snug text-slate-500">{sub}</span>
+                  </button>
+                ))}
+              </div>
+              {placePref === 'u_poskytovatele' && place === 'u_zakaznika' && (
+                <p className="mt-1 text-[11px] text-amber-700">Zákazník by raději přišel k vám.</p>
+              )}
+              {placePref === 'u_zakaznika' && place === 'u_poskytovatele' && (
+                <p className="mt-1 text-[11px] text-amber-700">Zákazník by to raději měl u sebe.</p>
+              )}
+              {place === 'u_poskytovatele' && (
+                <div className="mt-2">
+                  <AddressInput
+                    key={`place-${placeKey}`}
+                    defaultValue={placeAddr?.text ?? ''}
+                    placeholder="Adresa provozovny – vyberte ze seznamu…"
+                    onPick={(a) => { setPlaceAddr({ text: a.address, lat: a.lat, lng: a.lng }); setErr(null) }}
+                    onFreeText={(t) => setPlaceAddr({ text: t, lat: null, lng: null })}
+                  />
+                  <p className="mt-1 text-[11px] text-slate-400">Zákazník ji uvidí s mapou ve shrnutí před platbou.</p>
+                </div>
+              )}
+            </div>
+
+            <div>
               <p className="mb-1.5 text-xs font-semibold text-slate-600">Co zákazníkovi nabízíte *</p>
               <div className="grid grid-cols-2 gap-2">
                 {kindBtn('A', 'Službu', 'rezervace termínu, poplatek se odečte z ceny')}
@@ -344,9 +427,10 @@ function OfferPicker({
                   className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-emerald-400"
                 />
                 <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                  Tolik zákazník zaplatí přes Propojo, až potvrdí termín. Nejméně {minKc} Kč.
-                  {fee != null ? ` Provize Propojo ${fee.toLocaleString('cs-CZ')} Kč.` : ''}
-                  {kind === 'A' ? ' Při placení služby ho zákazníkovi odečtete z ceny.' : ''}
+                  {kind === 'A'
+                    ? 'Tuto částku vám zákazník zaplatí předem při rezervaci termínu – víte tak, že to myslí vážně. Při placení služby mu ji odečtete z konečné ceny.'
+                    : 'Tuto částku vám zákazník zaplatí předem při rezervaci výjezdu – za cestu, prohlídku a nacenění. Víte tak, že to myslí vážně.'}
+                  {' '}Nejméně {minKc} Kč{fee != null ? `, provize Propojo ${fee.toLocaleString('cs-CZ')} Kč` : ''}.
                 </p>
                 {kind === 'B' && (
                   <label className="mt-2 flex cursor-pointer items-start gap-2 text-xs text-slate-700">
@@ -382,13 +466,30 @@ function OfferPicker({
             </div>
 
             <div>
+              <p className="mb-1 text-xs font-semibold text-slate-600">Kdy můžete (nepovinné)</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <input type="date" value={availFrom} onChange={(e) => setAvailFrom(e.target.value)} aria-label="Od"
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400" />
+                <span className="text-slate-400">–</span>
+                <input type="date" value={availTo} min={availFrom || undefined} onChange={(e) => setAvailTo(e.target.value)} aria-label="Do"
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400" />
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">Konkrétní termín pak navrhnete v chatu – zákazník ho potvrdí zaplacením.</p>
+            </div>
+
+            <div>
+              <p className="mb-1 text-xs font-semibold text-slate-600">Fotky podobné práce (nepovinné, nejvýš {MAX_OFFER_PHOTOS})</p>
+              <GalleryUpload value={photos} onChange={(v) => setPhotos(v.slice(0, MAX_OFFER_PHOTOS))} onUploadingChange={setPhotosUploading} />
+            </div>
+
+            <div>
               <p className="mb-1 text-xs font-semibold text-slate-600">Zpráva zákazníkovi (nepovinné)</p>
               <textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 rows={3}
                 maxLength={2000}
-                placeholder="Např. kdy můžete začít, co je v ceně…"
+                placeholder="Např. co je v ceně, materiál cca 1 200 Kč…"
                 className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-emerald-400"
               />
             </div>
@@ -398,10 +499,10 @@ function OfferPicker({
             <button
               type="button"
               onClick={submit}
-              disabled={busy}
+              disabled={busy || photosUploading}
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-600 disabled:opacity-60"
             >
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : editing ? 'Uložit nabídku' : 'Odeslat nabídku'}
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : photosUploading ? <><Loader2 className="h-4 w-4 animate-spin" /> Nahrávám fotky…</> : editing ? 'Uložit nabídku' : 'Odeslat nabídku'}
             </button>
           </div>
         )}

@@ -23,6 +23,12 @@ export type Zajemce = {
   completedCount: number
   rating: { avg: number; count: number } | null
   priceEstimate: string | null
+  /** Kde to proběhne („U vás“ / „U poskytovatele: adresa“) */
+  placeLabel?: string | null
+  /** Kdy poskytovatel může („15. 10. – 17. 10.“) */
+  availability?: string | null
+  /** Fotky podobné práce, které poslal v jednání */
+  photos?: string[]
   hasService: boolean
   /** Nabídka: typ a částka placená přes Propojo (3d) */
   offerLabel: string | null
@@ -94,7 +100,30 @@ export default function ZajemciList({
                   <Coins className="h-3.5 w-3.5" /> Odhad: {z.priceEstimate}
                 </span>
               )}
+              {z.placeLabel && (
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                  <MapPin className="h-3.5 w-3.5" /> {z.placeLabel}
+                </span>
+              )}
+              {z.availability && (
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                  📅 Může: {z.availability}
+                </span>
+              )}
             </div>
+            {z.photos && z.photos.length > 0 && (
+              <div className="mt-2">
+                <p className="mb-1 text-[11px] font-semibold text-slate-500">Podobná práce</p>
+                <div className="flex gap-1.5">
+                  {z.photos.map((url) => (
+                    <a key={url} href={url} target="_blank" rel="noopener noreferrer">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={url} alt="Podobná práce" className="h-14 w-14 rounded-lg border border-slate-200 object-cover" />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
             {z.lastMessage && (
               <p className="mt-2 line-clamp-1 rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-500">
                 <MessageSquare className="mr-1 inline h-3 w-3" /> {z.lastMessage}

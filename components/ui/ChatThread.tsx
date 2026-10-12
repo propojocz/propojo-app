@@ -15,6 +15,9 @@ export type ChatMessage = {
   created_at: string
   image_url?: string | null
   is_admin?: boolean | null
+  /** Typ zprávy – 'order_created' = systémový předěl (vznik objednávky / rezervace) */
+  type?: string | null
+  payload?: any
 }
 
 export default function ChatThread({
@@ -36,7 +39,8 @@ export default function ChatThread({
   return (
     <div className="space-y-3">
       {messages.map((m) => {
-        const isPropojo = m.is_admin === true
+        // Zpráva od Propojo: admin, nebo systémový předěl (vznik objednávky / rezervace)
+        const isPropojo = m.is_admin === true || m.type === 'order_created' || m.payload?.kind === 'negotiation_ended'
         const mine = !isPropojo && myUserId !== null && m.sender_id === myUserId
 
         if (isPropojo) {

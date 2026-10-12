@@ -25,7 +25,28 @@ import type { ActionResult } from './types'
 import { bookingCharge } from '@/lib/booking/commission'
 
 /** Nabídka v odpovědi na poptávku: typ a částka placená přes Propojo (3d, 7. 10. 2026). */
-export type ResponseOffer = { offerKind: 'A' | 'B'; chargeKc: number; quoteFeeDeductible?: boolean }
+export type ResponseOffer = {
+  offerKind: 'A' | 'B'
+  chargeKc: number
+  quoteFeeDeductible?: boolean
+  /** Kde služba proběhne (12. 10. 2026): u zákazníka, nebo v provozovně poskytovatele */
+  place?: 'u_zakaznika' | 'u_poskytovatele'
+  /** Adresa provozovny (u poskytovatele) – vybraná ze seznamu */
+  placeAddress?: { text: string; lat: number | null; lng: number | null } | null
+}
+
+/** Místo z nabídky → sloupce request_responses; u provozovny povinná přesná adresa ze seznamu */
+function placeOf(offer: ResponseOffer | null | undefined): { ok: true; cols: Record<string, unknown> } | { ok: false; error: string } {
+  if (!offer?.place) return { ok: true, cols: {} }
+  if (offer.place === 'u_poskytovatele') {
+    const a = offer.placeAddress
+    if (!a?.text?.trim() || !/\d/.test(a.text) || a.lat == null || a.lng == null) {
+      return { ok: false, error: 'Vyberte ze seznamu přesnou adresu, kde služba proběhne (ulice a číslo).' }
+    }
+    return { ok: true, cols: { place: 'u_poskytovatele', place_address: a.text.trim(), place_lat: a.lat, place_lng: a.lng } }
+  }
+  return { ok: true, cols: { place: 'u_zakaznika', place_address: null, place_lat: null, place_lng: null } }
+}
 
 function checkOffer(offer: ResponseOffer | null | undefined): { ok: true; kind: 'A' | 'B'; halere: number; deductible: boolean } | { ok: false; error: string } {
   if (!offer) return { ok: false, error: 'Vyplňte prosím, co zákazník zaplatí přes Propojo.' }
@@ -68,6 +89,12 @@ const createSchema = z.object({
   email: z.string().email('Neplatný e-mail.').nullable().optional(),
   phone: z.string().max(40).nullable().optional(),
   photos: z.array(z.string()).max(12).optional(),
+  // Kde se to má konat (12. 10. 2026): u zákazníka / u poskytovatele / je mi to jedno
+  place_pref: z.enum(['u_zakaznika', 'u_poskytovatele', 'jedno']).nullable().optional(),
+  // Nepovinná přesná adresa (12. 10. 2026) – poskytovatelé ji nevidí, přenese se do objednávky
+  address: z.string().max(300).nullable().optional(),
+  address_lat: z.number().nullable().optional(),
+  address_lng: z.number().nullable().optional(),
   // Nepovinný nezávazný rozpočet zákazníka (11. 10. 2026)
   budget_from_kc: z.number().int().positive().max(10_000_000).nullable().optional(),
   budget_to_kc: z.number().int().positive().max(10_000_000).nullable().optional(),
@@ -76,6 +103,13 @@ const createSchema = z.object({
 })
 
 export type CreateRequestValues = z.infer<typeof createSchema>
+
+// Přesná adresa jen vybraná ze seznamu (souřadnice) a s číslem domu – jinak se neuloží
+function requestAddress(d: CreateRequestValues) {
+  const text = d.place_pref === 'u_poskytovatele' ? null : (d.address?.trim() || null)
+  const ok = !!text && /\d/.test(text) && d.address_lat != null && d.address_lng != null
+  return { address: ok ? text : null, address_lat: ok ? d.address_lat : null, address_lng: ok ? d.address_lng : null }
+}
 
 export async function createRequest(values: CreateRequestValues): Promise<ActionResult> {
   const supabase = createClient()
@@ -106,9 +140,16 @@ export async function createRequest(values: CreateRequestValues): Promise<Action
   if (cityLat == null || cityLng == null) {
     const { data: obec } = await admin
       .from('obce').select('latitude, longitude').ilike('obec', d.city.trim()).limit(1).maybeSingle() as { data: { latitude: number; longitude: number } | null }
-    if (!obec) return { success: false, error: 'Vyberte prosím obec ze seznamu.' }
-    cityLat = obec.latitude
-    cityLng = obec.longitude
+    if (obec) {
+      cityLat = obec.latitude
+      cityLng = obec.longitude
+    } else if (d.address_lat != null && d.address_lng != null) {
+      // Obec z adresy není v seznamu obcí (např. „Praha 4“) → poloha z adresy, zaokrouhlená na ~1 km
+      cityLat = Math.round(d.address_lat * 100) / 100
+      cityLng = Math.round(d.address_lng * 100) / 100
+    } else {
+      return { success: false, error: 'Vyberte prosím adresu nebo obec ze seznamu.' }
+    }
   }
 
   const insertData = {
@@ -126,6 +167,8 @@ export async function createRequest(values: CreateRequestValues): Promise<Action
     needed_at: d.needed_at || null,
     budget_from_kc: d.budget_from_kc ?? null,
     budget_to_kc: d.budget_to_kc ?? null,
+    ...requestAddress(d),
+    place_pref: d.place_pref ?? null,
     // status ('open') i expires_at (now + 14 dní) řeší default v DB
   }
 
@@ -211,12 +254,15 @@ export async function expressInterest(
     .eq('provider_id', user.id)
     .maybeSingle() as { data: { id: string; status: string } | null }
   const offerCheck = checkOffer(offer)
+  const placeCheck = placeOf(offer)
+  if (!placeCheck.ok) return { success: false, error: placeCheck.error }
+  const placeCols = placeCheck.cols
   if (existing) {
     // Úprava nabídky u živé odpovědi (před výběrem zákazníkem).
     if (offer && (ACTIVE_STATUSES as readonly string[]).includes(existing.status)) {
       if (!offerCheck.ok) return { success: false, error: offerCheck.error }
       await (admin.from('request_responses') as any)
-        .update({ offer_kind: offerCheck.kind, charge_halere: offerCheck.halere, quote_fee_deductible: offerCheck.deductible, service_id: serviceId ?? null, updated_at: new Date().toISOString() })
+        .update({ offer_kind: offerCheck.kind, charge_halere: offerCheck.halere, quote_fee_deductible: offerCheck.deductible, service_id: serviceId ?? null, ...placeCols, updated_at: new Date().toISOString() })
         .eq('id', existing.id)
     }
     // Aktivní = beze změny (idempotentní). Dřív odmítnutý zájem znovu otevřeme.
@@ -227,7 +273,7 @@ export async function expressInterest(
         return { success: false, error: 'Tahle poptávka už má plno zájemců.' }
       }
       await (admin.from('request_responses') as any)
-        .update({ status: 'interested', service_id: serviceId ?? null, offer_kind: offerCheck.kind, charge_halere: offerCheck.halere, quote_fee_deductible: offerCheck.deductible, updated_at: new Date().toISOString() })
+        .update({ status: 'interested', service_id: serviceId ?? null, offer_kind: offerCheck.kind, charge_halere: offerCheck.halere, quote_fee_deductible: offerCheck.deductible, ...placeCols, updated_at: new Date().toISOString() })
         .eq('id', existing.id)
     }
     const convId = await conversationIdOf(admin, existing.id)
@@ -252,6 +298,7 @@ export async function expressInterest(
       offer_kind: offerCheck.kind,
       charge_halere: offerCheck.halere,
       quote_fee_deductible: offerCheck.deductible,
+      ...placeCols,
     })
     .select('id')
     .single()
@@ -371,6 +418,8 @@ export type RenewableRequest = {
   preferredDate: string | null
   budgetFrom: number | null
   budgetTo: number | null
+  address: { text: string; lat: number | null; lng: number | null } | null
+  placePref: 'u_zakaznika' | 'u_poskytovatele' | 'jedno' | null
   phone: string | null
   photos: string[]
 }
@@ -399,7 +448,7 @@ export async function getRequestForRenew(requestId: string): Promise<RenewableRe
   const admin = getAdminClient()
   const { data: req } = await admin
     .from('requests')
-    .select('id, customer_id, status, expires_at, selected_response_id, category, description, city, city_lat, city_lng, preferred_date, phone, photos, budget_from_kc, budget_to_kc')
+    .select('id, customer_id, status, expires_at, selected_response_id, category, description, city, city_lat, city_lng, preferred_date, phone, photos, budget_from_kc, budget_to_kc, address, address_lat, address_lng, place_pref')
     .eq('id', requestId)
     .maybeSingle() as { data: any }
   if (!req || req.customer_id !== user.id) return null
@@ -414,6 +463,8 @@ export async function getRequestForRenew(requestId: string): Promise<RenewableRe
     preferredDate: req.preferred_date ?? null,
     budgetFrom: req.budget_from_kc ?? null,
     budgetTo: req.budget_to_kc ?? null,
+    address: req.address ? { text: req.address, lat: req.address_lat, lng: req.address_lng } : null,
+    placePref: req.place_pref ?? null,
     phone: req.phone ?? null,
     photos: req.photos ?? [],
   }
@@ -449,9 +500,16 @@ export async function renewRequest(requestId: string, values: CreateRequestValue
   if (cityLat == null || cityLng == null) {
     const { data: obec } = await admin
       .from('obce').select('latitude, longitude').ilike('obec', d.city.trim()).limit(1).maybeSingle() as { data: { latitude: number; longitude: number } | null }
-    if (!obec) return { success: false, error: 'Vyberte prosím obec ze seznamu.' }
-    cityLat = obec.latitude
-    cityLng = obec.longitude
+    if (obec) {
+      cityLat = obec.latitude
+      cityLng = obec.longitude
+    } else if (d.address_lat != null && d.address_lng != null) {
+      // Obec z adresy není v seznamu obcí (např. „Praha 4“) → poloha z adresy, zaokrouhlená na ~1 km
+      cityLat = Math.round(d.address_lat * 100) / 100
+      cityLng = Math.round(d.address_lng * 100) / 100
+    } else {
+      return { success: false, error: 'Vyberte prosím adresu nebo obec ze seznamu.' }
+    }
   }
 
   const now = new Date()
@@ -468,6 +526,8 @@ export async function renewRequest(requestId: string, values: CreateRequestValue
       needed_at: d.needed_at || null,
       budget_from_kc: d.budget_from_kc ?? null,
       budget_to_kc: d.budget_to_kc ?? null,
+      ...requestAddress(d),
+      place_pref: d.place_pref ?? null,
       phone: d.phone?.trim() || null,
       status: 'open',
       selected_response_id: null,

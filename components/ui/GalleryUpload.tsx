@@ -16,10 +16,13 @@ const MAX_SOURCE_MB = 25
 interface GalleryUploadProps {
   value: string[]
   onChange: (urls: string[]) => void
+  /** Hlásí probíhající nahrávání – formulář s tím může počkat s odesláním */
+  onUploadingChange?: (uploading: boolean) => void
 }
 
-export default function GalleryUpload({ value, onChange }: GalleryUploadProps) {
-  const [uploading, setUploading] = useState(false)
+export default function GalleryUpload({ value, onChange, onUploadingChange }: GalleryUploadProps) {
+  const [uploading, setUploadingState] = useState(false)
+  const setUploading = (v: boolean) => { setUploadingState(v); onUploadingChange?.(v) }
   const [error, setError] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 

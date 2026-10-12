@@ -45,12 +45,12 @@ export default async function PoptavkaDetailPage({
 
   const { data: req } = await admin
     .from('requests')
-    .select('id, customer_id, category, subcategory_id, city, description, preferred_date, photos, status, created_at, expires_at, budget_from_kc, budget_to_kc')
+    .select('id, customer_id, category, subcategory_id, city, description, preferred_date, photos, status, created_at, expires_at, budget_from_kc, budget_to_kc, place_pref')
     .eq('id', requestId)
     .maybeSingle() as { data: {
       id: string; customer_id: string | null; category: string | null; subcategory_id: string | null
       city: string; description: string; preferred_date: string | null; photos: string[] | null
-      budget_from_kc: number | null; budget_to_kc: number | null
+      budget_from_kc: number | null; budget_to_kc: number | null; place_pref: string | null
       status: string; created_at: string; expires_at: string
     } | null }
   if (!req) notFound()
@@ -86,10 +86,13 @@ export default async function PoptavkaDetailPage({
     myCity = prof?.city ?? null
     const { data: cards } = await admin
       .from('services')
-      .select('id, title, category, subcategory_id')
+      .select('id, title, category, subcategory_id, location_type, address, address_lat, address_lng')
       .eq('provider_id', user.id)
-      .eq('is_active', true) as { data: Array<{ id: string; title: string | null; category: string | null; subcategory_id: string | null }> | null }
-    myCards = (cards ?? []).map((c) => ({ id: c.id, title: c.title ?? 'Nabídka', category: c.category, subcategoryId: c.subcategory_id }))
+      .eq('is_active', true) as { data: Array<{ id: string; title: string | null; category: string | null; subcategory_id: string | null; location_type: string | null; address: string | null; address_lat: number | null; address_lng: number | null }> | null }
+    myCards = (cards ?? []).map((c) => ({
+      id: c.id, title: c.title ?? 'Nabídka', category: c.category, subcategoryId: c.subcategory_id,
+      locationType: c.location_type, address: c.address ? { text: c.address, lat: c.address_lat, lng: c.address_lng } : null,
+    }))
   }
 
   const statusBadge = req.status === 'selected'
@@ -119,6 +122,9 @@ export default async function PoptavkaDetailPage({
             <span className="inline-flex items-center gap-1.5"><Tag className="h-4 w-4 text-slate-400" /> {req.category}</span>
           )}
           <span className="inline-flex items-center gap-1.5"><MapPin className="h-4 w-4 text-slate-400" /> {req.city}</span>
+          {req.place_pref && (
+            <span className="inline-flex items-center gap-1.5">{({ u_zakaznika: '📍 u zákazníka', u_poskytovatele: '🏠 u poskytovatele', jedno: '📍 u zákazníka i u poskytovatele' } as Record<string, string>)[req.place_pref] ?? ''}</span>
+          )}
           {rozpocetText(req.budget_from_kc, req.budget_to_kc) && (
             <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">💰 Rozpočet {rozpocetText(req.budget_from_kc, req.budget_to_kc)}</span>
           )}
@@ -162,6 +168,7 @@ export default async function PoptavkaDetailPage({
                 requestId={req.id}
                 category={req.category}
                 subcategoryId={req.subcategory_id}
+                placePref={req.place_pref ?? null}
                 isFull={activeCount >= 5}
                 initialMyStatus={mine?.status ?? null}
                 initialConversationId={myConversationId}

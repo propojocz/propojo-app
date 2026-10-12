@@ -196,6 +196,8 @@ export type BookingRecap = {
   cityHint: string | null
   /** Nezávazný odhad ceny zakázky od poskytovatele („2 500 – 5 000 Kč (nezávazné)“), null = žádný */
   estimateText: string | null
+  /** Služba u poskytovatele: souřadnice provozovny pro mapu */
+  placeCoords: { lat: number; lng: number } | null
   /** Karta nabídky – návrat k výběru termínu po vypršení zámku */
   serviceId: string | null
   offerKindTitle: string
@@ -263,7 +265,7 @@ export async function getBookingRecap(
 
   const { data: row } = await db
     .from('orders')
-    .select('service_location, location_address, location_lat, location_lng, location_city, agreed_charge_halere, offer_kind, service_item_id, quote_fee_deductible, service_items(name, offer_kind, deposit_amount, quote_fee, deposit_type, quote_fee_deductible), services(title, location_type, address, city, phone)')
+    .select('service_location, location_address, location_lat, location_lng, location_city, provider_place_address, provider_place_lat, provider_place_lng, agreed_charge_halere, offer_kind, service_item_id, quote_fee_deductible, service_items(name, offer_kind, deposit_amount, quote_fee, deposit_type, quote_fee_deductible), services(title, location_type, address, address_lat, address_lng, city, phone)')
     .eq('id', orderId)
     .maybeSingle()
   const o = row as any
@@ -307,7 +309,9 @@ export async function getBookingRecap(
 
   // Adresa z poslední jiné objednávky zákazníka s přesnými souřadnicemi – jen k potvrzení.
   let suggestedAddress: BookingRecap['suggestedAddress'] = null
-  if (atCustomer && !o.location_address) {
+  // U objednávky z poptávky ne – adresa je z poptávky, jinak se předvyplní jen obec (12. 10. 2026)
+  const fromRequest = !!(await requestLinkOf(db, orderId))
+  if (atCustomer && !o.location_address && !fromRequest) {
     const { data: prev } = await db
       .from('orders')
       .select('location_address, location_lat, location_lng')
@@ -392,7 +396,14 @@ export async function getBookingRecap(
       suggestedAddress,
       cityHint: atCustomer ? (o.location_city ?? null) : null,
       estimateText,
-      placeText: atCustomer ? null : (o.services?.address ?? o.services?.city ?? null),
+      // U poskytovatele: přesná adresa provozovny s mapou už před platbou – zákazník musí vědět, kam přijít
+      placeText: atCustomer ? null : (o.services?.address ?? o.provider_place_address ?? o.services?.city ?? o.location_city ?? null),
+      placeCoords: atCustomer ? null : (
+        o.services?.address_lat != null && o.services?.address_lng != null
+          ? { lat: Number(o.services.address_lat), lng: Number(o.services.address_lng) }
+          : o.provider_place_lat != null && o.provider_place_lng != null
+            ? { lat: Number(o.provider_place_lat), lng: Number(o.provider_place_lng) }
+            : null),
       provider: {
         id: order.provider_id,
         name: pr?.company_name || pr?.full_name || 'Poskytovatel',

@@ -44,7 +44,7 @@ export default async function ZajemciPage({ params }: { params: { id: string } }
 
   const { data: rrs } = await admin
     .from('request_responses')
-    .select('id, provider_id, service_id, status, last_message_at, offer_kind, charge_halere, quote_fee_deductible')
+    .select('id, provider_id, service_id, status, last_message_at, offer_kind, charge_halere, quote_fee_deductible, place, place_address')
     .eq('request_id', id)
     .order('last_message_at', { ascending: false, nullsFirst: false }) as { data: Array<{
       id: string; provider_id: string; service_id: string | null; status: string; last_message_at: string | null
@@ -106,6 +106,28 @@ export default async function ZajemciPage({ params }: { params: { id: string } }
     }
   }
 
+  // Kdy poskytovatel může + fotky podobné práce (zprávy poskytovatele v jednání)
+  const availByConv = new Map<string, string>()
+  const photosByConv = new Map<string, string[]>()
+  if (convIds.length) {
+    const { data: extra } = await admin
+      .from('messages')
+      .select('conversation_id, sender_id, content, image_url, payload, created_at')
+      .in('conversation_id', convIds)
+      .order('created_at', { ascending: false }) as { data: Array<{ conversation_id: string | null; sender_id: string; content: string; image_url: string | null; payload: any; created_at: string }> | null }
+    const provByConv = new Map(Array.from(convMap.entries()).map(([respId, c]) => [c.id, responses.find((r) => r.id === respId)?.provider_id]))
+    for (const m of extra ?? []) {
+      if (!m.conversation_id || provByConv.get(m.conversation_id) !== m.sender_id) continue
+      if (m.payload?.kind === 'provider_availability' && !availByConv.has(m.conversation_id)) {
+        availByConv.set(m.conversation_id, String(m.content).replace(/^Mohu:\s*/, '').replace(/\.\.$/, '.'))
+      }
+      if (m.image_url && !/\.pdf($|\?)/i.test(m.image_url)) {
+        const list = photosByConv.get(m.conversation_id) ?? []
+        if (list.length < 4) photosByConv.set(m.conversation_id, [m.image_url, ...list])
+      }
+    }
+  }
+
   // Dokončené zakázky poskytovatele (důvěryhodnostní signál místo ratingu).
   const completedByProv = new Map<string, number>()
   if (provIds.length) {
@@ -149,6 +171,9 @@ export default async function ZajemciPage({ params }: { params: { id: string } }
       completedCount: completedByProv.get(r.provider_id) ?? 0,
       rating: ratingByProv.get(r.provider_id) ?? null,
       priceEstimate: conv ? (estimateByConv.get(conv.id) ?? null) : null,
+      availability: conv ? (availByConv.get(conv.id) ?? null) : null,
+      placeLabel: (r as any).place === 'u_poskytovatele' ? `U poskytovatele${(r as any).place_address ? `: ${(r as any).place_address}` : ''}` : (r as any).place === 'u_zakaznika' ? 'U vás' : null,
+      photos: conv ? (photosByConv.get(conv.id) ?? []) : [],
       // Vybrat jde poskytovatele s nabídkou (typ + částka); karta je nepovinná
       hasService: (r.offer_kind === 'A' || r.offer_kind === 'B') && !!r.charge_halere,
       offerLabel: (r.offer_kind === 'A' || r.offer_kind === 'B') && r.charge_halere

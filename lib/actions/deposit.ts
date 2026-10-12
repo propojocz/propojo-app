@@ -137,8 +137,10 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
     if (item.offer_kind === 'B' && (a?.location_lat == null || a?.location_lng == null)) {
       return { success: false, error: 'Nejdřív prosím doplňte přesnou adresu výjezdu (vyberte ji ze seznamu).' }
     }
-    if (atCustomer && !a?.location_address?.trim()) {
-      return { success: false, error: 'Nejdřív prosím doplňte adresu, kam má poskytovatel přijet.' }
+    // U zákazníka vždy přesná adresa: vybraná ze seznamu (souřadnice) a s číslem domu – samotná obec
+    // („Brno,“) nestačí (12. 10. 2026, platba prošla jen s obcí).
+    if (atCustomer && (!a?.location_address?.trim() || !/\d/.test(a.location_address) || a.location_lat == null || a.location_lng == null)) {
+      return { success: false, error: 'Nejdřív prosím doplňte přesnou adresu (ulice a číslo) a vyberte ji ze seznamu.' }
     }
     // Dosah poskytovatele podle přesné adresy – jen u přímé rezervace času, kde poskytovatel nic
     // nepotvrzoval. U domluveného termínu o vzdálenosti rozhodl poskytovatel sám (viděl ji v objednávce).

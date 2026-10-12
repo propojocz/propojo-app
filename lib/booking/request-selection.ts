@@ -13,7 +13,7 @@
 // Volá se jen ze serveru (server actions, webhook) s ověřenými účastníky.
 
 import type { Db } from './payments'
-import { logOrderEvent } from './payments'
+import { applyTransition, expireCheckoutIfOpen, loadBookingOrder, logOrderEvent } from './payments'
 
 const ACTIVE = ['interested', 'negotiating']
 
@@ -46,10 +46,13 @@ export async function createDraftOrderFromResponse(
 ): Promise<DraftResult> {
   const { data: req } = await db
     .from('requests')
-    .select('id, customer_id, status, expires_at, description, city')
+    .select('id, customer_id, status, expires_at, description, city, address, address_lat, address_lng')
     .eq('id', args.requestId)
     .maybeSingle()
-  const r = req as { id: string; customer_id: string | null; status: string; expires_at: string | null; description: string | null; city: string | null } | null
+  const r = req as {
+    id: string; customer_id: string | null; status: string; expires_at: string | null; description: string | null; city: string | null
+    address: string | null; address_lat: number | null; address_lng: number | null
+  } | null
   if (!r || r.customer_id !== args.customerId) return { ok: false, error: 'Poptávka nebyla nalezena.' }
   if (r.status !== 'open' || (r.expires_at && new Date(r.expires_at).getTime() < Date.now())) {
     return { ok: false, error: 'Tahle poptávka už není otevřená.' }
@@ -57,12 +60,13 @@ export async function createDraftOrderFromResponse(
 
   const { data: resp } = await db
     .from('request_responses')
-    .select('id, request_id, provider_id, service_id, status, offer_kind, charge_halere, quote_fee_deductible')
+    .select('id, request_id, provider_id, service_id, status, offer_kind, charge_halere, quote_fee_deductible, place, place_address, place_lat, place_lng')
     .eq('id', args.responseId)
     .maybeSingle()
   const rr = resp as {
     id: string; request_id: string; provider_id: string; service_id: string | null; status: string
     offer_kind: string | null; charge_halere: number | null; quote_fee_deductible: boolean | null
+    place: string | null; place_address: string | null; place_lat: number | null; place_lng: number | null
   } | null
   if (!rr || rr.request_id !== args.requestId) return { ok: false, error: 'Reakce k této poptávce nepatří.' }
   if (!ACTIVE.includes(rr.status)) return { ok: false, error: 'Tento poskytovatel už není ve hře.' }
@@ -81,11 +85,21 @@ export async function createDraftOrderFromResponse(
   for (const e of (prev ?? []) as Array<{ order_id: string }>) {
     const { data: o } = await db.from('orders').select('id, status, booking_state').eq('id', e.order_id).maybeSingle()
     const ord = o as { id: string; status: string; booking_state: string | null } | null
-    if (ord && ord.status !== 'zruseno' && (ord.booking_state === null || ord.booking_state === 'payment_expired')) {
+    if (ord && ord.status !== 'zruseno' && (ord.booking_state === null || ord.booking_state === 'payment_expired' || ord.booking_state === 'pending_payment')) {
+      // Zákazník se vrátil do chatu uprostřed platby (jiný termín) → rozpracovanou platbu uvolnit
+      await resetDraftPayment(db, ord.id, args.customerId)
+      // Adresa doplněná mezitím v chatu → do objednávky (jen u zákazníka a jen když tam ještě není)
+      if (r.address && rr.place !== 'u_poskytovatele') {
+        await db.from('orders')
+          .update({ location_address: r.address, location_lat: r.address_lat, location_lng: r.address_lng })
+          .eq('id', ord.id)
+          .is('location_address', null)
+      }
       return { ok: true, orderId: ord.id }
     }
   }
 
+  const atProvider = rr.place === 'u_poskytovatele'
   const { data: order, error } = await db
     .from('orders')
     .insert({
@@ -95,6 +109,15 @@ export async function createDraftOrderFromResponse(
       status: 'cekajici',
       is_inquiry: false,
       location_city: r.city ?? null,
+      // Místo konání z nabídky; bez údaje se řídí kartou (u karty bez typu = u zákazníka)
+      service_location: rr.place ?? null,
+      // U zákazníka: přesná adresa z poptávky (ve shrnutí ji jen potvrdí). U provozovny: adresa z nabídky.
+      location_address: atProvider ? null : (r.address ?? null),
+      location_lat: atProvider ? null : (r.address ? r.address_lat : null),
+      location_lng: atProvider ? null : (r.address ? r.address_lng : null),
+      provider_place_address: atProvider ? rr.place_address : null,
+      provider_place_lat: atProvider ? rr.place_lat : null,
+      provider_place_lng: atProvider ? rr.place_lng : null,
       description: r.description ?? null,
       offer_kind: rr.offer_kind,
       agreed_charge_halere: rr.charge_halere,
@@ -142,6 +165,22 @@ export async function draftOrdersBy(db: Db, key: 'request_id' | 'response_id', i
   return out
 }
 
+/**
+ * Rozpracovaná objednávka z poptávky uprostřed platby (Stripe Checkout otevřený nebo opuštěný) →
+ * zavřít platební stránku a vrátit ji do domluvy (payment_expired), ať jde zvolit termín znovu.
+ */
+export async function resetDraftPayment(db: Db, orderId: string, customerId: string): Promise<void> {
+  const order = await loadBookingOrder(db, orderId)
+  if (!order || order.booking_state !== 'pending_payment') return
+  if (order.stripe_checkout_session_id) await expireCheckoutIfOpen(order.stripe_account_id, order.stripe_checkout_session_id)
+  await applyTransition(db, order, 'checkout_expired', { type: 'customer', id: customerId }, { payload: { reason: 'back_to_chat' } })
+}
+
+/** Objednávka z poptávky, která ještě není zaplacená (předautorizovaná) – žije jen v chatu jednání */
+export function isUnpaidDraftState(bookingState: string | null | undefined): boolean {
+  return bookingState == null || bookingState === 'payment_expired' || bookingState === 'pending_payment'
+}
+
 /** Smí se platba této objednávky přijmout? (Poptávku mezitím nevyřídila jiná platba.) */
 export async function requestStillAvailable(db: Db, orderId: string): Promise<boolean> {
   const link = await requestLinkOf(db, orderId)
@@ -177,7 +216,7 @@ export async function finalizeRequestSelection(db: Db, orderId: string): Promise
       order_id: orderId,
       sender_id: req.customer_id,
       type: 'order_created',
-      content: 'Zákazník vybral termín a zaplatil — vznikla rezervace. Domluva pokračuje tady.',
+      content: 'Zákazník vybral termín a zaplatil – vznikla rezervace. Propojo vás propojilo, teď už je domluva na vás. Psát si můžete dál tady.',
     })
   }
 

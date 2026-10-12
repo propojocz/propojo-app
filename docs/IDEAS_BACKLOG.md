@@ -85,3 +85,27 @@ Neimplementovat v současném MVP. Před návrhem produktu je potřeba samostatn
 **Status:** CANDIDATE / POST-MVP
 
 Dnes poskytovatel napojuje účet na stránce hostované Stripe (rozložení nejde měnit, jen logo a barvy v Stripe → Settings → Business → Branding). Stripe nabízí „embedded components“ – onboarding vložený přímo do stránky Propoja s naším vzhledem a texty. Víc práce (Account Sessions, Connect.js), přínos: plynulejší zážitek, menší odpadávání poskytovatelů. Zvážit spolu s přechodem z `type: 'standard'` na controller properties / Accounts v2 (Stripe Standard označuje za legacy).
+
+---
+
+## IDEA-004 — Realizace v profilu (skutečné ceny skutečných prací)
+
+**Status:** CANDIDATE / POST-MVP (Matej 12. 10. 2026: „tuhle myšlenku bych skutečně rozvíjel“)
+
+Poskytovatel po dokončené zakázce zveřejní na profilu realizaci, např.:
+
+> Rekonstrukce koupelny · Rožnov p. R.
+> 📷 6 skutečných fotografií · Cena práce: 48 000 Kč · Materiál: 71 000 Kč · Doba realizace: 8 dní · Hodnocení zákazníka ★★★★★
+
+Proč: hodnotnější než „ceny od 500 Kč/h“. Za rok vznikne databáze skutečných cen skutečných prací – zákazník, který
+za půl roku plánuje koupelnu, si vzpomene „na Propoju jsem viděl, že podobné koupelny stojí 40–70 tisíc“. Důvod chodit
+na Propojo ještě předtím, než člověk shání řemeslníka (SEO, obsah), a zároveň marketing řemeslníka.
+
+Na co myslet při návrhu (nic z toho není blokující, jen nezapomenout):
+- ceny zadává poskytovatel sám – Propojo je neověřuje a nezpracovává (model §19: konečnou cenu Hlavní smlouvy neevidujeme);
+  v UI jasně „údaje uvedl poskytovatel“;
+- vazba na hodnocení jen u skutečné rezervace přes Propojo (štítek „Ověřená rezervace přes Propojo“, model §14);
+- fotky domácnosti zákazníka a přesné místo: zveřejnit jen se souhlasem zákazníka a bez adresy (obec stačí) –
+  při návrhu ověřit, jestli to není nové nakládání s osobními údaji (LEGAL_REVIEW_NEEDED jen pokud ano);
+- později: přehled „kolik stojí …“ podle oboru a regionu z těchto realizací.
+

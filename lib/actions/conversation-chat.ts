@@ -22,7 +22,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { createNotification } from './notifications'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
-import { createDraftOrderFromResponse } from '@/lib/booking/request-selection'
+import { createDraftOrderFromResponse, draftOrdersBy } from '@/lib/booking/request-selection'
 import { cas, terminDlouze } from '@/lib/format'
 
 function getAdminClient() {
@@ -455,6 +455,139 @@ export async function selectProviderWithTerm(
   // Poskytovatel dostane oznámení „Zákazník vybral termín — čeká na platbu“ až při přijetí termínu ve shrnutí
   // (acceptProposal) – tady by bylo duplicitní.
   return { success: true, orderId: draft.orderId, startsAt: p.starts_at }
+}
+
+// ── Přesná adresa zákazníka doplněná v chatu jednání (12. 10. 2026) ──
+// Uloží se k poptávce (poskytovatelé dál vidí jen obec) a do rozpracované objednávky, pokud už je.
+// Poskytovatel ji uvidí až po zaplacení / potvrzení rezervace.
+export async function setRequestAddressInChat(
+  conversationId: string,
+  address: { text: string; lat: number | null; lng: number | null },
+): Promise<{ success: true } | { success: false; error: string }> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+  const admin = getAdminClient()
+  const conv = await loadConversation(admin, conversationId)
+  if (!conv || !conv.requestId || !conv.responseId) return { success: false, error: 'Konverzace nebyla nalezena.' }
+  if (user.id !== conv.customerId) return { success: false, error: 'Adresu doplňuje zákazník.' }
+  if (conv.orderId) return { success: false, error: 'Rezervace už vznikla – adresa je v objednávce.' }
+  const text = address.text?.trim()
+  if (!text || !/\d/.test(text) || address.lat == null || address.lng == null) {
+    return { success: false, error: 'Vyberte prosím přesnou adresu ze seznamu (ulice a číslo).' }
+  }
+  await (admin.from('requests') as any)
+    .update({ address: text, address_lat: address.lat, address_lng: address.lng, updated_at: new Date().toISOString() })
+    .eq('id', conv.requestId)
+    .eq('customer_id', user.id)
+  // Rozpracovaná objednávka (vybraný termín, nezaplaceno) – ať ji shrnutí rovnou předvyplní
+  const draftId = (await draftOrdersBy(admin as any, 'response_id', [conv.responseId])).get(conv.responseId) ?? null
+  if (draftId) {
+    await (admin.from('orders') as any)
+      .update({ location_address: text, location_lat: address.lat, location_lng: address.lng })
+      .eq('id', draftId)
+      .eq('customer_id', user.id)
+      .is('booking_state', null)
+  }
+  return { success: true }
+}
+
+// ── Ukončení jednání (12. 10. 2026) ─────────────────────────────
+// Zákazník i poskytovatel můžou domluvu opustit (nesedí cena, termín…). Druhá strana uvidí v chatu,
+// kdo a proč jednání ukončil. Jen před vznikem rezervace – potom platí rušení rezervace.
+// Poskytovatel → reakce 'rejected' (může později znovu nabídnout), zákazník → 'not_selected'.
+
+export type EndReason = 'cena' | 'termin' | 'jine'
+const END_REASON_TEXT: Record<EndReason, string> = {
+  cena: 'nesedí cena',
+  termin: 'nesedí termín',
+  jine: 'jiný důvod',
+}
+
+export async function endNegotiation(conversationId: string, reason: EndReason, note?: string | null): Promise<SendResult> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+  const admin = getAdminClient()
+  const conv = await loadConversation(admin, conversationId)
+  if (!conv || !conv.responseId) return { success: false, error: 'Konverzace nebyla nalezena.' }
+  const by = user.id === conv.providerId ? 'provider' : user.id === conv.customerId ? 'customer' : null
+  if (!by) return { success: false, error: 'K této konverzaci nemáte přístup.' }
+  if (conv.status !== 'open') return { success: false, error: 'Tohle jednání už je ukončené.' }
+  if (conv.orderId) return { success: false, error: 'Rezervace už vznikla – zrušit ji můžete v objednávce.' }
+  if (!END_REASON_TEXT[reason]) return { success: false, error: 'Vyberte důvod.' }
+
+  // Rozpracovaná rezervace (vybraný termín, nezaplaceno) se zruší; probíhající platbu ne
+  const draftId = (await draftOrdersBy(admin as any, 'response_id', [conv.responseId])).get(conv.responseId) ?? null
+  if (draftId) {
+    const { data: d } = await admin.from('orders').select('booking_state').eq('id', draftId).maybeSingle() as { data: { booking_state: string | null } | null }
+    if (d?.booking_state === 'pending_payment') {
+      return { success: false, error: 'Právě probíhá platba. Dokončete ji nebo počkejte, až vyprší, a pak jednání ukončete.' }
+    }
+    await (admin.from('orders') as any).update({ status: 'zruseno' }).eq('id', draftId).neq('status', 'zruseno')
+  }
+
+  const now = new Date().toISOString()
+  await (admin.from('request_responses') as any)
+    .update({ status: by === 'provider' ? 'rejected' : 'not_selected', updated_at: now })
+    .eq('id', conv.responseId)
+  await (admin.from('conversations') as any).update({ status: 'closed' }).eq('id', conversationId)
+
+  const kdo = by === 'provider' ? 'Poskytovatel' : 'Zákazník'
+  const cleanNote = note?.trim().slice(0, 300) || null
+  const content = `${kdo} ukončil jednání – ${END_REASON_TEXT[reason]}.${cleanNote ? ` ${cleanNote}` : ''}`
+  const { data, error } = await (admin.from('messages') as any)
+    .insert({ conversation_id: conversationId, order_id: null, sender_id: user.id, content, type: 'message',
+      payload: { kind: 'negotiation_ended', by, reason, note: cleanNote } })
+    .select('*')
+    .single() as { data: any; error: any }
+  if (error || !data) console.error('[endNegotiation] zpráva', error)
+
+  try {
+    const other = by === 'provider' ? conv.customerId : conv.providerId
+    if (other) {
+      await createNotification({
+        userId: other,
+        type: 'status_change',
+        actorId: user.id,
+        title: `${kdo} ukončil jednání o poptávce`,
+        preview: `Důvod: ${END_REASON_TEXT[reason]}${cleanNote ? ` – ${cleanNote}` : ''}`,
+        url: `/poptavky/${conv.requestId}/jednani/${conversationId}`,
+      })
+    }
+  } catch (err) {
+    console.error('[endNegotiation] notifikace', err)
+  }
+  return { success: true, id: data?.id ?? conversationId, message: data }
+}
+
+// ── Poskytovatel: kdy může (u nabídky na poptávku) ─────────────────
+// Strukturovaná zpráva do chatu jednání („Mohu: 15.–17. 10.“); souhrn „Co je domluveno“ i přehled
+// zájemců berou poslední hodnotu. Nic se tím nerezervuje.
+export async function sendProviderAvailability(conversationId: string, from: string, to: string | null): Promise<SendResult> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+  const admin = getAdminClient()
+  const conv = await loadConversation(admin, conversationId)
+  if (!conv || !conv.responseId) return { success: false, error: 'Konverzace nebyla nalezena.' }
+  if (user.id !== conv.providerId) return { success: false, error: 'Tohle posílá poskytovatel.' }
+  if (conv.status !== 'open') return { success: false, error: 'Tahle konverzace je uzavřená.' }
+  const iso = /^\d{4}-\d{2}-\d{2}$/
+  if (!iso.test(from) || (to && !iso.test(to)) || (to && to < from)) return { success: false, error: 'Zkontrolujte prosím data.' }
+  const den = (d: string) => new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'numeric', timeZone: 'Europe/Prague' }).format(new Date(`${d}T12:00:00Z`))
+  // Datum končí tečkou („17. 10.“) – další už nepřidávat
+  const content = `Mohu: ${to && to !== from ? `${den(from)} – ${den(to)}` : den(from)}`
+  const { data, error } = await (admin.from('messages') as any)
+    .insert({ conversation_id: conversationId, order_id: conv.orderId, sender_id: user.id, content, type: 'message',
+      payload: { kind: 'provider_availability', from, to: to && to !== from ? to : null } })
+    .select('*')
+    .single() as { data: any; error: any }
+  if (error || !data) {
+    console.error('[sendProviderAvailability]', error)
+    return { success: false, error: 'Nepodařilo se odeslat.' }
+  }
+  return { success: true, id: data.id, message: data }
 }
 
 // ── Domluva od zákazníka: kdy se to hodí, rozpočet ─────────────────

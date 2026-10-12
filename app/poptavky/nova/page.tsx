@@ -17,7 +17,7 @@ import Link from 'next/link'
 import { createRequest, getRequestForRenew, renewRequest } from '@/lib/actions/requests'
 import { createClient } from '@/lib/supabase/client'
 import GalleryUpload from '@/components/ui/GalleryUpload'
-import SearchAutocomplete from '@/components/ui/SearchAutocomplete'
+import AddressInput from '@/components/ui/AddressInput'
 
 export default function NovaPoptavkaPage() {
   const searchParams = useSearchParams()
@@ -32,10 +32,14 @@ export default function NovaPoptavkaPage() {
     when_from: '',
     when_to: '',
     when_part: 'kdykoli',
+    place_pref: 'u_zakaznika',
     budget_from: '',
     budget_to: '',
   })
   const [photos, setPhotos] = useState<string[]>([])
+  // Přesná adresa (nepovinná) – poskytovatelé uvidí jen obec, adresu až vybraný po potvrzení rezervace
+  const [addr, setAddr] = useState<{ text: string; lat: number | null; lng: number | null }>({ text: '', lat: null, lng: null })
+  const [addrKey, setAddrKey] = useState(0)
   // Poloha obce – podle ní poptávku uvidí hlavně poskytovatelé v okolí (3d, 7. 10. 2026)
   const [cityGeo, setCityGeo] = useState<{ lat: number; lng: number } | null>(null)
   // Obec předvyplněná z URL – změna klíče přenačte našeptávač s novou výchozí hodnotou
@@ -71,8 +75,11 @@ export default function NovaPoptavkaPage() {
         preferred_date: r.preferredDate ?? '',
         budget_from: r.budgetFrom ? String(r.budgetFrom) : '',
         budget_to: r.budgetTo ? String(r.budgetTo) : '',
+        place_pref: r.placePref ?? 'u_zakaznika',
       }))
       setPhotos(r.photos)
+      if (r.address) setAddr({ text: r.address.text, lat: r.address.lat, lng: r.address.lng })
+      setAddrKey((k) => k + 1)
       setCityGeo(r.cityLat != null && r.cityLng != null ? { lat: r.cityLat, lng: r.cityLng } : null)
       setCityPrefill(r.city)
       setRenewLoaded(true)
@@ -108,6 +115,12 @@ export default function NovaPoptavkaPage() {
   }
 
   const handleSubmit = async () => {
+    // Adresa (nebo aspoň obec) musí být vybraná ze seznamu
+    if (!form.city.trim()) {
+      setState('error')
+      setErrorMsg('Vyberte prosím adresu nebo obec ze seznamu.')
+      return
+    }
     setState('loading')
     setErrorMsg('')
     // createRequest bere stejná pole; category zůstává volný text, subcategory_id
@@ -122,6 +135,10 @@ export default function NovaPoptavkaPage() {
       phone: form.phone || null,
       preferred_date: whenText() || null,
       needed_at: form.when_from || null,
+      place_pref: form.place_pref as 'u_zakaznika' | 'u_poskytovatele' | 'jedno',
+      address: form.place_pref === 'u_poskytovatele' ? null : (addr.text.trim() || null),
+      address_lat: addr.lat,
+      address_lng: addr.lng,
       budget_from_kc: form.budget_from ? Math.round(Number(form.budget_from)) : null,
       budget_to_kc: form.budget_to ? Math.round(Number(form.budget_to)) : null,
       photos,
@@ -239,7 +256,10 @@ export default function NovaPoptavkaPage() {
           {/* Fotky jako příloha přímo u popisu – v telefonu nabídne galerii i fotoaparát */}
           <div className="pt-1">
             <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
-              <Paperclip className="h-3.5 w-3.5 text-slate-400" /> Přiložit fotky <span className="font-normal text-slate-400">(nepovinné – z galerie nebo fotoaparátu)</span>
+              <Paperclip className="h-3.5 w-3.5 text-slate-400" /> Přidat foto <span className="font-normal text-slate-400">(nepovinné)</span>
+            </p>
+            <p className="mb-1.5 text-[11px] leading-relaxed text-slate-400">
+              Fotka místa nebo problému – a klidně i vizualizace, jak chcete, aby to vypadalo (třeba z AI). Poskytovatel pak líp odhadne cenu.
             </p>
             <GalleryUpload value={photos} onChange={setPhotos} />
           </div>
@@ -247,16 +267,42 @@ export default function NovaPoptavkaPage() {
 
         <div className="space-y-5">
           <div className="space-y-1.5">
-            <label className="text-sm font-bold text-slate-800">Obec *</label>
-            <SearchAutocomplete
-              key={`obec-${cityPrefill}`}
-              mode="obce"
-              defaultValue={cityPrefill}
-              placeholder="Začněte psát a vyberte obec…"
-              onPickObec={(o) => { set('city', o.obec); setCityGeo({ lat: o.latitude, lng: o.longitude }) }}
-              onFreeText={(t) => { set('city', t); setCityGeo(null) }}
+            <label className="text-sm font-bold text-slate-800">Kde se to má konat?</label>
+            <div className="flex flex-wrap gap-1.5">
+              {([['u_zakaznika', 'U mě'], ['u_poskytovatele', 'U poskytovatele'], ['jedno', 'Obojí je možné']] as const).map(([v, label]) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => set('place_pref', v)}
+                  className={`rounded-xl border-[1.5px] px-3.5 py-2 text-sm font-semibold transition ${form.place_pref === v ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-400">Např. masáž doma, nebo v salonu poskytovatele.</p>
+          </div>
+          {/* Jedno pole: ulice s číslem, nebo jen obec. Poskytovatelé uvidí jen obec, zbytek až po zaplacení. */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-bold text-slate-800">Adresa *</label>
+            <AddressInput
+              key={`addr-${addrKey}-${cityPrefill}`}
+              allowMunicipality
+              defaultValue={addr.text || cityPrefill}
+              placeholder={form.place_pref === 'u_poskytovatele' ? 'Obec, kde jste – vyberte ze seznamu…' : 'Ulice a číslo, nebo jen obec – vyberte ze seznamu…'}
+              onPick={(a) => {
+                set('city', a.municipality || a.address)
+                // Obec: souřadnice obce rovnou; u adresy je dohledá server podle názvu obce
+                setCityGeo(a.kind === 'municipality' ? { lat: a.lat, lng: a.lng } : null)
+                setAddr(a.kind === 'address' ? { text: a.address, lat: a.lat, lng: a.lng } : { text: '', lat: null, lng: null })
+              }}
+              onFreeText={(t) => { set('city', ''); setCityGeo(null); setAddr({ text: t, lat: null, lng: null }) }}
             />
-            <p className="text-[11px] text-slate-400">Vyberte ze seznamu – podle obce poptávku uvidí hlavně poskytovatelé v okolí.</p>
+            <p className="text-[11px] text-slate-400">
+              {form.place_pref === 'u_poskytovatele'
+                ? 'Stačí obec – podle ní poptávku uvidí poskytovatelé v okolí.'
+                : 'Poskytovatelé uvidí jen obec. Ulici a číslo uvidí jen ten, koho vyberete, a to po zaplacení.'}
+            </p>
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-bold text-slate-800">

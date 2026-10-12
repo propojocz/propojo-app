@@ -19,8 +19,6 @@ export type MyRequest = {
   activeCount: number
   isSelected: boolean
   orderId: string | null
-  /** Vybraný termín, ale nezaplaceno – rozpracovaná rezervace */
-  draftOrderId?: string | null
 }
 
 function timeAgo(iso: string) {
@@ -126,16 +124,6 @@ export default function MojePoptavkyList({ items, showBoardHint = false }: {
                   <p className="mt-3 inline-flex items-center gap-1.5 text-xs text-slate-500">
                     <Users className="h-3.5 w-3.5" /> {r.activeCount} {r.activeCount === 1 ? 'aktivní zájemce' : r.activeCount < 5 ? 'aktivní zájemci' : 'aktivních zájemců'}
                   </p>
-                )}
-
-                {r.draftOrderId && r.status === 'open' && (
-                  <Link
-                    href={`/dashboard/objednavky/${r.draftOrderId}`}
-                    className="mt-3 flex items-center justify-between gap-2 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-bold text-amber-900 transition hover:bg-amber-100"
-                  >
-                    Máte vybraný termín – dokončete rezervaci (adresa a platba)
-                    <ChevronRight className="h-4 w-4 shrink-0" />
-                  </Link>
                 )}
 
                 <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-3">

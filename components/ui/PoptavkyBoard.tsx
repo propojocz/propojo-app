@@ -20,6 +20,8 @@ export type BoardRequest = {
   preferredDate: string | null
   /** Nezávazný rozpočet zákazníka („do 5 500 Kč“), null = neuveden */
   budget?: string | null
+  /** Kde to zákazník chce: u_zakaznika / u_poskytovatele / jedno */
+  placePref?: string | null
   photos: string[]
   createdAt: string
   activeCount: number
@@ -200,6 +202,9 @@ export default function PoptavkyBoard({
                   <MapPin className="h-3.5 w-3.5" /> {req.city}
                   {req.distanceKm != null && <span className={req.sameCity ? 'font-semibold text-emerald-700' : 'text-slate-400'}>· ≈ {req.distanceKm} km</span>}
                 </span>
+                {req.placePref && (
+                  <span className="inline-flex items-center gap-1">{({ u_zakaznika: '📍 u zákazníka', u_poskytovatele: '🏠 u poskytovatele', jedno: '📍 u zákazníka i u poskytovatele' } as Record<string, string>)[req.placePref] ?? ''}</span>
+                )}
                 {req.budget && (
                   <span className="inline-flex items-center gap-1 font-semibold text-slate-700">💰 {req.budget}</span>
                 )}
@@ -252,6 +257,7 @@ export default function PoptavkyBoard({
                     myCards={myCards}
                     isLoggedIn={isLoggedIn}
                     myCity={myCity}
+                    placePref={req.placePref ?? null}
                     onReacted={(cid) => setLocal((prev) => ({
                       ...prev,
                       [req.id]: { myStatus: 'interested', myConversationId: cid, activeCount: req.activeCount + 1 },

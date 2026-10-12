@@ -18,6 +18,10 @@ type Suggestion = {
   location: string      // „Vsetín, okres Vsetín"
   lat: number
   lng: number
+  /** Výsledek je obec (ne adresa s číslem) */
+  isMunicipality: boolean
+  /** Obec z regionální struktury Mapy.cz (spolehlivější než text „location“, např. v Praze) */
+  municipality: string | null
 }
 
 /** Z „Vsetín, okres Vsetín" vytáhne „Vsetín" — použijeme k doplnění města působiště. */
@@ -30,10 +34,13 @@ export default function AddressInput({
   onPick,
   onFreeText,
   placeholder = 'Začněte psát adresu a vyberte ze seznamu…',
+  allowMunicipality = false,
 }: {
   defaultValue?: string | null
-  /** Uživatel vybral adresu ze seznamu → máme text, souřadnice i obec */
-  onPick: (a: { address: string; lat: number; lng: number; municipality: string }) => void
+  /** Uživatel vybral adresu ze seznamu → máme text, souřadnice i obec (kind: adresa s číslem / jen obec) */
+  onPick: (a: { address: string; lat: number; lng: number; municipality: string; kind: 'address' | 'municipality' }) => void
+  /** Nabízet i samotné obce (poptávka: stačí obec, ulice je nepovinná) */
+  allowMunicipality?: boolean
   /** Uživatel psal volný text (nevybral) → adresa bez souřadnic */
   onFreeText: (text: string) => void
   placeholder?: string
@@ -65,7 +72,7 @@ export default function AddressInput({
       setLoading(true)
       try {
         const url =
-          `https://api.mapy.cz/v1/suggest?lang=cs&limit=6&type=regional.address` +
+          `https://api.mapy.cz/v1/suggest?lang=cs&limit=6&type=${allowMunicipality ? 'regional.address,regional.municipality' : 'regional.address'}` +
           `&apikey=${encodeURIComponent(apiKey)}&query=${encodeURIComponent(q)}`
         const res = await fetch(url)
         if (!res.ok) throw new Error(`Mapy.cz ${res.status}`)
@@ -77,6 +84,10 @@ export default function AddressInput({
             location: i.location ?? '',
             lat: i.position.lat,
             lng: i.position.lon,
+            isMunicipality: i.type === 'regional.municipality',
+            municipality: i.type === 'regional.municipality'
+              ? (i.name ?? null)
+              : ((i.regionalStructure ?? []).find((r: any) => r?.type === 'regional.municipality')?.name ?? null),
           }))
         setItems(mapped)
         setOpen(mapped.length > 0)
@@ -93,7 +104,11 @@ export default function AddressInput({
     const full = s.location ? `${s.name}, ${s.location}` : s.name
     setValue(full)
     setOpen(false)
-    onPick({ address: full, lat: s.lat, lng: s.lng, municipality: municipalityOf(s.location) })
+    onPick({
+      address: full, lat: s.lat, lng: s.lng,
+      municipality: s.municipality ?? municipalityOf(s.location),
+      kind: s.isMunicipality ? 'municipality' : 'address',
+    })
   }
 
   return (

@@ -1,7 +1,6 @@
 // app/dashboard/objednavky/page.tsx
 import { createClient } from '@/lib/supabase/server'
 import { adminDb } from '@/lib/booking/payments'
-import { draftOrdersBy } from '@/lib/booking/request-selection'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { CalendarDays, AlertCircle } from 'lucide-react'
@@ -41,15 +40,13 @@ function customerTodo(o: any): string | null {
   return null
 }
 
-// Poptávky, ze kterých vznikly nezaplacené objednávky bez položky z ceníku (kandidáti na rozpracovanou rezervaci)
-async function requestIdsOfDrafts(orders: any[]): Promise<string[]> {
-  const ids = orders
-    .filter((o) => o.status !== 'zruseno' && !o.service_item_id && (o.booking_state == null || o.booking_state === 'payment_expired' || o.booking_state === 'pending_payment'))
-    .map((o) => o.id)
-  if (ids.length === 0) return []
+// Objednávky z poptávky, které ještě nejsou zaplacené – žijí jen v chatu jednání, v seznamu se neukazují
+async function unpaidRequestDrafts(orders: any[]): Promise<Set<string>> {
+  const ids = orders.filter((o) => !o.authorized_at && !o.service_item_id).map((o) => o.id)
+  if (ids.length === 0) return new Set()
   const { data } = await adminDb()
-    .from('order_events').select('payload').eq('type', 'created_from_request').in('order_id', ids)
-  return Array.from(new Set(((data ?? []) as Array<{ payload: any }>).map((e) => e.payload?.request_id).filter(Boolean)))
+    .from('order_events').select('order_id').eq('type', 'created_from_request').in('order_id', ids)
+  return new Set(((data ?? []) as Array<{ order_id: string }>).map((e) => e.order_id))
 }
 
 function OrderCard({ o, role, otherName, todo }: { o: any; role: 'provider' | 'customer'; otherName: string; todo?: string | null }) {
@@ -140,14 +137,11 @@ export default async function ObjednavkyPage() {
     : { data: [] }
   const nameMap = Object.fromEntries((otherProfiles ?? []).map((p: any) => [p.id, p.full_name]))
 
-  const provOrders = asProvider ?? []
-  const custOrdersRaw = asCustomer ?? []
-
-  // Rozpracovaná rezervace z poptávky (vybraný termín, nezaplaceno) – jinak by zapadla mezi ostatní
-  const drafts = new Set<string>(
-    Array.from((await draftOrdersBy(adminDb(), 'request_id', await requestIdsOfDrafts(custOrdersRaw))).values()),
-  )
-  const todoOf = (o: any): string | null => (drafts.has(o.id) ? 'Dokončete rezervaci: adresa a platba' : customerTodo(o))
+  // Nezaplacené objednávky z poptávky se neukazují (domluva a platba běží v chatu jednání)
+  const hidden = await unpaidRequestDrafts([...(asProvider ?? []), ...(asCustomer ?? [])])
+  const provOrders = (asProvider ?? []).filter((o: any) => !hidden.has(o.id))
+  const custOrdersRaw = (asCustomer ?? []).filter((o: any) => !hidden.has(o.id))
+  const todoOf = customerTodo
 
   // Rozdělíme: co po mně něco chce (platba, potvrzení) jde NAHORU. Bez toho
   // zákazník po rezervaci odejde a objednávku pak nenajde.

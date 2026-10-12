@@ -318,6 +318,10 @@ export default function OrderDetailClient({
     && isPaid
   const hasDeposit = depositAmount > 0
   const hasAddress = !!order.location_address || addrSaved
+  // Provozovna: z karty, u objednávky z poptávky bez karty z nabídky (provider_place_*)
+  const placeAddress: string | null = service?.address ?? (order as any).provider_place_address ?? null
+  const placeLat: number | null = service?.address_lat ?? (order as any).provider_place_lat ?? null
+  const placeLng: number | null = service?.address_lng ?? (order as any).provider_place_lng ?? null
   const atCustomer = order.service_location
     ? order.service_location === 'u_zakaznika'
     : (service?.location_type ? service.location_type !== 'u_poskytovatele' : true)
@@ -737,15 +741,15 @@ export default function OrderDetailClient({
                     // Přesnou adresu ukážeme až po potvrzení objednávky; předtím
                     // (nebo když ji poskytovatel nezveřejnil) jen město.
                     <>
-                      {service?.address && order.status !== 'cekajici' ? (
+                      {placeAddress && order.status !== 'cekajici' ? (
                         <p className="font-medium text-slate-800">
-                          {service.address}
-                          <CopyAddressButton text={service.address} />
+                          {placeAddress}
+                          <CopyAddressButton text={placeAddress} />
                         </p>
                       ) : (
                         <p className="font-medium text-slate-800">
-                          {service?.city ?? '—'}
-                          {service?.address ? ' — přesnou adresu uvidíte po potvrzení objednávky' : ''}
+                          {service?.city ?? order.location_city ?? '—'}
+                          {placeAddress ? ' — přesnou adresu uvidíte po potvrzení objednávky' : ''}
                         </p>
                       )}
                       {service?.phone && order.status !== 'cekajici' ? (
@@ -769,10 +773,10 @@ export default function OrderDetailClient({
           )}
 
           {/* Mapa pro ZÁKAZNÍKA — kam si dojít pro výrobek / na službu do provozovny */}
-          {!isProvider && !atCustomer && service?.address_lat != null && service?.address_lng != null
+          {!atCustomer && placeLat != null && placeLng != null
             && order.status !== 'zruseno' && order.status !== 'cekajici' && (
             <div className="mt-4">
-              <ServiceMap lat={service.address_lat} lng={service.address_lng} label={service.address ?? 'Provozovna'} />
+              <ServiceMap lat={placeLat} lng={placeLng} label={placeAddress ?? 'Provozovna'} />
             </div>
           )}
 

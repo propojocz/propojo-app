@@ -11,6 +11,7 @@ import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle, CalendarDays, Coins, Info, Loader2, MapPin, ShieldCheck, User, X } from 'lucide-react'
 import AddressInput from '@/components/ui/AddressInput'
+import ServiceMap from '@/components/ui/ServiceMap'
 import { getBookingRecap, startBookingPayment, type BookingRecap } from '@/lib/actions/booking'
 import { acceptProposal } from '@/lib/actions/time-proposals'
 import { setOrderAddress } from '@/lib/actions/orders'
@@ -87,8 +88,9 @@ export default function BookingWizard({
   /** Uloží adresu, pokud je nová nebo změněná. Vrací false při chybě. */
   const saveAddressIfNeeded = async (): Promise<boolean> => {
     if (!recap || !recap.atCustomer) return true
-    if (addrText.trim().length < 5) { setError('Doplňte prosím adresu (ulice a číslo).'); return false }
-    if (recap.addressRequiresCoords && (addrCoords.lat == null || addrCoords.lng == null)) {
+    // Přesná adresa: s číslem domu a vybraná ze seznamu (samotná obec nestačí)
+    if (addrText.trim().length < 5 || !/\d/.test(addrText)) { setError('Doplňte prosím přesnou adresu – ulici a číslo domu.'); return false }
+    if (addrCoords.lat == null || addrCoords.lng == null) {
       setError('Vyberte prosím adresu ze seznamu, ať poskytovatel ví přesně, kam přijet.')
       return false
     }
@@ -201,7 +203,15 @@ export default function BookingWizard({
                       </span>
                     )
                   ) : (
-                    <span>{recap.placeText ?? '—'}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-slate-500">Místo konání – u poskytovatele</p>
+                      <p>{recap.placeText ?? '—'}</p>
+                      {recap.placeCoords && (
+                        <div className="mt-2 overflow-hidden rounded-lg">
+                          <ServiceMap lat={recap.placeCoords.lat} lng={recap.placeCoords.lng} label={recap.placeText ?? 'Místo konání'} />
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
 

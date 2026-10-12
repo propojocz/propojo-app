@@ -7,7 +7,7 @@ import OrderDetailClient from './OrderDetailClient'
 import BookingStateBadge from '@/components/ui/BookingStateBadge'
 import BookingProviderActions from '@/components/ui/BookingProviderActions'
 import { adminDb, loadBookingOrder, resolveCaptureInProgress, syncCheckoutOnReturn } from '@/lib/booking/payments'
-import { finalizeRequestSelection } from '@/lib/booking/request-selection'
+import { finalizeRequestSelection, isUnpaidDraftState, requestLinkOf, resetDraftPayment } from '@/lib/booking/request-selection'
 import ReviewForm from '@/components/ui/ReviewForm'
 import TimeProposalPanel from '@/components/ui/TimeProposalPanel'
 import { itemPriceKc } from '@/lib/booking/commission'
@@ -125,6 +125,19 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
 
   if (error || !order) notFound()
   if (order.customer_id !== user.id && order.provider_id !== user.id) notFound()
+  // Objednávka z poptávky se ukazuje až po zaplacení (termín, cena a adresa pevně dané). Do té doby
+  // se všechno děje v chatu jednání – i návrat ze Stripe po zrušení platby (12. 10. 2026).
+  {
+    const bs = ((order as any).booking_state ?? null) as string | null
+    if (order.status !== 'zruseno' && isUnpaidDraftState(bs)) {
+      const link = await requestLinkOf(adminDb(), order.id)
+      const returningPaid = bs === 'pending_payment' && searchParams.platba === 'uspech'
+      if (link?.conversationId && !returningPaid) {
+        if (bs === 'pending_payment' && order.customer_id === user.id) await resetDraftPayment(adminDb(), order.id, user.id)
+        redirect(`/poptavky/${link.requestId}/jednani/${link.conversationId}`)
+      }
+    }
+  }
   // Otevřený chat objednávky → zprávy jsou přečtené (ikona zpráv v horní liště)
   await markThreadRead({ orderId: order.id })
   // Pojistka: zaplacená objednávka z poptávky → poptávka musí být ostatním uzavřená (kdyby to
@@ -255,11 +268,20 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
     .eq(otherCompletedField, otherId)
     .eq('status', 'dokonceno')
 
-  const { data: messages } = await supabase
-    .from('messages')
-    .select('*')
-    .eq('order_id', params.id)
-    .order('created_at', { ascending: true }) as { data: MessageRow[] | null }
+  // Objednávka z poptávky: i domluva z chatu jednání (před zaplacením ještě nemá order_id).
+  // Účastník je ověřený výš, čte se přes service role.
+  const reqLink = await requestLinkOf(adminDb(), order.id)
+  const { data: messages } = reqLink?.conversationId
+    ? await adminDb()
+      .from('messages')
+      .select('*')
+      .or(`order_id.eq.${params.id},conversation_id.eq.${reqLink.conversationId}`)
+      .order('created_at', { ascending: true }) as { data: MessageRow[] | null }
+    : await supabase
+      .from('messages')
+      .select('*')
+      .eq('order_id', params.id)
+      .order('created_at', { ascending: true }) as { data: MessageRow[] | null }
 
   const senderIds = Array.from(new Set((messages ?? []).map((m) => m.sender_id)))
   const namesMap: Record<string, string> = {}

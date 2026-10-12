@@ -47,7 +47,7 @@ export default async function JednaniPage({
 
   const { data: rr } = await admin
     .from('request_responses')
-    .select('id, request_id, provider_id, service_id, status, offer_kind, charge_halere, quote_fee_deductible')
+    .select('id, request_id, provider_id, service_id, status, offer_kind, charge_halere, quote_fee_deductible, place, place_address, place_lat, place_lng')
     .eq('id', conv.request_response_id)
     .maybeSingle() as { data: {
       id: string; request_id: string; provider_id: string; service_id: string | null; status: string
@@ -58,12 +58,13 @@ export default async function JednaniPage({
 
   const { data: req } = await admin
     .from('requests')
-    .select('id, customer_id, category, city, city_lat, city_lng, description, preferred_date, photos, status, budget_from_kc, budget_to_kc')
+    .select('id, customer_id, category, city, city_lat, city_lng, description, preferred_date, photos, status, budget_from_kc, budget_to_kc, place_pref, address')
     .eq('id', requestId)
     .maybeSingle() as { data: {
       id: string; customer_id: string | null; category: string | null; city: string
       city_lat: number | null; city_lng: number | null
-      budget_from_kc: number | null; budget_to_kc: number | null
+      budget_from_kc: number | null; budget_to_kc: number | null; place_pref: string | null
+      address: string | null
       description: string; preferred_date: string | null; photos: string[] | null; status: string
     } | null }
   if (!req) notFound()
@@ -79,13 +80,21 @@ export default async function JednaniPage({
   // Uzavřené / nevybrané konverzace jsou jen ke čtení.
   // Zamčeno jen když je konverzace zavřená (couvnutí) nebo už vznikla objednávka
   // (pokračuje se v ní). Nevybraní zůstávají přístupní.
-  const readOnly = conv.status !== 'open' || !!conv.order_id
+  // Po zaplacení se chat nepřesouvá: píše se dál tady i v objednávce, je to jedno vlákno (12. 10. 2026)
+  const readOnly = conv.status !== 'open'
+
+  // Rozpracovaná rezervace (vybraný termín, nezaplaceno) – její zprávy patří do stejného vlákna
+  const draftAny = !conv.order_id
+    ? ((await draftOrdersBy(admin as any, 'response_id', [rr.id])).get(rr.id) ?? null)
+    : null
+  const linkedOrderId = conv.order_id ?? draftAny
 
   // Zprávy jednání.
   const { data: msgs } = await admin
     .from('messages')
     .select('*')
-    .eq('conversation_id', conversationId)
+    // I zprávy psané v detailu objednávky (mají jen order_id) – jedno vlákno
+    .or(linkedOrderId ? `conversation_id.eq.${conversationId},order_id.eq.${linkedOrderId}` : `conversation_id.eq.${conversationId}`)
     .order('created_at', { ascending: true })
   const messages = msgs ?? []
 
@@ -165,9 +174,20 @@ export default async function JednaniPage({
     rr.status !== 'rejected' && hasOffer
 
   // Zákazník už vybral termín, ale nezaplatil → odkaz na rozpracovanou rezervaci
-  const draftOrderId = isCustomer && !conv.order_id
-    ? ((await draftOrdersBy(admin as any, 'response_id', [rr.id])).get(rr.id) ?? null)
-    : null
+  const draftOrderId = isCustomer ? draftAny : null
+
+  // Místo konání: z nabídky; bez údaje z karty; jinak u zákazníka
+  let placeInfo: { atProvider: boolean; address: string | null; lat: number | null; lng: number | null; pref: string | null } = {
+    atProvider: (rr as any).place === 'u_poskytovatele',
+    address: (rr as any).place_address ?? null,
+    lat: (rr as any).place_lat ?? null,
+    lng: (rr as any).place_lng ?? null,
+    pref: req.place_pref ?? null,
+  }
+  if (!(rr as any).place && rr.service_id) {
+    const { data: c } = await admin.from('services').select('location_type, address, address_lat, address_lng').eq('id', rr.service_id).maybeSingle() as { data: { location_type: string | null; address: string | null; address_lat: number | null; address_lng: number | null } | null }
+    if (c?.location_type === 'u_poskytovatele') placeInfo = { ...placeInfo, atProvider: true, address: c.address, lat: c.address_lat, lng: c.address_lng }
+  }
 
   // Vzdálenost obce poptávky od místa, odkud poskytovatel vyjíždí (karta, jinak obec z profilu)
   let distanceKm: number | null = null
@@ -204,6 +224,9 @@ export default async function JednaniPage({
         : null}
       otherName={otherName}
       distanceKm={distanceKm}
+      place={placeInfo}
+      // Přesná adresa jen pro zákazníka – poskytovatel ji před zaplacením nedostane ani do stránky
+      customerAddress={isCustomer ? (req.address ?? null) : null}
       draftOrderId={draftOrderId}
       request={{
         heading: req.category ?? 'Poptávka',

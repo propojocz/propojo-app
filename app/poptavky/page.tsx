@@ -58,7 +58,7 @@ export default async function PoptavkyPage() {
   // Otevřené, nevypršelé poptávky.
   const { data: reqs } = await admin
     .from('requests')
-    .select('id, customer_id, category, subcategory_id, city, city_lat, city_lng, description, preferred_date, photos, created_at, budget_from_kc, budget_to_kc')
+    .select('id, customer_id, category, subcategory_id, city, city_lat, city_lng, description, preferred_date, photos, created_at, budget_from_kc, budget_to_kc, place_pref')
     .eq('status', 'open')
     .gt('expires_at', new Date().toISOString())
     .order('created_at', { ascending: false })
@@ -66,7 +66,7 @@ export default async function PoptavkyPage() {
       id: string; customer_id: string | null; category: string | null; subcategory_id: string | null
       city: string; city_lat: number | null; city_lng: number | null; description: string; preferred_date: string | null
       photos: string[] | null; created_at: string
-      budget_from_kc: number | null; budget_to_kc: number | null
+      budget_from_kc: number | null; budget_to_kc: number | null; place_pref: string | null
     }> | null }
   const requests = reqs ?? []
   const reqIds = requests.map((r) => r.id)
@@ -102,15 +102,17 @@ export default async function PoptavkyPage() {
   if (user) {
     const { data: cards } = await admin
       .from('services')
-      .select('id, title, category, subcategory_id, city, city_lat, city_lng, radius_km')
+      .select('id, title, category, subcategory_id, city, city_lat, city_lng, radius_km, location_type, address, address_lat, address_lng')
       .eq('provider_id', user.id)
       .eq('is_active', true) as { data: Array<{
         id: string; title: string | null; category: string | null
         subcategory_id: string | null; city: string | null
         city_lat: number | null; city_lng: number | null; radius_km: number | null
+        location_type: string | null; address: string | null; address_lat: number | null; address_lng: number | null
       }> | null }
     myCards = (cards ?? []).map((c) => ({
       id: c.id, title: c.title ?? 'Nabídka', category: c.category, subcategoryId: c.subcategory_id,
+      locationType: c.location_type, address: c.address ? { text: c.address, lat: c.address_lat, lng: c.address_lng } : null,
     }))
     for (const c of cards ?? []) {
       const base = c.city_lat != null && c.city_lng != null
@@ -183,6 +185,7 @@ export default async function PoptavkyPage() {
       description: r.description,
       preferredDate: r.preferred_date,
       budget: rozpocetText(r.budget_from_kc, r.budget_to_kc),
+      placePref: r.place_pref ?? null,
       photos: r.photos ?? [],
       createdAt: r.created_at,
       activeCount,
