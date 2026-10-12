@@ -20,7 +20,7 @@ import {
   Coins, CheckCircle2, MessagesSquare, CalendarDays, Wallet, ClipboardList,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { sendConversationMessage, sendPriceEstimate, proposeTermInChat, selectProviderWithTerm, sendCustomerPreference, endNegotiation, setRequestAddressInChat, type EndReason } from '@/lib/actions/conversation-chat'
+import { sendConversationMessage, sendPriceEstimate, proposeTermInChat, selectProviderWithTerm, sendCustomerPreference, endNegotiation, resumeNegotiation, requestResume, setRequestAddressInChat, type EndReason } from '@/lib/actions/conversation-chat'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
 import { rozpocetText } from '@/lib/format'
 import ChatThread from '@/components/ui/ChatThread'
@@ -54,7 +54,7 @@ type RequestCtx = {
 export default function PoptavkaChat({
   conversationId, requestId, responseId,
   isProvider, readOnly, orderId, canSelect, hasServiceForOrder, offerText = null, offerKind = null,
-  otherName, distanceKm = null, draftOrderId = null, place = null, customerAddress = null, request, threads, initialMessages, myUserId, senderNames,
+  otherName, distanceKm = null, draftOrderId = null, place = null, customerAddress = null, declinedBy = null, request, threads, initialMessages, myUserId, senderNames,
 }: {
   conversationId: string
   requestId: string
@@ -77,6 +77,8 @@ export default function PoptavkaChat({
   place?: { atProvider: boolean; address: string | null; lat: number | null; lng: number | null; pref: string | null } | null
   /** Přesná adresa zákazníka z poptávky – jen v pohledu zákazníka */
   customerAddress?: string | null
+  /** „Nemám zájem“ – kdo zájem zrušil (chat zůstává otevřený) */
+  declinedBy?: 'provider' | 'customer' | null
   request: RequestCtx
   threads: ThreadItem[]
   initialMessages: any[]
@@ -237,6 +239,35 @@ export default function PoptavkaChat({
     const res = await setRequestAddressInChat(conversationId, addrDraft)
     setAddrBusy(false)
     if (res.success) { setMyAddress(addrDraft.text); setAddrEdit(false) } else setError(res.error)
+  }
+
+  // Jen ten, kdo zájem zrušil, ho může obnovit
+  const declinedByMe = !!declinedBy && (declinedBy === 'provider') === isProvider
+  const [resumeBusy, setResumeBusy] = useState(false)
+  // Druhá strana: o obnovení jde požádat jednou po každém „Nemám zájem“
+  const lastDeclineEvent = [...messages].reverse().find((m) => m?.payload?.kind === 'negotiation_ended' || m?.payload?.kind === 'resume_requested')
+  const resumeRequested = lastDeclineEvent?.payload?.kind === 'resume_requested'
+  const handleRequestResume = async () => {
+    if (resumeBusy) return
+    setResumeBusy(true)
+    setError(null)
+    const res = await requestResume(conversationId)
+    setResumeBusy(false)
+    if (res.success) { if (res.message) setMessages((prev) => [...prev, res.message]) }
+    else setError(res.error)
+  }
+  const handleResume = async () => {
+    if (resumeBusy) return
+    setResumeBusy(true)
+    setError(null)
+    const res = await resumeNegotiation(conversationId)
+    setResumeBusy(false)
+    if (res.success) {
+      if (res.message) setMessages((prev) => [...prev, res.message])
+      router.refresh()
+    } else {
+      setError(res.error)
+    }
   }
 
   const handleEnd = async () => {
@@ -713,8 +744,31 @@ export default function PoptavkaChat({
                 </div>
               )}
 
+              {/* Nemám zájem → chat dál otevřený, jen bez termínů a rezervace */}
+              {!orderId && declinedBy && (
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  <span>
+                    {declinedByMe
+                      ? 'Dali jste vědět, že teď nemáte zájem. Psát si můžete dál.'
+                      : `${isProvider ? 'Zákazník' : 'Poskytovatel'} teď nemá zájem. Psát si můžete dál, nebo požádejte o obnovení jednání.`}
+                  </span>
+                  {declinedByMe ? (
+                    <button onClick={handleResume} disabled={resumeBusy}
+                      className="inline-flex items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50">
+                      {resumeBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Pokračovat v jednání
+                    </button>
+                  ) : resumeRequested ? (
+                    <span className="font-semibold text-amber-800">Žádost o obnovení odeslána</span>
+                  ) : (
+                    <button onClick={handleRequestResume} disabled={resumeBusy}
+                      className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-bold text-amber-900 transition hover:bg-amber-100 disabled:opacity-50">
+                      {resumeBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Požádat o obnovení
+                    </button>
+                  )}
+                </div>
+              )}
               {/* Nástroje domluvy – přímo nad polem pro zprávu */}
-              {!orderId && (
+              {!orderId && !declinedBy && (
                 <div className="mb-2 flex flex-wrap gap-1.5">
                   {isProvider && offerKind && (
                     <button
@@ -752,7 +806,7 @@ export default function PoptavkaChat({
                     onClick={() => { setEndOpen(true); setError(null) }}
                     className="ml-auto inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-400 transition hover:bg-red-50 hover:text-red-600"
                   >
-                    <X className="h-3.5 w-3.5" /> Ukončit jednání
+                    <X className="h-3.5 w-3.5" /> Nemám zájem
                   </button>
                 </div>
               )}
@@ -825,16 +879,16 @@ export default function PoptavkaChat({
         />
       )}
 
-      {/* Ukončit jednání – obě strany, s důvodem; druhá strana ho uvidí v chatu */}
+      {/* Nemám zájem – obě strany, s důvodem; druhá strana ho uvidí v chatu, chat zůstává otevřený */}
       {endOpen && (
         <div className="fixed inset-0 z-[9990] flex items-end justify-center sm:items-center">
           <button aria-label="Zavřít" onClick={() => !endBusy && setEndOpen(false)} className="absolute inset-0 bg-slate-950/40" />
           <div className="relative w-full max-w-md rounded-t-3xl bg-white p-6 shadow-2xl sm:rounded-3xl">
-            <h2 className="text-lg font-black text-slate-900">Ukončit jednání?</h2>
+            <h2 className="text-lg font-black text-slate-900">Nemáte zájem?</h2>
             <p className="mt-1 text-sm text-slate-600">
               {isProvider
-                ? 'Zákazník uvidí, že jste jednání ukončili, a proč. Nabídku můžete později poslat znovu, pokud bude poptávka ještě otevřená.'
-                : `${otherName} uvidí, že jste jednání ukončili, a proč. S ostatními poskytovateli můžete jednat dál.`}
+                ? 'Zákazník uvidí, že teď nemáte zájem, a proč. Chat zůstane otevřený – když se domluvíte jinak, jednání obnovíte jedním klikem.'
+                : `${otherName} uvidí, že teď nemáte zájem, a proč. Chat zůstane otevřený a s ostatními poskytovateli jednáte dál. Když si to rozmyslíte, jednání obnovíte jedním klikem.`}
             </p>
             <div className="mt-4 space-y-2">
               {([['cena', 'Nesedí cena'], ['termin', 'Nesedí termín'], ['jine', 'Jiný důvod']] as const).map(([v, label]) => (
@@ -859,7 +913,7 @@ export default function PoptavkaChat({
                 disabled={endBusy}
                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-red-700 disabled:opacity-60"
               >
-                {endBusy && <Loader2 className="h-4 w-4 animate-spin" />} Ukončit jednání
+                {endBusy && <Loader2 className="h-4 w-4 animate-spin" />} Nemám zájem
               </button>
               <button
                 onClick={() => setEndOpen(false)}

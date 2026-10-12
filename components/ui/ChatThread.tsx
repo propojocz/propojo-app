@@ -40,7 +40,7 @@ export default function ChatThread({
     <div className="space-y-3">
       {messages.map((m) => {
         // Zpráva od Propojo: admin, nebo systémový předěl (vznik objednávky / rezervace)
-        const isPropojo = m.is_admin === true || m.type === 'order_created' || m.payload?.kind === 'negotiation_ended'
+        const isPropojo = m.is_admin === true || m.type === 'order_created' || m.payload?.kind === 'negotiation_ended' || m.payload?.kind === 'negotiation_resumed' || m.payload?.kind === 'resume_requested'
         const mine = !isPropojo && myUserId !== null && m.sender_id === myUserId
 
         if (isPropojo) {

@@ -492,10 +492,11 @@ export async function setRequestAddressInChat(
   return { success: true }
 }
 
-// ── Ukončení jednání (12. 10. 2026) ─────────────────────────────
-// Zákazník i poskytovatel můžou domluvu opustit (nesedí cena, termín…). Druhá strana uvidí v chatu,
-// kdo a proč jednání ukončil. Jen před vznikem rezervace – potom platí rušení rezervace.
-// Poskytovatel → reakce 'rejected' (může později znovu nabídnout), zákazník → 'not_selected'.
+// ── „Nemám zájem“ (12. 10. 2026, upraveno 13. 10.) ──────────────
+// Zákazník i poskytovatel můžou dát najevo, že teď nemají zájem (nesedí cena, termín…). Druhá strana
+// uvidí v chatu kdo a proč. Chat se NEZAMYKÁ – psát si můžou dál; jen se skryjí termíny a rezervace.
+// Kdo zájem zrušil, může jednání obnovit (resumeNegotiation). Jen před vznikem rezervace.
+// Poskytovatel → reakce 'rejected', zákazník → 'not_selected'.
 
 export type EndReason = 'cena' | 'termin' | 'jine'
 const END_REASON_TEXT: Record<EndReason, string> = {
@@ -513,7 +514,7 @@ export async function endNegotiation(conversationId: string, reason: EndReason, 
   if (!conv || !conv.responseId) return { success: false, error: 'Konverzace nebyla nalezena.' }
   const by = user.id === conv.providerId ? 'provider' : user.id === conv.customerId ? 'customer' : null
   if (!by) return { success: false, error: 'K této konverzaci nemáte přístup.' }
-  if (conv.status !== 'open') return { success: false, error: 'Tohle jednání už je ukončené.' }
+  if (conv.status !== 'open') return { success: false, error: 'Tohle jednání je uzavřené.' }
   if (conv.orderId) return { success: false, error: 'Rezervace už vznikla – zrušit ji můžete v objednávce.' }
   if (!END_REASON_TEXT[reason]) return { success: false, error: 'Vyberte důvod.' }
 
@@ -522,7 +523,7 @@ export async function endNegotiation(conversationId: string, reason: EndReason, 
   if (draftId) {
     const { data: d } = await admin.from('orders').select('booking_state').eq('id', draftId).maybeSingle() as { data: { booking_state: string | null } | null }
     if (d?.booking_state === 'pending_payment') {
-      return { success: false, error: 'Právě probíhá platba. Dokončete ji nebo počkejte, až vyprší, a pak jednání ukončete.' }
+      return { success: false, error: 'Právě probíhá platba. Dokončete ji nebo počkejte, až vyprší.' }
     }
     await (admin.from('orders') as any).update({ status: 'zruseno' }).eq('id', draftId).neq('status', 'zruseno')
   }
@@ -531,11 +532,11 @@ export async function endNegotiation(conversationId: string, reason: EndReason, 
   await (admin.from('request_responses') as any)
     .update({ status: by === 'provider' ? 'rejected' : 'not_selected', updated_at: now })
     .eq('id', conv.responseId)
-  await (admin.from('conversations') as any).update({ status: 'closed' }).eq('id', conversationId)
+  // Chat zůstává otevřený (13. 10. 2026)
 
   const kdo = by === 'provider' ? 'Poskytovatel' : 'Zákazník'
   const cleanNote = note?.trim().slice(0, 300) || null
-  const content = `${kdo} ukončil jednání – ${END_REASON_TEXT[reason]}.${cleanNote ? ` ${cleanNote}` : ''}`
+  const content = `${kdo} teď nemá zájem – ${END_REASON_TEXT[reason]}.${cleanNote ? ` ${cleanNote}` : ''} Psát si můžete dál.`
   const { data, error } = await (admin.from('messages') as any)
     .insert({ conversation_id: conversationId, order_id: null, sender_id: user.id, content, type: 'message',
       payload: { kind: 'negotiation_ended', by, reason, note: cleanNote } })
@@ -550,13 +551,113 @@ export async function endNegotiation(conversationId: string, reason: EndReason, 
         userId: other,
         type: 'status_change',
         actorId: user.id,
-        title: `${kdo} ukončil jednání o poptávce`,
+        title: `${kdo} teď nemá zájem`,
         preview: `Důvod: ${END_REASON_TEXT[reason]}${cleanNote ? ` – ${cleanNote}` : ''}`,
         url: `/poptavky/${conv.requestId}/jednani/${conversationId}`,
       })
     }
   } catch (err) {
     console.error('[endNegotiation] notifikace', err)
+  }
+  return { success: true, id: data?.id ?? conversationId, message: data }
+}
+
+/**
+ * Druhá strana po „Nemám zájem“ požádá o obnovení jednání – zpráva od Propojo + oznámení tomu,
+ * kdo zájem zrušil. Jen jednou po každém „Nemám zájem“ (ať se nedá otravovat).
+ */
+export async function requestResume(conversationId: string): Promise<SendResult> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+  const admin = getAdminClient()
+  const conv = await loadConversation(admin, conversationId)
+  if (!conv || !conv.responseId || !conv.requestId) return { success: false, error: 'Konverzace nebyla nalezena.' }
+  const by = user.id === conv.providerId ? 'provider' : user.id === conv.customerId ? 'customer' : null
+  if (!by) return { success: false, error: 'K této konverzaci nemáte přístup.' }
+  if (conv.status !== 'open' || conv.orderId) return { success: false, error: 'Tohle jednání už obnovit nejde.' }
+
+  const { data: rr } = await admin.from('request_responses').select('status').eq('id', conv.responseId).maybeSingle() as { data: { status: string } | null }
+  const declinedBy = rr?.status === 'rejected' ? 'provider' : rr?.status === 'not_selected' ? 'customer' : null
+  if (!declinedBy) return { success: false, error: 'Jednání běží.' }
+  if (declinedBy === by) return { success: false, error: 'Jednání můžete obnovit sami tlačítkem „Pokračovat v jednání“.' }
+
+  // Jen jednou po posledním „Nemám zájem“
+  const { data: last } = await admin
+    .from('messages')
+    .select('payload, created_at')
+    .eq('conversation_id', conversationId)
+    .in('payload->>kind', ['negotiation_ended', 'resume_requested'])
+    .order('created_at', { ascending: false })
+    .limit(1) as { data: Array<{ payload: any }> | null }
+  if (last?.[0]?.payload?.kind === 'resume_requested') return { success: false, error: 'O obnovení už jste požádali.' }
+
+  const kdo = by === 'provider' ? 'Poskytovatel' : 'Zákazník'
+  const { data } = await (admin.from('messages') as any)
+    .insert({ conversation_id: conversationId, order_id: null, sender_id: user.id, content: `${kdo} žádá o obnovení jednání.`, type: 'message',
+      payload: { kind: 'resume_requested', by } })
+    .select('*')
+    .single() as { data: any }
+  try {
+    const other = by === 'provider' ? conv.customerId : conv.providerId
+    if (other) {
+      await createNotification({
+        userId: other, type: 'status_change', actorId: user.id,
+        title: `${kdo} žádá o obnovení jednání`, preview: 'Pokud chcete pokračovat, klikněte v chatu na „Pokračovat v jednání“.',
+        url: `/poptavky/${conv.requestId}/jednani/${conversationId}`,
+      })
+    }
+  } catch (err) {
+    console.error('[requestResume] notifikace', err)
+  }
+  return { success: true, id: data?.id ?? conversationId, message: data }
+}
+
+/** Obnovení jednání po „Nemám zájem“ – jen ten, kdo zájem zrušil, a jen u otevřené poptávky */
+export async function resumeNegotiation(conversationId: string): Promise<SendResult> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+  const admin = getAdminClient()
+  const conv = await loadConversation(admin, conversationId)
+  if (!conv || !conv.responseId || !conv.requestId) return { success: false, error: 'Konverzace nebyla nalezena.' }
+  const by = user.id === conv.providerId ? 'provider' : user.id === conv.customerId ? 'customer' : null
+  if (!by) return { success: false, error: 'K této konverzaci nemáte přístup.' }
+  if (conv.status !== 'open' || conv.orderId) return { success: false, error: 'Tohle jednání už obnovit nejde.' }
+
+  const { data: rr } = await admin.from('request_responses').select('status').eq('id', conv.responseId).maybeSingle() as { data: { status: string } | null }
+  const declinedBy = rr?.status === 'rejected' ? 'provider' : rr?.status === 'not_selected' ? 'customer' : null
+  if (!declinedBy) return { success: false, error: 'Jednání běží.' }
+  if (declinedBy !== by) return { success: false, error: 'Obnovit jednání může jen ten, kdo zájem zrušil.' }
+
+  const { data: req } = await admin.from('requests').select('status, expires_at').eq('id', conv.requestId).maybeSingle() as { data: { status: string; expires_at: string | null } | null }
+  if (!req || req.status !== 'open' || (req.expires_at && new Date(req.expires_at).getTime() < Date.now())) {
+    return { success: false, error: 'Poptávka už není otevřená.' }
+  }
+  const { count } = await admin.from('request_responses').select('id', { count: 'exact', head: true })
+    .eq('request_id', conv.requestId).in('status', ACTIVE_RESPONSE)
+  if ((count ?? 0) >= 5) return { success: false, error: 'U poptávky už teď jedná plný počet poskytovatelů.' }
+
+  await (admin.from('request_responses') as any)
+    .update({ status: 'interested', updated_at: new Date().toISOString() })
+    .eq('id', conv.responseId)
+  const kdo = by === 'provider' ? 'Poskytovatel' : 'Zákazník'
+  const { data } = await (admin.from('messages') as any)
+    .insert({ conversation_id: conversationId, order_id: null, sender_id: user.id, content: `${kdo} chce v jednání pokračovat.`, type: 'message',
+      payload: { kind: 'negotiation_resumed', by } })
+    .select('*')
+    .single() as { data: any }
+  try {
+    const other = by === 'provider' ? conv.customerId : conv.providerId
+    if (other) {
+      await createNotification({
+        userId: other, type: 'status_change', actorId: user.id,
+        title: `${kdo} chce v jednání pokračovat`, preview: null,
+        url: `/poptavky/${conv.requestId}/jednani/${conversationId}`,
+      })
+    }
+  } catch (err) {
+    console.error('[resumeNegotiation] notifikace', err)
   }
   return { success: true, id: data?.id ?? conversationId, message: data }
 }

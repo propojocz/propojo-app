@@ -172,7 +172,7 @@ export default async function JednaniPage({
   const hasOffer = (rr.offer_kind === 'A' || rr.offer_kind === 'B') && !!rr.charge_halere
   const canSelect =
     isCustomer && conv.status === 'open' && !conv.order_id && req.status === 'open' &&
-    rr.status !== 'rejected' && hasOffer
+    rr.status !== 'rejected' && rr.status !== 'not_selected' && hasOffer
 
   // Zákazník už vybral termín, ale nezaplatil → odkaz na rozpracovanou rezervaci
   const draftOrderId = isCustomer ? draftAny : null
@@ -216,6 +216,10 @@ export default async function JednaniPage({
       responseId={rr.id}
       isProvider={isProvider}
       readOnly={readOnly}
+      // „Nemám zájem“ – kdo zájem zrušil (chat zůstává otevřený); jen u otevřené poptávky bez rezervace
+      declinedBy={!conv.order_id && req.status === 'open'
+        ? (rr.status === 'rejected' ? 'provider' : rr.status === 'not_selected' ? 'customer' : null)
+        : null}
       orderId={conv.order_id}
       canSelect={canSelect}
       hasServiceForOrder={hasOffer}
