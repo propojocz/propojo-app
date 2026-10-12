@@ -6,8 +6,11 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { MapPin, Clock, CalendarClock, Users, Send, Megaphone, Sparkles } from 'lucide-react'
+import { MapPin, Clock, CalendarClock, Users, Send, Megaphone, Sparkles, Loader2, X, ExternalLink } from 'lucide-react'
 import InterestAction, { type PickerCard } from '@/components/ui/InterestAction'
+import RequestDetailCard from '@/components/ui/RequestDetailCard'
+import { getRequestDetail } from '@/lib/actions/requests'
+import type { RequestDetailData } from '@/lib/request-detail'
 
 export type ProviderCard = PickerCard
 
@@ -68,6 +71,17 @@ export default function PoptavkyBoard({
   const [tab, setTab] = useState<Tab>('doporucene')
   // Filtr vzdálenosti (km), null = kdekoli – kdo chce jet daleko, může
   const [maxKm, setMaxKm] = useState<number | null>(null)
+  // Detail poptávky v okně – stejná karta jako stránka /poptavky/[id]
+  const [detail, setDetail] = useState<RequestDetailData | null>(null)
+  const [detailLoading, setDetailLoading] = useState<string | null>(null)
+  const openDetail = async (id: string) => {
+    if (detailLoading) return
+    setDetailLoading(id)
+    const d = await getRequestDetail(id)
+    setDetailLoading(null)
+    if (d) setDetail(d)
+    else window.location.href = `/poptavky/${id}`
+  }
   // Po reakci si držíme lokální stav (kvůli tabu Moje zájmy a počtu zájemců).
   const [local, setLocal] = useState<Record<string, { myStatus: string; myConversationId: string | null; activeCount: number }>>({})
 
@@ -233,12 +247,13 @@ export default function PoptavkyBoard({
                 </span>
 
                 <div className="flex items-center gap-2">
-                  <Link
-                    href={`/poptavky/${req.id}`}
+                  <button
+                    type="button"
+                    onClick={() => openDetail(req.id)}
                     className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
                   >
-                    Detail
-                  </Link>
+                    {detailLoading === req.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Detail'}
+                  </button>
                   {req.isMine ? (
                     <Link
                       href={`/dashboard/poptavky/${req.id}`}
@@ -268,6 +283,24 @@ export default function PoptavkyBoard({
               </div>
             </article>
           ))}
+        </div>
+      )}
+
+      {/* Detail poptávky v okně */}
+      {detail && (
+        <div className="fixed inset-0 z-[9980] flex items-end justify-center sm:items-center">
+          <button aria-label="Zavřít" onClick={() => setDetail(null)} className="absolute inset-0 bg-slate-950/40" />
+          <div className="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl bg-slate-50 p-3 shadow-2xl sm:rounded-3xl sm:p-4">
+            <div className="mb-2 flex items-center justify-between px-1">
+              <Link href={`/poptavky/${detail.id}`} className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-700">
+                <ExternalLink className="h-3.5 w-3.5" /> Otevřít na samostatné stránce
+              </Link>
+              <button onClick={() => setDetail(null)} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-200" aria-label="Zavřít">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <RequestDetailCard d={detail} />
+          </div>
         </div>
       )}
     </div>

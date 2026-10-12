@@ -23,6 +23,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { createNotification } from './notifications'
 import type { ActionResult } from './types'
 import { bookingCharge } from '@/lib/booking/commission'
+import { loadRequestDetail, type RequestDetailData } from '@/lib/request-detail'
 
 /** Nabídka v odpovědi na poptávku: typ a částka placená přes Propojo (3d, 7. 10. 2026). */
 export type ResponseOffer = {
@@ -576,3 +577,10 @@ export async function renewRequest(requestId: string, values: CreateRequestValue
   revalidatePath('/dashboard/poptavky')
   return { success: true, id: requestId }
 }
+
+// ── Detail poptávky pro okno na nástěnce (12. 10. 2026) ───────
+// Stejná data jako stránka /poptavky/[id] (loadRequestDetail) – okno i stránka ukazují totéž.
+export async function getRequestDetail(requestId: string): Promise<RequestDetailData | null> {
+  return loadRequestDetail(requestId)
+}
+
