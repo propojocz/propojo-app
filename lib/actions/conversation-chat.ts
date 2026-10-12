@@ -518,6 +518,16 @@ export async function endNegotiation(conversationId: string, reason: EndReason, 
   if (conv.orderId) return { success: false, error: 'Rezervace už vznikla – zrušit ji můžete v objednávce.' }
   if (!END_REASON_TEXT[reason]) return { success: false, error: 'Vyberte důvod.' }
 
+  // Pojistka: zaplacená (předautorizovaná) objednávka z této reakce, i kdyby chat ještě nebyl připojený
+  {
+    const { data: ev } = await admin.from('order_events').select('order_id').eq('type', 'created_from_request').eq('payload->>response_id', conv.responseId)
+    const ids = ((ev ?? []) as Array<{ order_id: string }>).map((e) => e.order_id)
+    if (ids.length) {
+      const { data: paid } = await admin.from('orders').select('id').in('id', ids).not('authorized_at', 'is', null).neq('status', 'zruseno').limit(1)
+      if ((paid ?? []).length) return { success: false, error: 'Rezervace už je zaplacená – zrušit ji můžete v objednávce.' }
+    }
+  }
+
   // Rozpracovaná rezervace (vybraný termín, nezaplaceno) se zruší; probíhající platbu ne
   const draftId = (await draftOrdersBy(admin as any, 'response_id', [conv.responseId])).get(conv.responseId) ?? null
   if (draftId) {
