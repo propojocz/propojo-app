@@ -45,11 +45,12 @@ export default async function PoptavkaDetailPage({
 
   const { data: req } = await admin
     .from('requests')
-    .select('id, customer_id, category, subcategory_id, city, description, preferred_date, photos, status, created_at, expires_at, budget_from_kc, budget_to_kc, place_pref')
+    .select('id, customer_id, category, subcategory_id, city, description, preferred_date, photos, status, created_at, expires_at, budget_from_kc, budget_to_kc, place_pref, inspiration_photos')
     .eq('id', requestId)
     .maybeSingle() as { data: {
       id: string; customer_id: string | null; category: string | null; subcategory_id: string | null
       city: string; description: string; preferred_date: string | null; photos: string[] | null
+      inspiration_photos: string[] | null
       budget_from_kc: number | null; budget_to_kc: number | null; place_pref: string | null
       status: string; created_at: string; expires_at: string
     } | null }
@@ -146,6 +147,20 @@ export default async function PoptavkaDetailPage({
               // eslint-disable-next-line @next/next/no-img-element
               <img key={i} src={url} alt="" className="aspect-square w-full rounded-xl border border-slate-200 object-cover" />
             ))}
+          </div>
+        )}
+
+        {req.inspiration_photos && req.inspiration_photos.length > 0 && (
+          <div className="mt-4">
+            <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">✨ Představa zákazníka – jak by to mělo vypadat</p>
+            <div className="grid grid-cols-3 gap-2">
+              {req.inspiration_photos.map((url, i) => (
+                <a key={i} href={url} target="_blank" rel="noopener noreferrer">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={url} alt="Představa zákazníka" className="aspect-square w-full rounded-xl border border-violet-200 object-cover" />
+                </a>
+              ))}
+            </div>
           </div>
         )}
 

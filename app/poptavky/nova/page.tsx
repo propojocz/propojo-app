@@ -12,7 +12,7 @@
 
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Loader2, CheckCircle2, Send, ArrowLeft, LogIn, Mail, Paperclip } from 'lucide-react'
+import { Loader2, CheckCircle2, Send, ArrowLeft, LogIn, Mail, Paperclip, Sparkles } from 'lucide-react'
 import Link from 'next/link'
 import { createRequest, getRequestForRenew, renewRequest } from '@/lib/actions/requests'
 import { createClient } from '@/lib/supabase/client'
@@ -37,6 +37,8 @@ export default function NovaPoptavkaPage() {
     budget_to: '',
   })
   const [photos, setPhotos] = useState<string[]>([])
+  // Představa – vizualizace, jak to má vypadat (zvlášť od fotek skutečného stavu)
+  const [inspiration, setInspiration] = useState<string[]>([])
   // Přesná adresa (nepovinná) – poskytovatelé uvidí jen obec, adresu až vybraný po potvrzení rezervace
   const [addr, setAddr] = useState<{ text: string; lat: number | null; lng: number | null }>({ text: '', lat: null, lng: null })
   const [addrKey, setAddrKey] = useState(0)
@@ -78,6 +80,7 @@ export default function NovaPoptavkaPage() {
         place_pref: r.placePref ?? 'u_zakaznika',
       }))
       setPhotos(r.photos)
+      setInspiration(r.inspirationPhotos ?? [])
       if (r.address) setAddr({ text: r.address.text, lat: r.address.lat, lng: r.address.lng })
       setAddrKey((k) => k + 1)
       setCityGeo(r.cityLat != null && r.cityLng != null ? { lat: r.cityLat, lng: r.cityLng } : null)
@@ -142,6 +145,7 @@ export default function NovaPoptavkaPage() {
       budget_from_kc: form.budget_from ? Math.round(Number(form.budget_from)) : null,
       budget_to_kc: form.budget_to ? Math.round(Number(form.budget_to)) : null,
       photos,
+      inspiration_photos: inspiration,
     }
     const result = renewId && renewLoaded ? await renewRequest(renewId, values) : await createRequest(values)
     if (result.success) {
@@ -259,9 +263,18 @@ export default function NovaPoptavkaPage() {
               <Paperclip className="h-3.5 w-3.5 text-slate-400" /> Přidat foto <span className="font-normal text-slate-400">(nepovinné)</span>
             </p>
             <p className="mb-1.5 text-[11px] leading-relaxed text-slate-400">
-              Fotka místa nebo problému – a klidně i vizualizace, jak chcete, aby to vypadalo (třeba z AI). Poskytovatel pak líp odhadne cenu.
+              Fotka místa nebo problému – poskytovatel pak líp odhadne cenu.
             </p>
             <GalleryUpload value={photos} onChange={setPhotos} />
+          </div>
+          <div className="pt-2">
+            <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+              <Sparkles className="h-3.5 w-3.5 text-slate-400" /> Máte i vizualizaci? <span className="font-normal text-slate-400">(nepovinné)</span>
+            </p>
+            <p className="mb-1.5 text-[11px] leading-relaxed text-slate-400">
+              Přidejte sem, jak byste chtěli, aby to vypadalo – třeba návrh z AI, fotka z internetu nebo náčrt.
+            </p>
+            <GalleryUpload value={inspiration} onChange={(v) => setInspiration(v.slice(0, 8))} />
           </div>
         </div>
 

@@ -58,7 +58,7 @@ export default async function JednaniPage({
 
   const { data: req } = await admin
     .from('requests')
-    .select('id, customer_id, category, city, city_lat, city_lng, description, preferred_date, photos, status, budget_from_kc, budget_to_kc, place_pref, address')
+    .select('id, customer_id, category, city, city_lat, city_lng, description, preferred_date, photos, status, budget_from_kc, budget_to_kc, place_pref, address, inspiration_photos')
     .eq('id', requestId)
     .maybeSingle() as { data: {
       id: string; customer_id: string | null; category: string | null; city: string
@@ -66,6 +66,7 @@ export default async function JednaniPage({
       budget_from_kc: number | null; budget_to_kc: number | null; place_pref: string | null
       address: string | null
       description: string; preferred_date: string | null; photos: string[] | null; status: string
+      inspiration_photos: string[] | null
     } | null }
   if (!req) notFound()
 
@@ -237,6 +238,7 @@ export default async function JednaniPage({
         budgetFrom: req.budget_from_kc ?? null,
         budgetTo: req.budget_to_kc ?? null,
         photos: req.photos ?? [],
+        inspirationPhotos: req.inspiration_photos ?? [],
       }}
       threads={threads}
       initialMessages={messages}

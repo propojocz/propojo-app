@@ -89,6 +89,8 @@ const createSchema = z.object({
   email: z.string().email('Neplatný e-mail.').nullable().optional(),
   phone: z.string().max(40).nullable().optional(),
   photos: z.array(z.string()).max(12).optional(),
+  // Představa zákazníka – vizualizace, jak to má vypadat (12. 10. 2026)
+  inspiration_photos: z.array(z.string()).max(8).optional(),
   // Kde se to má konat (12. 10. 2026): u zákazníka / u poskytovatele / je mi to jedno
   place_pref: z.enum(['u_zakaznika', 'u_poskytovatele', 'jedno']).nullable().optional(),
   // Nepovinná přesná adresa (12. 10. 2026) – poskytovatelé ji nevidí, přenese se do objednávky
@@ -160,6 +162,7 @@ export async function createRequest(values: CreateRequestValues): Promise<Action
     subcategory_id: d.subcategory_id ?? null,
     description: d.description.trim(),
     photos: d.photos ?? [],
+    inspiration_photos: d.inspiration_photos ?? [],
     city: d.city.trim(),
     city_lat: cityLat,
     city_lng: cityLng,
@@ -422,6 +425,7 @@ export type RenewableRequest = {
   placePref: 'u_zakaznika' | 'u_poskytovatele' | 'jedno' | null
   phone: string | null
   photos: string[]
+  inspirationPhotos: string[]
 }
 
 /** Lze poptávku obnovit? (vypršela / uzavřená / objednávka padla před zaplacením) */
@@ -448,7 +452,7 @@ export async function getRequestForRenew(requestId: string): Promise<RenewableRe
   const admin = getAdminClient()
   const { data: req } = await admin
     .from('requests')
-    .select('id, customer_id, status, expires_at, selected_response_id, category, description, city, city_lat, city_lng, preferred_date, phone, photos, budget_from_kc, budget_to_kc, address, address_lat, address_lng, place_pref')
+    .select('id, customer_id, status, expires_at, selected_response_id, category, description, city, city_lat, city_lng, preferred_date, phone, photos, budget_from_kc, budget_to_kc, address, address_lat, address_lng, place_pref, inspiration_photos')
     .eq('id', requestId)
     .maybeSingle() as { data: any }
   if (!req || req.customer_id !== user.id) return null
@@ -467,6 +471,7 @@ export async function getRequestForRenew(requestId: string): Promise<RenewableRe
     placePref: req.place_pref ?? null,
     phone: req.phone ?? null,
     photos: req.photos ?? [],
+    inspirationPhotos: req.inspiration_photos ?? [],
   }
 }
 
@@ -519,6 +524,7 @@ export async function renewRequest(requestId: string, values: CreateRequestValue
       subcategory_id: d.subcategory_id ?? null,
       description: d.description.trim(),
       photos: d.photos ?? [],
+      inspiration_photos: d.inspiration_photos ?? [],
       city: d.city.trim(),
       city_lat: cityLat,
       city_lng: cityLng,

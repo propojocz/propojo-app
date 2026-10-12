@@ -38,6 +38,8 @@ export type ThreadItem = {
 }
 
 type RequestCtx = {
+  /** Představa zákazníka – vizualizace, jak to má vypadat */
+  inspirationPhotos?: string[]
   /** Nezávazný rozpočet zákazníka z poptávky (Kč) */
   budgetFrom?: number | null
   budgetTo?: number | null
@@ -387,9 +389,24 @@ export default function PoptavkaChat({
             {request.photos.length > 0 && (
               <div className="mt-3 flex gap-2 overflow-x-auto">
                 {request.photos.slice(0, 6).map((url, i) => (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img key={i} src={url} alt="" className="h-16 w-16 shrink-0 rounded-lg border border-slate-200 object-cover" />
+                  <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={url} alt="" className="h-16 w-16 rounded-lg border border-slate-200 object-cover" />
+                  </a>
                 ))}
+              </div>
+            )}
+            {(request.inspirationPhotos?.length ?? 0) > 0 && (
+              <div className="mt-3">
+                <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">✨ Představa – jak by to mělo vypadat</p>
+                <div className="flex gap-2 overflow-x-auto">
+                  {request.inspirationPhotos!.slice(0, 8).map((url, i) => (
+                    <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={url} alt="Představa zákazníka" className="h-16 w-16 rounded-lg border border-violet-200 object-cover" />
+                    </a>
+                  ))}
+                </div>
               </div>
             )}
 
