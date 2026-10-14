@@ -18,6 +18,7 @@ import {
   ArrowLeft, Wallet, Eye, Building2, MapPin, ArrowRight,
 } from 'lucide-react'
 import { lookupIco, becomeProvider } from '@/lib/actions/become-provider'
+import ProviderConsents from '@/components/ui/ProviderConsents'
 
 type Subject = { companyName: string; address?: string | null; legalForm?: string | null; since?: string | null }
 
@@ -28,6 +29,8 @@ export default function StatSePoskytovatelemPage() {
   const [phone, setPhone] = useState('')
   const [subject, setSubject] = useState<Subject | null>(null)
   const [agree, setAgree] = useState(false)
+  const [agreeTerms, setAgreeTerms] = useState(false)
+  const [agreeRefund, setAgreeRefund] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState<{ companyName?: string } | null>(null)
@@ -52,12 +55,15 @@ export default function StatSePoskytovatelemPage() {
   const confirm = async () => {
     setError('')
     if (!agree) { setError('Potvrďte prosím, že údaje patří vám.'); return }
+    if (!agreeTerms || !agreeRefund) { setError('Potvrďte prosím souhlas s podmínkami i pokyn k vracení peněz.'); return }
 
     setLoading(true)
     const res: any = await becomeProvider({
       ico: ico.replace(/\s/g, ''),
       phone: phone.trim() || undefined,
       confirmed: true,
+      termsAccepted: agreeTerms,
+      refundInstruction: agreeRefund,
     })
     if (!res.success) { setError(res.error); setLoading(false); return }
 
@@ -202,6 +208,10 @@ export default function StatSePoskytovatelemPage() {
                   </span>
                 </label>
 
+                <div className="mb-4">
+                  <ProviderConsents terms={agreeTerms} refund={agreeRefund} onTerms={(v) => { setAgreeTerms(v); setError('') }} onRefund={(v) => { setAgreeRefund(v); setError('') }} />
+                </div>
+
                 <p className="mb-4 flex items-start gap-2 text-xs leading-relaxed text-slate-400">
                   <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   Než začnete přijímat platby, ověří vaši totožnost i Stripe (doklad a bankovní účet na
@@ -223,7 +233,7 @@ export default function StatSePoskytovatelemPage() {
                     Zpět
                   </button>
                   <button
-                    onClick={confirm} disabled={loading || !agree}
+                    onClick={confirm} disabled={loading || !agree || !agreeTerms || !agreeRefund}
                     className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3.5 font-extrabold text-white transition hover:bg-emerald-600 disabled:opacity-50"
                   >
                     {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Ukládám…</> : 'Ano, to jsem já'}

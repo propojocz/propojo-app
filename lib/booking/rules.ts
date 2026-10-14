@@ -61,13 +61,17 @@ export function bookingBufferMs(order: {
 
 // ─── Automatické refundy a pokyn providera ────────────────────────────────
 
+// Uzavřený katalog AUTOREF-001…006 (model §21). Nic mimo něj; rozšíření = nová verze pokynu + nový souhlas.
 export const AUTO_REFUND_TRIGGERS = [
-  'provider_cancelled',
-  'reschedule_rejected',
-  'reschedule_expired',
-  'no_show_agreed',
-  'no_show_no_response',
-  'customer_cancelled', // jen před hranicí podle customerCancellationOutcome
+  'provider_cancelled', // AUTOREF-001
+  'reschedule_rejected', // AUTOREF-002
+  'reschedule_expired', // AUTOREF-002
+  'no_show_agreed', // AUTOREF-003
+  'no_show_no_response', // AUTOREF-003
+  'customer_cancelled', // AUTOREF-004 – jen před hranicí podle customerCancellationOutcome
+  'capture_after_deadline', // AUTOREF-005
+  'offer_missing_agreed', // AUTOREF-006
+  'offer_missing_no_response', // AUTOREF-006
 ] as const
 
 export type AutoRefundTrigger = (typeof AUTO_REFUND_TRIGGERS)[number]
@@ -85,7 +89,7 @@ export const CONSENT_KINDS = [
 
 export type ConsentKind = (typeof CONSENT_KINDS)[number]
 
-export function isAutoRefundTrigger(event: BookingEvent): event is AutoRefundTrigger {
+export function isAutoRefundTrigger(event: BookingEvent | string): event is AutoRefundTrigger {
   return (AUTO_REFUND_TRIGGERS as readonly string[]).includes(event)
 }
 
@@ -395,6 +399,10 @@ export interface StripeAccountFacts {
   deauthorizedAt: Date | null
   chargesEnabled: boolean
   cardPayments: string | null
+  /** Platný pokyn k automatickým refundům v aktuální verzi katalogu (vrstva 4) */
+  hasRefundInstruction: boolean
+  /** IČO ověřené v ARES */
+  icoVerified: boolean
 }
 
 export type AccountBlock =
@@ -403,6 +411,8 @@ export type AccountBlock =
   | 'deauthorized'
   | 'charges_disabled'
   | 'card_payments_inactive'
+  | 'missing_refund_instruction'
+  | 'ico_unverified'
 
 /** Prázdné pole = provider může přijímat nové rezervace */
 export function accountBlocks(facts: StripeAccountFacts): AccountBlock[] {
@@ -412,5 +422,7 @@ export function accountBlocks(facts: StripeAccountFacts): AccountBlock[] {
   if (facts.deauthorizedAt !== null) blocks.push('deauthorized')
   if (!facts.chargesEnabled) blocks.push('charges_disabled')
   if (facts.cardPayments !== 'active') blocks.push('card_payments_inactive')
+  if (!facts.hasRefundInstruction) blocks.push('missing_refund_instruction')
+  if (!facts.icoVerified) blocks.push('ico_unverified')
   return blocks
 }

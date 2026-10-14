@@ -104,7 +104,7 @@ export function bookingCharge(item: ChargeableItem, policy: BookingPolicy = BOOK
   const agreed = item.agreed_charge_halere != null ? Number(item.agreed_charge_halere) : null
   if (agreed != null) {
     if (!Number.isInteger(agreed) || agreed > policy.maxAgreedChargeHalere) {
-      return { ok: false, error: 'Upravená cena není platná.' }
+      return { ok: false, error: `Částka placená přes Propojo může být nejvýš ${(policy.maxAgreedChargeHalere / 100).toLocaleString('cs-CZ')} Kč.` }
     }
     const result = computeCommission(agreed, policy.commission, policy.minChargeHalere)
     if (!result.ok) return result
@@ -118,6 +118,9 @@ export function bookingCharge(item: ChargeableItem, policy: BookingPolicy = BOOK
         ? 'U této položky není nastavená Cena výjezdu.'
         : 'U této položky není nastavený Rezervační poplatek.',
     }
+  }
+  if (Math.round(kc * 100) > policy.maxAgreedChargeHalere) {
+    return { ok: false, error: `Částka placená přes Propojo může být nejvýš ${(policy.maxAgreedChargeHalere / 100).toLocaleString('cs-CZ')} Kč.` }
   }
   const result = computeCommission(Math.round(kc * 100), policy.commission, policy.minChargeHalere)
   if (!result.ok) return result

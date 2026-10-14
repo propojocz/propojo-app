@@ -24,6 +24,7 @@ import { createNotification } from './notifications'
 import type { ActionResult } from './types'
 import { bookingCharge } from '@/lib/booking/commission'
 import { loadRequestDetail, type RequestDetailData } from '@/lib/request-detail'
+import { alertIfHighCharge } from '@/lib/booking/alerts'
 
 /** Nabídka v odpovědi na poptávku: typ a částka placená přes Propojo (3d, 7. 10. 2026). */
 export type ResponseOffer = {
@@ -260,6 +261,7 @@ export async function expressInterest(
   const offerCheck = checkOffer(offer)
   const placeCheck = placeOf(offer)
   if (!placeCheck.ok) return { success: false, error: placeCheck.error }
+  if (offerCheck.ok && offer) await alertIfHighCharge(offer.chargeKc, { providerId: user.id, where: 'nabídka na poptávku', url: `/poptavky/${requestId}` })
   const placeCols = placeCheck.cols
   if (existing) {
     // Úprava nabídky u živé odpovědi (před výběrem zákazníkem).

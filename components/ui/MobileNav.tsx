@@ -1,7 +1,7 @@
 'use client'
 // components/ui/MobileNav.tsx
-// Univerzální menu — mobil i desktop, STEJNÁ data včetně odznaků (žádný rozdíl v obsahu,
-// jen v zobrazení podle velikosti obrazovky). Drawer renderovaný přes React Portal přímo
+// Univerzální menu ☰ — mobil i desktop. Od 13. 10. 2026 jediné menu účtu (dashboard už levé
+// menu nemá), včetně odznaků a Admin panelu. Drawer renderovaný přes React Portal přímo
 // do <body>, aby ho neovlivnil backdrop-blur na rodičovském <header>.
 
 import { useState, useEffect } from 'react'
@@ -26,11 +26,13 @@ interface MobileNavProps {
   disputeCount?: number
   /** Objednávky čekající na akci zákazníka (platba, potvrzení). */
   todoCount?: number
+  /** Výplaty: poskytovatel zatím nemůže přijímat rezervace s platbou (Stripe / pokyn / IČO) */
+  payoutsWarn?: boolean
 }
 
 export default function MobileNav({
   user, displayName, avatarUrl, isProvider, isAdmin,
-  unansweredReviews = 0, disputeCount = 0, todoCount = 0,
+  unansweredReviews = 0, disputeCount = 0, todoCount = 0, payoutsWarn = false,
 }: MobileNavProps) {
   const [open, setOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
@@ -59,24 +61,40 @@ export default function MobileNav({
     { href: '/poptavky', label: 'Poptávky', icon: Megaphone },
   ]
 
-  // Zrcadlí přesně NAV pole z app/dashboard/layout.tsx (role-based) + Oblíbené navíc.
-  // Stejné odznaky jako na desktopovém dashboard sidebaru — žádný rozdíl v informacích.
-  const ACCOUNT_LINKS: { href: string; label: string; icon: any; big?: boolean; badge?: number }[] = user ? [
-    { href: '/dashboard', label: 'Přehled', icon: LayoutDashboard, big: true },
-    ...(isProvider ? [{ href: '/dashboard/nabidky', label: 'Moje nabídky', icon: Package }] : []),
-    ...(isProvider ? [{ href: '/dashboard/znacka', label: 'Značka', icon: Building2 }] : []),
-    ...(isProvider ? [{ href: '/dashboard/qr', label: 'QR kód', icon: QrCode }] : []),
-    ...(isProvider ? [{ href: '/dashboard/terminy', label: 'Termíny', icon: CalendarDays }] : []),
-    { href: '/dashboard/objednavky', label: 'Objednávky', icon: Inbox, badge: todoCount },
-    { href: '/dashboard/poptavky', label: 'Moje poptávky', icon: Megaphone },
-    ...(isProvider ? [{ href: '/dashboard/recenze', label: 'Moje recenze', icon: Star, badge: unansweredReviews }] : []),
-    ...(isProvider ? [{ href: '/dashboard/predplatne', label: 'Předplatné', icon: CreditCard }] : []),
-    ...(isProvider ? [{ href: '/dashboard/vyplaty', label: 'Výplaty', icon: Landmark }] : []),
-    { href: '/dashboard/oblibene', label: 'Oblíbené', icon: Heart },
-    { href: '/dashboard/profil', label: 'Můj profil', icon: User },
+  // Jediné menu účtu (od 13. 10. 2026 bez levého menu v dashboardu) – všude stejné, i s odznaky.
+  // Skupiny podle toho, co člověk dělá: objednávky a poptávky → moje podnikání → účet a platby.
+  type AccountLink = { href: string; label: string; icon: any; badge?: number; warn?: boolean }
+  const ACCOUNT_GROUPS: { title: string; items: AccountLink[] }[] = user ? [
+    {
+      title: 'Objednávky a poptávky',
+      items: [
+        { href: '/dashboard/objednavky', label: 'Objednávky', icon: Inbox, badge: todoCount },
+        { href: '/dashboard/poptavky', label: 'Moje poptávky', icon: Megaphone },
+        { href: '/dashboard/oblibene', label: 'Oblíbené', icon: Heart },
+      ],
+    },
+    ...(isProvider ? [{
+      title: 'Moje podnikání',
+      items: [
+        { href: '/dashboard/nabidky', label: 'Moje nabídky', icon: Package },
+        { href: '/dashboard/terminy', label: 'Termíny', icon: CalendarDays },
+        { href: '/dashboard/recenze', label: 'Moje recenze', icon: Star, badge: unansweredReviews },
+        { href: '/dashboard/znacka', label: 'Značka', icon: Building2 },
+        { href: '/dashboard/qr', label: 'QR kód', icon: QrCode },
+      ],
+    }] : []),
+    {
+      title: 'Účet a platby',
+      items: [
+        ...(isProvider ? [{ href: '/dashboard/vyplaty', label: 'Výplaty', icon: Landmark, warn: payoutsWarn }] : []),
+        ...(isProvider ? [{ href: '/dashboard/predplatne', label: 'Předplatné', icon: CreditCard }] : []),
+        { href: '/dashboard/profil', label: 'Můj profil', icon: User },
+      ],
+    },
   ] : []
+  const isActive = (href: string) => (href === '/dashboard' ? pathname === href : pathname === href || pathname.startsWith(href + '/'))
 
-  const totalBadge = unansweredReviews + todoCount + (isAdmin ? disputeCount : 0)
+  const totalBadge = unansweredReviews + todoCount + (isAdmin ? disputeCount : 0) + (payoutsWarn ? 1 : 0)
 
   const drawer = (
     <AnimatePresence>
@@ -131,11 +149,11 @@ export default function MobileNav({
 
               <p className="px-5 py-2 text-xs font-bold uppercase tracking-wider text-slate-400">Navigace</p>
               {NAV_LINKS.map((item) => {
-                const isActive = pathname === item.href
+                const active = pathname === item.href
                 return (
                   <Link key={item.href} href={item.href}
                     className={`flex items-center gap-3 px-5 py-3.5 text-sm font-medium transition-colors ${
-                      isActive ? 'bg-emerald-50 text-emerald-700' : 'text-slate-600 hover:bg-slate-50'
+                      active ? 'bg-emerald-50 text-emerald-700' : 'text-slate-600 hover:bg-slate-50'
                     }`}>
                     <item.icon className="h-5 w-5 shrink-0" />
                     {item.label}
@@ -145,20 +163,30 @@ export default function MobileNav({
 
               {user && (
                 <div className="mt-2 border-t border-slate-100 pt-2">
-                  <p className="px-5 py-2 text-xs font-bold uppercase tracking-wider text-slate-400">Můj účet</p>
-                  {ACCOUNT_LINKS.map((item) => (
-                    <Link key={item.href} href={item.href}
-                      className={`flex items-center gap-3 px-5 hover:bg-slate-50 ${
-                        item.big ? 'py-4 text-base font-bold text-slate-900' : 'py-3.5 text-sm font-medium text-slate-600'
-                      }`}>
-                      <item.icon className={item.big ? 'h-6 w-6 shrink-0' : 'h-5 w-5 shrink-0'} />
-                      <span className="flex-1">{item.label}</span>
-                      {!!item.badge && item.badge > 0 && (
-                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-white">
-                          {item.badge}
-                        </span>
-                      )}
-                    </Link>
+                  <Link href="/dashboard"
+                    className={`flex items-center gap-3 px-5 py-4 text-base font-bold transition-colors ${isActive('/dashboard') ? 'bg-emerald-50 text-emerald-700' : 'text-slate-900 hover:bg-slate-50'}`}>
+                    <LayoutDashboard className="h-6 w-6 shrink-0" />
+                    <span className="flex-1">Přehled</span>
+                  </Link>
+                  {ACCOUNT_GROUPS.map((group) => (
+                    <div key={group.title} className="mt-1">
+                      <p className="px-5 pb-1 pt-3 text-xs font-bold uppercase tracking-wider text-slate-400">{group.title}</p>
+                      {group.items.map((item) => (
+                        <Link key={item.href} href={item.href}
+                          className={`flex items-center gap-3 px-5 py-3 text-sm font-medium transition-colors ${isActive(item.href) ? 'bg-emerald-50 text-emerald-700' : 'text-slate-600 hover:bg-slate-50'}`}>
+                          <item.icon className="h-5 w-5 shrink-0" />
+                          <span className="flex-1">{item.label}</span>
+                          {!!item.badge && item.badge > 0 && (
+                            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-white">
+                              {item.badge}
+                            </span>
+                          )}
+                          {item.warn && (
+                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[11px] font-black text-white" title="Dokončete nastavení plateb">!</span>
+                          )}
+                        </Link>
+                      ))}
+                    </div>
                   ))}
                 </div>
               )}

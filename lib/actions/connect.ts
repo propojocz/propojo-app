@@ -17,6 +17,8 @@ import {
   syncStripeAccount,
 } from '@/lib/booking/payments'
 import type { AccountBlock } from '@/lib/booking/rules'
+import { recordRefundInstruction } from '@/lib/booking/consents'
+import { headers } from 'next/headers'
 
 type LinkResult = { success: true; url: string } | { success: false; error: string }
 
@@ -82,3 +84,23 @@ export async function refreshConnectStatus(refresh = true): Promise<ConnectStatu
   const fresh = refresh ? await getProviderAccount(db, user.id) : current
   return { hasAccount: !!fresh.accountId, ready: fresh.blocks.length === 0, blocks: fresh.blocks }
 }
+
+// ── Pokyn k automatickým refundům (vrstva 4, AK bod 4) ─────────
+// Samostatný výslovný souhlas: přesné znění, rozsah (katalog AUTOREF), verze katalogu a podmínek, čas, IP, prohlížeč.
+export async function acceptRefundInstruction(): Promise<{ success: true } | { success: false; error: string }> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Nejste přihlášeni.' }
+  const db = adminDb()
+  const { data: prof } = await db.from('profiles').select('is_provider').eq('id', user.id).maybeSingle()
+  if ((prof as { is_provider: boolean | null } | null)?.is_provider !== true) {
+    return { success: false, error: 'Pokyn dává poskytovatel.' }
+  }
+  const h = headers()
+  const ok = await recordRefundInstruction(db, user.id, {
+    ip: (h.get('x-forwarded-for') ?? '').split(',')[0].trim() || null,
+    userAgent: h.get('user-agent'),
+  })
+  return ok ? { success: true } : { success: false, error: 'Pokyn se nepodařilo uložit. Zkuste to prosím znovu.' }
+}
+

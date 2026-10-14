@@ -5,7 +5,11 @@ import Link from 'next/link'
 import { CheckCircle2, AlertTriangle, Landmark, ShieldCheck, ArrowLeft, Clock, Eye, ArrowRight, Package } from 'lucide-react'
 import ConnectButton from '@/components/ui/ConnectButton'
 import { refreshConnectStatus } from '@/lib/actions/connect'
-import { ACCOUNT_BLOCK_TEXT } from '@/lib/booking/payments'
+import { ACCOUNT_BLOCK_TEXT, adminDb } from '@/lib/booking/payments'
+import RefundInstructionCard from '@/components/ui/RefundInstructionCard'
+import { AUTOREF_CATALOG_VERSION, AUTOREF_INSTRUCTION_TEXT } from '@/lib/booking/texts'
+import { providerTrust } from '@/lib/booking/trust'
+import { BOOKING_POLICY } from '@/lib/booking/policy'
 
 export const metadata = { title: 'Výplaty | Propojo' }
 
@@ -51,8 +55,26 @@ export default async function VyplatyPage({ searchParams }: Props) {
   // obnoví přímo ze Stripe (ať se nečeká na webhook). Starý Express účet se nepočítá.
   const status = await refreshConnectStatus(searchParams.stav === 'hotovo')
   const hasAccount = status.hasAccount
-  const fullyReady = status.ready
-  const duvody = status.blocks.filter((b) => b !== 'not_connected').map((b) => ACCOUNT_BLOCK_TEXT[b])
+  // Stripe část zvlášť od pokynu k refundům a IČO (ty mají vlastní kartu / řeší se jinde)
+  const NON_STRIPE = ['missing_refund_instruction', 'ico_unverified']
+  const stripeBlocks = status.blocks.filter((b) => !NON_STRIPE.includes(b))
+  const fullyReady = hasAccount && stripeBlocks.length === 0
+  const duvody = stripeBlocks.filter((b) => b !== 'not_connected').map((b) => ACCOUNT_BLOCK_TEXT[b])
+  const icoChybi = status.blocks.includes('ico_unverified')
+
+  // Pokyn k automatickým refundům (vrstva 4) a limit podle důvěryhodnosti
+  const db = adminDb()
+  const { data: consent } = await db
+    .from('booking_consents')
+    .select('accepted_at')
+    .eq('user_id', user.id)
+    .eq('kind', 'provider_auto_refund_instruction')
+    .eq('catalog_version', AUTOREF_CATALOG_VERSION)
+    .order('accepted_at', { ascending: false })
+    .limit(1)
+    .maybeSingle() as { data: { accepted_at: string } | null }
+  const trust = await providerTrust(db, user.id)
+  const kc = (h: number) => `${(h / 100).toLocaleString('cs-CZ')} Kč`
 
   // Má aktivní předplatné? Bez něj jsou nabídky neviditelné — a když sem přišel
   // rovnou napojit účet (Krok 2), Stripe ho vrátí sem a Krok 1 by mu utekl.
@@ -78,6 +100,35 @@ export default async function VyplatyPage({ searchParams }: Props) {
       <div>
         <h1 className="text-2xl font-black text-slate-900">Výplaty</h1>
         <p className="mt-0.5 text-sm text-slate-500">Napojení Stripe účtu pro příjem Rezervačních poplatků a Cen výjezdu od zákazníků.</p>
+      </div>
+
+      <RefundInstructionCard text={AUTOREF_INSTRUCTION_TEXT} acceptedAt={consent?.accepted_at ?? null} />
+
+      {icoChybi && (
+        <div className="rounded-2xl border-2 border-amber-300 bg-amber-50/60 p-5 text-sm text-amber-900">
+          <b>IČO zatím není ověřené v ARES.</b> Bez něj nemůžete přijímat rezervace s platbou – doplňte ho v profilu.
+        </div>
+      )}
+
+      {/* Limit otevřených zaplacených rezervací podle důvěryhodnosti (ochrana proti podvodu) */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-700 shadow-sm">
+        <p className="font-black text-slate-900">
+          {trust.tier === 'trusted' ? '★ Důvěryhodný poskytovatel' : trust.tier === 'proven' ? 'Prověřený účet' : 'Nový účet'}
+        </p>
+        {trust.limitHalere == null ? (
+          <p className="mt-1">Máte {trust.completed} dokončených rezervací bez problémů – bez limitu rezervací a se štítkem „Důvěryhodný“.</p>
+        ) : (
+          <p className="mt-1">
+            Otevřené zaplacené rezervace: <b>{kc(trust.openHalere)}</b> z limitu <b>{kc(trust.limitHalere)}</b>.
+            {' '}Dokončené rezervace: {trust.completed}.
+            {trust.problems > 0
+              ? ' Kvůli zrušení z vaší strany, nedostavení nebo sporu limit zůstává – ozvěte se nám.'
+              : trust.tier === 'new'
+                ? ` Po ${BOOKING_POLICY.trust.provenAfterCompleted} dokončených bez problémů se limit zvýší na ${kc(BOOKING_POLICY.trust.provenMaxOpenHalere)}, po ${BOOKING_POLICY.trust.trustedAfterCompleted} zmizí úplně.`
+                : ` Po ${BOOKING_POLICY.trust.trustedAfterCompleted} dokončených bez problémů limit zmizí a získáte štítek „Důvěryhodný“.`}
+          </p>
+        )}
+        <p className="mt-1 text-xs text-slate-400">Jedna rezervace může být nejvýš {kc(BOOKING_POLICY.maxAgreedChargeHalere)}.</p>
       </div>
 
       {fullyReady ? (

@@ -9,6 +9,7 @@ import InboxButton from './InboxButton'
 import MobileNav from './MobileNav'
 import SuspendedTopBar from './SuspendedTopBar'
 import { getCustomerTodoCount, getProviderTodoCount } from '@/lib/actions/order-alerts'
+import { adminDb, getProviderAccount } from '@/lib/booking/payments'
 
 function getAdminClient() {
   return createAdminClient(
@@ -76,6 +77,8 @@ export default async function Navbar() {
       ])
     : [0, 0]
   const todoCount = customerTodo + providerTodo
+  // Výplaty: dokud poskytovatel nemůže přijímat rezervace s platbou (Stripe, pokyn k refundům, IČO)
+  const payoutsWarn = user && isProvider ? (await getProviderAccount(adminDb(), user.id)).blocks.length > 0 : false
 
   // Světlé postranní tlačítko (Poptávky, Objednávky) — jen na desktopu
   const sideBtn =
@@ -146,6 +149,7 @@ export default async function Navbar() {
               unansweredReviews={unansweredReviews}
               disputeCount={disputeCount}
               todoCount={todoCount}
+              payoutsWarn={payoutsWarn}
             />
           </div>
         </nav>

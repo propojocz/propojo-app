@@ -10,6 +10,8 @@
 
 import { expandSearch, relevanceScore, searchPlan } from '@/lib/search'
 import { accountBlocks } from '@/lib/booking/rules'
+import { AUTOREF_CATALOG_VERSION } from '@/lib/booking/texts'
+import { tierOf, trustCounts } from '@/lib/booking/trust'
 import { Suspense } from 'react'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
@@ -35,6 +37,7 @@ interface Props {
     minRating?: string
     subcats?: string
     dosah?: string
+    volno?: string
   }
 }
 
@@ -87,10 +90,12 @@ async function serviceIdsByItemText(q: string): Promise<string[]> {
 }
 
 async function ServiceList({
-  category, city, q, sort, priceMin, priceMax, minRating, subcats, dosah,
+  category, city, q, sort, priceMin, priceMax, minRating, subcats, dosah, volno,
 }: {
   category?: string; city?: string; q?: string; sort?: string
   priceMin?: string; priceMax?: string; minRating?: string; subcats?: string; dosah?: string
+  /** Filtr volného termínu: 'dnes' / 'tyden' */
+  volno?: string
 }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -175,6 +180,8 @@ async function ServiceList({
 
   const activeSubscribers = new Set<string>()
   const acceptsOnline = new Set<string>()
+  // Štítky: „Nový na Propoju“ (žádná dokončená rezervace), „Důvěryhodný“ (20 dokončených bez problémů)
+  const trustBadgeOf = new Map<string, 'new' | 'trusted'>()
   if (candidateProviderIds.length > 0) {
     // POZOR: číst přes SERVICE ROLE (subscriptions má RLS „každý vidí jen svoje").
     const adminDb = createAdminClient(
@@ -193,6 +200,16 @@ async function ServiceList({
       .from('stripe_accounts')
       .select('provider_id, stripe_account_id, account_type, charges_enabled, card_payments, deauthorized_at')
       .in('provider_id', candidateProviderIds)
+    // Vrstva 4: i pokyn k automatickým refundům a ověřené IČO
+    const { data: consents } = await adminDb
+      .from('booking_consents')
+      .select('user_id')
+      .in('user_id', candidateProviderIds)
+      .eq('kind', 'provider_auto_refund_instruction')
+      .eq('catalog_version', AUTOREF_CATALOG_VERSION)
+    const withInstruction = new Set(((consents ?? []) as Array<{ user_id: string }>).map((c) => c.user_id))
+    const { data: icoRows } = await adminDb.from('profiles').select('id, ico_verified').in('id', candidateProviderIds)
+    const icoOk = new Set(((icoRows ?? []) as Array<{ id: string; ico_verified: boolean | null }>).filter((p) => p.ico_verified).map((p) => p.id))
     for (const a of (accs ?? []) as any[]) {
       const blocks = accountBlocks({
         accountId: a.stripe_account_id ?? null,
@@ -200,8 +217,15 @@ async function ServiceList({
         deauthorizedAt: a.deauthorized_at ? new Date(a.deauthorized_at) : null,
         chargesEnabled: a.charges_enabled === true,
         cardPayments: a.card_payments ?? null,
+        hasRefundInstruction: withInstruction.has(a.provider_id),
+        icoVerified: icoOk.has(a.provider_id),
       })
       if (blocks.length === 0) acceptsOnline.add(a.provider_id)
+    }
+    const counts = await trustCounts(adminDb as any, candidateProviderIds)
+    for (const [pid, c] of Array.from(counts.entries())) {
+      if (tierOf(c.completed, c.problems) === 'trusted') trustBadgeOf.set(pid, 'trusted')
+      else if (c.completed === 0) trustBadgeOf.set(pid, 'new')
     }
   }
 
@@ -322,20 +346,61 @@ async function ServiceList({
     })
   }
 
-  // Hledání: nejrelevantnější karty dopředu (název/obor/ceník > popis, správná kategorie).
-  // Jen u výchozího řazení – když si zákazník zvolí cenu nebo hodnocení, platí jeho volba.
+  // Volné termíny karet (budoucí okna) – potřeba už pro řazení „Nejdřív volno“ a filtr volna.
+  // Okno ↔ karta je přes slot_services; časy vzestupně, první = nejbližší volný termín karty.
+  const freeSlotServices = new Set<string>()
+  const slotTimesOf: Record<string, string[]> = {}
+  {
+    const ids = sorted.map((s) => s.id)
+    if (ids.length > 0) {
+      const { data: slotRows } = await supabase
+        .from('availability_slots')
+        .select('id, starts_at, slot_services!inner(service_id)')
+        .eq('status', 'volno')
+        .eq('pending_confirm', false)
+        .gte('starts_at', new Date().toISOString())
+        .order('starts_at', { ascending: true })
+        .in('slot_services.service_id', ids) as { data: any[] | null }
+      for (const r of (slotRows ?? [])) {
+        for (const l of (r.slot_services ?? [])) {
+          if (!l.service_id) continue
+          freeSlotServices.add(l.service_id)
+          ;(slotTimesOf[l.service_id] ??= []).push(r.starts_at)
+        }
+      }
+    }
+  }
+  const earliestOf = (id: string): number => {
+    const t = slotTimesOf[id]?.[0]
+    return t ? new Date(t).getTime() : Number.POSITIVE_INFINITY
+  }
+
+  // Filtr volného termínu: dnes (pražský den) / do týdne
+  if (volno === 'dnes' || volno === 'tyden') {
+    const pragueDay = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(d)
+    const today = pragueDay(new Date())
+    const weekEnd = Date.now() + 7 * 24 * 3600_000
+    sorted = sorted.filter((s) => (slotTimesOf[s.id] ?? []).some((t) =>
+      volno === 'dnes' ? pragueDay(new Date(t)) === today : new Date(t).getTime() <= weekEnd))
+  }
+
+  // Výchozí řazení „⚡ Nejdřív volno“: karta s nejbližším volným termínem první, bez termínu na konec.
+  // Při hledání nejdřív podle shody s dotazem, při stejné shodě podle nejbližšího termínu.
+  const relevance = new Map<string, number>()
   if (q && smartIds && (!sort || sort === 'volno')) {
     const plan = searchPlan(q)
-    const score = new Map<string, number>()
     for (const s of sorted) {
       const items = (itemsByService[s.id] ?? []).map((i) => i.name).join(' ')
-      score.set(s.id, relevanceScore(plan, {
+      relevance.set(s.id, relevanceScore(plan, {
         strong: [s.title, (s as any).subtitle, s.category, items].filter(Boolean).join(' '),
         weak: (s as any).description ?? '',
         category: s.category ?? null,
       }))
     }
-    sorted = [...sorted].sort((a, b) => (score.get(b.id) ?? 0) - (score.get(a.id) ?? 0))
+  }
+  if (!sort || sort === 'volno') {
+    sorted = [...sorted].sort((a, b) =>
+      ((relevance.get(b.id) ?? 0) - (relevance.get(a.id) ?? 0)) || (earliestOf(a.id) - earliestOf(b.id)))
   }
 
   // Řazení
@@ -454,30 +519,7 @@ async function ServiceList({
     ;(subsByService[l.service_id] ??= []).push(nm)
   }
 
-  // Které KARTY mají do budoucna vypsané volné okno — štítek „Volný termín"
-  // patří kartě, ne poskytovateli. Jinak by se u někoho se třemi kartami
-  // rozsvítil i tam, kde okno není. Okno ↔ karta je přes slot_services.
-  const freeSlotServices = new Set<string>()
-  // Časy oken po kartách — karta ukáže nejbližší termín, ať zákazník nemusí
-  // proklikávat, aby zjistil, kdy se dostane na řadu.
-  const slotTimesOf: Record<string, string[]> = {}
-  if (serviceIds.length > 0) {
-    const { data: slotRows } = await supabase
-      .from('availability_slots')
-      .select('id, starts_at, slot_services!inner(service_id)')
-      .eq('status', 'volno')
-      .eq('pending_confirm', false)
-      .gte('starts_at', new Date().toISOString())
-      .order('starts_at', { ascending: true })
-      .in('slot_services.service_id', serviceIds) as { data: any[] | null }
-    for (const r of (slotRows ?? [])) {
-      for (const l of (r.slot_services ?? [])) {
-        if (!l.service_id) continue
-        freeSlotServices.add(l.service_id)
-        ;(slotTimesOf[l.service_id] ??= []).push(r.starts_at)
-      }
-    }
-  }
+  // Volné termíny karet (freeSlotServices, slotTimesOf) jsou načtené výš – před řazením.
 
   const favSet = new Set<string>()
   if (user && providerIds.length > 0) {
@@ -521,6 +563,7 @@ async function ServiceList({
               gallery={(service as any).gallery ?? []}
               priceItems={priceItemsOf(service.id)}
               acceptsOnline={acceptsOnline.has(pid)}
+              trustBadge={trustBadgeOf.get(pid) ?? null}
             />
           )
         })}
@@ -530,7 +573,7 @@ async function ServiceList({
 }
 
 export default async function MarketplacePage({ searchParams }: Props) {
-  const { category, city, q, sort, priceMin, priceMax, minRating, subcats, dosah } = searchParams
+  const { category, city, q, sort, priceMin, priceMax, minRating, subcats, dosah, volno } = searchParams
   const categories = await getCategories()
   const subcategories = await getSubcategories(category)
 
@@ -566,15 +609,16 @@ export default async function MarketplacePage({ searchParams }: Props) {
               currentSubcats={subcats}
               currentCity={city}
               currentDosah={dosah}
+              currentVolno={volno}
             />
           </aside>
 
           <div className="min-w-0 flex-1">
             <Suspense
-              key={`${category}-${city}-${q}-${sort}-${priceMin}-${priceMax}-${minRating}-${subcats}-${dosah}`}
+              key={`${category}-${city}-${q}-${sort}-${priceMin}-${priceMax}-${minRating}-${subcats}-${dosah}-${volno}`}
               fallback={<ServiceListSkeleton />}
             >
-              <ServiceList category={category} city={city} q={q} sort={sort} priceMin={priceMin} priceMax={priceMax} minRating={minRating} subcats={subcats} dosah={dosah} />
+              <ServiceList category={category} city={city} q={q} sort={sort} priceMin={priceMin} priceMax={priceMax} minRating={minRating} subcats={subcats} dosah={dosah} volno={volno} />
             </Suspense>
           </div>
         </div>

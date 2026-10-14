@@ -2,6 +2,7 @@
 // app/registrace/zivnostnik/page.tsx
 
 import { useState } from 'react'
+import ProviderConsents from '@/components/ui/ProviderConsents'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -42,6 +43,8 @@ export default function ZivnostnikRegistracePage() {
   const [icoLoading, setIcoLoading] = useState(false)
   const [icoError, setIcoError] = useState('')
   const [aresData, setAresData] = useState<AresResult | null>(null)
+  const [agreeTerms, setAgreeTerms] = useState(false)
+  const [agreeRefund, setAgreeRefund] = useState(false)
 
   const { register: f, handleSubmit, setValue, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -66,13 +69,14 @@ export default function ZivnostnikRegistracePage() {
   // Volá API route místo Server Action – spolehlivější
   const onSubmit = async (data: FormValues) => {
     if (!aresData) return
+    if (!agreeTerms || !agreeRefund) { setServerError('Potvrďte prosím oba souhlasy.'); return }
     setIsLoading(true); setServerError('')
     try {
       const { password_confirm, ...payload } = data
       const res = await fetch('/api/register-provider', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...payload, company_name: aresData.obchodniJmeno }),
+        body: JSON.stringify({ ...payload, company_name: aresData.obchodniJmeno, terms_accepted: agreeTerms, refund_instruction: agreeRefund }),
       })
       const result = await res.json()
       if (res.ok) { setSuccess(true) }
@@ -236,9 +240,7 @@ export default function ZivnostnikRegistracePage() {
                     </div>
                     {errors.password_confirm && <p className="form-error">{errors.password_confirm.message}</p>}
                   </div>
-                  <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 text-xs text-slate-500">
-                    Registrací souhlasíte s <Link href="/podminky" className="underline text-slate-700">podmínkami služby</Link> a <Link href="/pravidla-komunity" className="underline text-slate-700">pravidly komunity</Link>.
-                  </div>
+                  <ProviderConsents terms={agreeTerms} refund={agreeRefund} onTerms={setAgreeTerms} onRefund={setAgreeRefund} />
                   <AnimatePresence>
                     {serverError && (
                       <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="flex items-center gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

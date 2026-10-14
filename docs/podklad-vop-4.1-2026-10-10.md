@@ -148,6 +148,17 @@ Popsat hlavní parametry v pořadí významu a proč jsou důležité:
 - Cokoli, co přidává nový pohyb peněz nebo refund trigger, mění vznik smlouvy nebo odpovědnost, omezuje spotřebitele, výrazně mění nakládání s osobními údaji, mění řazení nebo sankce podle P2B, mění role Stripe nebo přibližuje Propojo k rozhodování sporů, označ **LEGAL_REVIEW_NEEDED** a nezamykej.
 - Výsledkem je revize VOP 4.1 v režimu sledování změn, ne nová „VOP 5“.
 
+### A17. Ochrana proti zneužití (13. 10. 2026) – LEGAL_REVIEW_NEEDED
+- **Strop částky placené přes Propojo:** nejvýš 5 000 Kč na jednu rezervaci (Rezervační poplatek / Cena výjezdu), pro všechny.
+- **Limit otevřených zaplacených rezervací** podle historie poskytovatele (omezení podle P2B → uvést v Podmínkách pro poskytovatele i s důvodem: ochrana zákazníků, Propojo peníze nedrží):
+  - nový účet: součet budoucích zaplacených rezervací nejvýš 15 000 Kč;
+  - po 5 dokončených rezervacích bez zrušení z jeho strany, nahlášeného nedostavení a sporu: 25 000 Kč;
+  - po 20 dokončených bez problémů: bez limitu.
+  Při dosažení limitu nejde další termín zaplatit online (zákazník to vidí a může poskytovateli napsat).
+- **Štítek „Důvěryhodný“** (vlastní štítek Propoja, AK bod 10): jen objektivní kritérium – 20 dokončených rezervací přes Propojo bez zrušení z jeho strany, nedostavení a sporu; u štítku vysvětlení, co se ověřuje a co ne (kvalitu práce Propojo neověřuje). Štítek **„Nový na Propoju“** u poskytovatele bez dokončené rezervace.
+- **Pokyn k automatickým refundům** je podmínkou přijímání rezervací s platbou (spolu s funkčním Stripe účtem a ověřeným IČO).
+- **Forma souhlasu s pokynem (13. 10. 2026) – LEGAL_REVIEW_NEEDED:** samostatné zaškrtávací pole při registraci poskytovatele (a pro stávající poskytovatele na stránce Výplaty) s krátkým textem „Souhlasím s pravidly ochrany zákazníků: když zruším potvrzenou rezervaci nebo nedorazím, vrátí se zákazníkovi zaplacená částka automaticky z mého Stripe účtu.“ Přesné znění pokynu (příkaz, aby Provozovatel jeho jménem zadal refund v případech AUTOREF-001…006, provize a poplatek Stripe se nevracejí, při sporu se refund neprovede) je u pole na rozkliknutí „Přesná pravidla“ a ukládá se do záznamu souhlasu. Ověřit, že takto zkrácený popisek u pole stačí jako výslovné přijetí (§ 1753 OZ), když je přesné znění hned u něj.
+
 ---
 
 ## B. Technická pravidla Platformy (návrh obsahu přílohy)
@@ -155,7 +166,8 @@ Popsat hlavní parametry v pořadí významu a proč jsou důležité:
 | Parametr | Hodnota |
 |---|---|
 | Minimální částka placená přes Propojo | 200 Kč |
-| Maximální částka u jedné Rezervace | 20 000 Kč |
+| Maximální částka u jedné Rezervace | 5 000 Kč |
+| Limit otevřených zaplacených rezervací | nový 15 000 Kč; po 5 dokončených bez problémů 25 000 Kč; po 20 bez limitu |
 | Provize | 10 %, min. 29 Kč, max. 89 Kč + 2 % z části nad 3 000 Kč (bez dovětku o DPH – VAT-001) |
 | Minimální předstih Rezervace | 60 minut (zobrazuje se při výběru termínu) |
 | Platnost platební brány | 30 minut |

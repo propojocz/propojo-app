@@ -594,8 +594,8 @@ export default function OrderDetailClient({
                 </>
               ) : (
                 <>
-                  <strong>Rezervace se zálohou:</strong> {depositAmount.toLocaleString('cs-CZ')} Kč{' '}
-                  <span>(započítává se do ceny)</span>
+                  <strong>Rezervační poplatek:</strong> {depositAmount.toLocaleString('cs-CZ')} Kč{' '}
+                  <span>(odečte se z ceny služby)</span>
                 </>
               )}
             </div>

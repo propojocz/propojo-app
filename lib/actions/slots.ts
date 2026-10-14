@@ -143,7 +143,10 @@ async function kryjeSeSBlokaci(
  * které mají aspoň jednu aktivní službu s pevnou cenou – stejné pravidlo jako stránka Termíny.
  * Nepřihlášený / neposkytovatel → isProvider: false.
  */
-export async function getQuickSlotCards(): Promise<{ isProvider: boolean; cards: { id: string; title: string }[] }> {
+export type QuickSlotItem = { id: string; name: string; duration_minutes: number | null }
+export type QuickSlotCard = { id: string; title: string; items: QuickSlotItem[] }
+
+export async function getQuickSlotCards(): Promise<{ isProvider: boolean; cards: QuickSlotCard[] }> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { isProvider: false, cards: [] }
@@ -161,18 +164,29 @@ export async function getQuickSlotCards(): Promise<{ isProvider: boolean; cards:
 
   const { data: items } = await supabase
     .from('service_items')
-    .select('service_id')
+    .select('id, service_id, name, duration_minutes')
     .in('service_id', ids)
     .eq('is_active', true)
-    .eq('payment_model', 'A') as { data: { service_id: string }[] | null }
-  const withItems = new Set((items ?? []).map((i) => i.service_id))
-  return { isProvider: true, cards: (myServices ?? []).filter((s) => withItems.has(s.id)) }
+    .eq('payment_model', 'A')
+    .order('sort_order', { ascending: true }) as { data: { id: string; service_id: string; name: string; duration_minutes: number | null }[] | null }
+  const byCard = new Map<string, QuickSlotItem[]>()
+  for (const i of items ?? []) {
+    const list = byCard.get(i.service_id) ?? []
+    list.push({ id: i.id, name: i.name, duration_minutes: i.duration_minutes })
+    byCard.set(i.service_id, list)
+  }
+  return {
+    isProvider: true,
+    cards: (myServices ?? []).filter((s) => byCard.has(s.id)).map((s) => ({ ...s, items: byCard.get(s.id)! })),
+  }
 }
 
 export async function createSlot(values: {
   starts_at: string
   ends_at: string
   service_ids: string[]
+  /** Jen vybrané položky ceníku podle karty (bleskový termín); chybí = všechny položky karty */
+  item_ids?: Record<string, string[]>
   /** Poskytovatel potvrdil, že v tomto čase pracuje, i když je mimo otevírací dobu. */
   outsideHoursConfirmed?: boolean
 }): Promise<Result | { success: false; error: string; confirm: 'outside_hours' }> {
@@ -248,8 +262,18 @@ export async function createSlot(values: {
     return { success: false, error: 'Okno se nepodařilo uložit.' }
   }
 
-  // Přiřaď služby
-  const rows = ids.map((sid) => ({ slot_id: slot.id, service_id: sid }))
+  // Přiřaď služby (případně jen vybrané položky ceníku – musí patřit ke kartě)
+  const itemFilter = new Map<string, string[]>()
+  const wanted = Object.entries(values.item_ids ?? {}).filter(([sid, list]) => ids.includes(sid) && Array.isArray(list) && list.length > 0)
+  if (wanted.length > 0) {
+    const { data: own } = await admin
+      .from('service_items').select('id, service_id').in('service_id', wanted.map(([sid]) => sid)) as { data: { id: string; service_id: string }[] | null }
+    for (const [sid, list] of wanted) {
+      const ok = list.filter((iid) => (own ?? []).some((o) => o.id === iid && o.service_id === sid))
+      if (ok.length > 0) itemFilter.set(sid, Array.from(new Set(ok)))
+    }
+  }
+  const rows = ids.map((sid) => ({ slot_id: slot.id, service_id: sid, item_ids: itemFilter.get(sid) ?? null }))
   const { error: linkErr } = await (admin.from('slot_services') as any).insert(rows)
   if (linkErr) {
     console.error('[createSlot slot_services]', linkErr)
@@ -345,11 +369,14 @@ export async function reserveSlotForItem(values: {
 
   const { data: link } = await admin
     .from('slot_services')
-    .select('service_id')
+    .select('service_id, item_ids')
     .eq('slot_id', slot.id)
     .eq('service_id', values.service_id)
-    .single()
+    .single() as { data: { service_id: string; item_ids: string[] | null } | null }
   if (!link) return { success: false, error: 'Tato služba se do vybraného termínu nenabízí.' }
+  if (link.item_ids && link.item_ids.length > 0 && !link.item_ids.includes(values.service_item_id)) {
+    return { success: false, error: 'Tuto službu poskytovatel v tomto termínu nenabízí. Vyberte jinou nebo jiný termín.' }
+  }
 
   const { data: item } = await admin
     .from('service_items')
@@ -421,8 +448,9 @@ export async function reserveSlotForItem(values: {
   // nejkratší možný zbytek a předat je zbytku za rezervací.
   const { data: puvodniLinky } = await admin
     .from('slot_services')
-    .select('service_id')
-    .eq('slot_id', slot.id) as { data: { service_id: string }[] | null }
+    .select('service_id, item_ids')
+    .eq('slot_id', slot.id) as { data: { service_id: string; item_ids: string[] | null }[] | null }
+  const polozkyKarty = new Map((puvodniLinky ?? []).map((l) => [l.service_id, l.item_ids ?? null]))
   const nabizeneKarty = Array.from(new Set((puvodniLinky ?? []).map((l) => l.service_id)))
 
   // ── Nejkratší použitelný zbytek ──────────────────────────────
@@ -664,7 +692,7 @@ export async function reserveSlotForItem(values: {
       .select('id')
       .single()
     if (tail) {
-      const linky = nabizeneKarty.map((sid) => ({ slot_id: tail.id, service_id: sid }))
+      const linky = nabizeneKarty.map((sid) => ({ slot_id: tail.id, service_id: sid, item_ids: polozkyKarty.get(sid) ?? null }))
       if (linky.length > 0) {
         await (admin.from('slot_services') as any).insert(linky)
       }

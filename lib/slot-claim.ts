@@ -58,9 +58,10 @@ export async function claimMatchingAvailabilitySlot(
   const originalEnd = slot.ends_at
   const { data: links } = await admin
     .from('slot_services')
-    .select('service_id')
-    .eq('slot_id', slot.id) as { data: { service_id: string }[] | null }
+    .select('service_id, item_ids')
+    .eq('slot_id', slot.id) as { data: { service_id: string; item_ids: string[] | null }[] | null }
   const serviceIds = Array.from(new Set((links ?? []).map((l) => l.service_id)))
+  const itemsOf = new Map((links ?? []).map((l) => [l.service_id, l.item_ids ?? null]))
 
   const guard = (q: any) => q
     .eq('id', slot!.id)
@@ -144,7 +145,7 @@ export async function claimMatchingAvailabilitySlot(
 
     if (serviceIds.length > 0) {
       await admin.from('slot_services').insert(
-        serviceIds.map((serviceId) => ({ slot_id: tail.id, service_id: serviceId }))
+        serviceIds.map((serviceId) => ({ slot_id: tail.id, service_id: serviceId, item_ids: itemsOf.get(serviceId) ?? null }))
       )
     }
   }

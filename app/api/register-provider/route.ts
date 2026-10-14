@@ -1,5 +1,6 @@
 // app/api/register-provider/route.ts
 import { NextResponse } from 'next/server'
+import { recordRefundInstruction } from '@/lib/booking/consents'
 import { createClient } from '@supabase/supabase-js'
 import { z } from 'zod'
 
@@ -42,6 +43,10 @@ export async function POST(request: Request) {
     if (!parsed.success) return NextResponse.json({ error: 'Neplatná data.' }, { status: 400 })
 
     const { email, password, full_name, phone, city, ico } = parsed.data
+    // Souhlas s podmínkami a pokyn k vracení peněz (vrstva 4) – bez nich registrace neproběhne
+    if (body?.terms_accepted !== true || body?.refund_instruction !== true) {
+      return NextResponse.json({ error: 'Potvrďte prosím souhlas s podmínkami i pokyn k vracení peněz.' }, { status: 400 })
+    }
 
     // 1) Ověřit IČO proti ARES ještě PŘED založením účtu
     const ares = await verifyIcoInAres(ico)
@@ -102,6 +107,10 @@ export async function POST(request: Request) {
       if (profileError) {
         console.error('[register-provider] uložení profilu selhalo:', profileError)
       }
+      await recordRefundInstruction(admin as any, authData.user.id, {
+        ip: (request.headers.get('x-forwarded-for') ?? '').split(',')[0].trim() || null,
+        userAgent: request.headers.get('user-agent'),
+      })
 
       // POZOR: uvítací mail se NEposílá tady. Odesílá se až po POTVRZENÍ e-mailu
       // v app/auth/callback/route.ts (s příznakem welcome_sent, aby přišel jen jednou).

@@ -10,6 +10,8 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import type { ActionResult, ServiceItemFormValues } from './types'
+import { alertIfHighCharge } from '@/lib/booking/alerts'
+import { BOOKING_POLICY } from '@/lib/booking/policy'
 
 const itemSchema = z.object({
   id: z.string().uuid().optional(),
@@ -355,6 +357,9 @@ export async function createServiceItem(values: ServiceItemFormValues): Promise<
   if (!owns.ok) return { success: false, error: owns.error }
 
   const norm = normalizeItem(parsed.data)
+  const capErr = chargeCapError(norm)
+  if (capErr) return { success: false, error: capErr }
+  await alertIfHighCharge(Math.max(Number(norm.deposit_amount ?? 0), Number(norm.quote_fee ?? 0)), { providerId: owns.userId, where: 'ceník', url: `/sluzby/${norm.service_id}` })
   const { id: _ignore, sort_order: incomingSort, ...insertBase } = norm
 
   // sort_order: když nepřišel, dej položku na konec ceníku
@@ -385,6 +390,14 @@ export async function createServiceItem(values: ServiceItemFormValues): Promise<
   return { success: true, id: (data as { id: string }).id }
 }
 
+// Strop částky placené přes Propojo (Rezervační poplatek / Cena výjezdu) – 5 000 Kč pro všechny (13. 10. 2026)
+function chargeCapError(norm: ItemParsed): string | null {
+  const maxKc = BOOKING_POLICY.maxAgreedChargeHalere / 100
+  if (Number(norm.deposit_amount ?? 0) > maxKc) return `Rezervační poplatek může být nejvýš ${maxKc.toLocaleString('cs-CZ')} Kč.`
+  if (Number(norm.quote_fee ?? 0) > maxKc) return `Cena výjezdu může být nejvýš ${maxKc.toLocaleString('cs-CZ')} Kč.`
+  return null
+}
+
 // ── Upravit položku ──────────────────────────────────────────
 export async function updateServiceItem(id: string, values: ServiceItemFormValues): Promise<ActionResult> {
   const supabase = createClient()
@@ -398,6 +411,9 @@ export async function updateServiceItem(id: string, values: ServiceItemFormValue
   if (!owns.ok) return { success: false, error: owns.error }
 
   const norm = normalizeItem(parsed.data)
+  const capErr = chargeCapError(norm)
+  if (capErr) return { success: false, error: capErr }
+  await alertIfHighCharge(Math.max(Number(norm.deposit_amount ?? 0), Number(norm.quote_fee ?? 0)), { providerId: owns.userId, where: 'ceník', url: `/sluzby/${realServiceId}` })
   // service_id ani sort_order tady nepřepisujeme — položka zůstává na své kartě i pozici
   const { id: _ignore, service_id: _svc, sort_order: _so, ...updateData } = norm
 

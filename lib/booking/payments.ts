@@ -20,6 +20,9 @@ import { legacyMirror } from './legacy'
 import { isPlaceKnown, type KnownPlace } from '@/lib/geo'
 import { buildStandardAccountParams } from './onboarding-prefill'
 import { finalizeRequestSelection, requestStillAvailable } from './request-selection'
+import { providerTrust } from './trust'
+import { alertAdmins } from './alerts'
+import { AUTOREF_CATALOG_VERSION } from './texts'
 import {
   confirmationDeadline,
   isAuthorizationTooLate,
@@ -265,6 +268,19 @@ interface StripeAccountRow {
   deauthorized_at: string | null
 }
 
+/** Pokyn k refundům v aktuální verzi katalogu + ověřené IČO (vrstva 4) */
+export async function providerReadiness(db: Db, providerId: string): Promise<{ hasRefundInstruction: boolean; icoVerified: boolean }> {
+  const { data: c } = await db
+    .from('booking_consents')
+    .select('id')
+    .eq('user_id', providerId)
+    .eq('kind', 'provider_auto_refund_instruction')
+    .eq('catalog_version', AUTOREF_CATALOG_VERSION)
+    .limit(1)
+  const { data: p } = await db.from('profiles').select('ico_verified').eq('id', providerId).maybeSingle()
+  return { hasRefundInstruction: (c ?? []).length > 0, icoVerified: (p as { ico_verified: boolean | null } | null)?.ico_verified === true }
+}
+
 export async function getProviderAccount(
   db: Db,
   providerId: string,
@@ -275,12 +291,15 @@ export async function getProviderAccount(
     .eq('provider_id', providerId)
     .maybeSingle()
   const row = data as StripeAccountRow | null
+  const extra = await providerReadiness(db, providerId)
   const blocks = accountBlocks({
     accountId: row?.stripe_account_id ?? null,
     accountType: row?.account_type ?? null,
     deauthorizedAt: toDate(row?.deauthorized_at),
     chargesEnabled: row?.charges_enabled === true,
     cardPayments: row?.card_payments ?? null,
+    hasRefundInstruction: extra.hasRefundInstruction,
+    icoVerified: extra.icoVerified,
   })
   return { accountId: row?.stripe_account_id ?? null, blocks }
 }
@@ -291,6 +310,8 @@ export const ACCOUNT_BLOCK_TEXT: Record<AccountBlock, string> = {
   deauthorized: 'Stripe účet byl od Propoja odpojen.',
   charges_disabled: 'Stripe zatím neumožňuje na účtu přijímat platby (nedokončené ověření nebo omezení účtu).',
   card_payments_inactive: 'Na Stripe účtu nejsou aktivní platby kartou.',
+  missing_refund_instruction: 'Chybí odsouhlasený pokyn k automatickému vracení peněz (níže na této stránce).',
+  ico_unverified: 'IČO zatím není ověřené v ARES.',
 }
 
 /** Zapíše stav účtu ze Stripe do stripe_accounts (jediný zdroj pro accountBlocks) */
@@ -406,7 +427,7 @@ export type NewBookingCheck =
  */
 export async function checkNewBooking(
   db: Db,
-  args: { item: ChargeableItem; providerId: string; start: Date | null; end: Date | null; now?: Date },
+  args: { item: ChargeableItem; providerId: string; start: Date | null; end: Date | null; now?: Date; orderId?: string | null },
 ): Promise<NewBookingCheck> {
   const charge = bookingCharge(args.item)
   if (!charge.ok) return charge
@@ -417,6 +438,17 @@ export async function checkNewBooking(
   const account = await getProviderAccount(db, args.providerId)
   if (account.blocks.length > 0 || !account.accountId) {
     return { ok: false, error: 'Poskytovatel teď nemůže přijímat rezervace s platbou. Zkuste to prosím později.' }
+  }
+  // Limit otevřených zaplacených rezervací podle důvěryhodnosti (ochrana proti podvodu)
+  const trust = await providerTrust(db, args.providerId, args.orderId ?? null)
+  if (trust.limitHalere != null && trust.openHalere + charge.commission.chargeHalere > trust.limitHalere) {
+    await alertAdmins({
+      title: 'Poskytovatel narazil na limit nového účtu',
+      preview: `Otevřené rezervace ${(trust.openHalere / 100).toLocaleString('cs-CZ')} Kč + ${(charge.commission.chargeHalere / 100).toLocaleString('cs-CZ')} Kč > limit ${(trust.limitHalere / 100).toLocaleString('cs-CZ')} Kč.`,
+      url: `/profil/${args.providerId}`,
+      actorId: args.providerId,
+    })
+    return { ok: false, error: 'Tento termín teď nejde zaplatit online – poskytovatel má na Propoju nový účet s limitem rezervací. Napište mu prosím do chatu.' }
   }
   return { ok: true, offerKind: charge.offerKind, commission: charge.commission, accountId: account.accountId }
 }

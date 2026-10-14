@@ -62,6 +62,8 @@ interface ServiceCardProps {
   priceItems?: CardPriceItem[]
   /** Poskytovatel má funkční Stripe účet (model v2) – jinak „Zatím nepřijímá online rezervace“ */
   acceptsOnline?: boolean
+  /** „Nový na Propoju“ / „Důvěryhodný“ (20 dokončených rezervací bez problémů) */
+  trustBadge?: 'new' | 'trusted' | null
 }
 
 const DEFAULT_META = { label: 'Služba', emoji: '🔧' }
@@ -94,6 +96,7 @@ export default function ServiceCard({
   nextFreeSlot = null, freeSlots = [], isFavorited = false, isLoggedIn = false, preview = false,
   minItemPrice = null, minItemUnit = null, itemCount = 0, gallery = [], priceItems = [],
   acceptsOnline = true,
+  trustBadge = null,
 }: ServiceCardProps) {
   const meta = (CATEGORY_META as Record<string, { label: string; emoji: string }>)[service.category] ?? DEFAULT_META
   const p = service.profiles as any
@@ -313,6 +316,25 @@ export default function ServiceCard({
               <span className="text-slate-300">·</span>
               <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
                 <ShieldCheck className="h-3 w-3" /> Ověřeno
+              </span>
+            </>
+          )}
+          {trustBadge === 'trusted' && (
+            <>
+              <span className="text-slate-300">·</span>
+              <span
+                className="inline-flex items-center gap-1 font-semibold text-emerald-700"
+                title="20 dokončených rezervací přes Propojo bez zrušení z jeho strany, nahlášeného nedostavení a sporu. Propojo neověřuje kvalitu provedené práce."
+              >
+                ★ Důvěryhodný
+              </span>
+            </>
+          )}
+          {trustBadge === 'new' && (
+            <>
+              <span className="text-slate-300">·</span>
+              <span className="inline-flex items-center gap-1 text-slate-500" title="Zatím žádná dokončená rezervace přes Propojo">
+                Nový na Propoju
               </span>
             </>
           )}

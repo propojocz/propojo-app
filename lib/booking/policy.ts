@@ -43,8 +43,17 @@ export interface BookingPolicy {
   currency: 'czk'
   /** Minimální placená částka (Rezervační poplatek / Cena výjezdu) */
   minChargeHalere: number
-  /** Horní hranice ceny, kterou poskytovatel upraví u konkrétní objednávky (pojistka proti překlepu) */
+  /** Strop částky placené přes Propojo u jedné rezervace – u položky, nabídky i upravené ceny (13. 10. 2026: 5 000 Kč) */
   maxAgreedChargeHalere: number
+  /** Důvěryhodnost a limit otevřených zaplacených rezervací (ochrana proti podvodu, lib/booking/trust.ts) */
+  trust: {
+    newMaxOpenHalere: number
+    provenMaxOpenHalere: number
+    provenAfterCompleted: number
+    trustedAfterCompleted: number
+    /** Od této částky dostane admin upozornění */
+    alertChargeHalere: number
+  }
   /** Minimální předstih rezervace před začátkem termínu (Stripe Checkout žije min. 30 min) */
   minLeadMinutes: number
   /** Platnost Stripe Checkout session (Stripe minimum je 30 min) */
@@ -89,10 +98,17 @@ export interface BookingPolicy {
 }
 
 export const BOOKING_POLICY: BookingPolicy = {
-  version: '2026-10-06-v3',
+  version: '2026-10-13-v4',
   currency: 'czk',
   minChargeHalere: 20000, // 200 Kč
-  maxAgreedChargeHalere: 2000000, // 20 000 Kč
+  maxAgreedChargeHalere: 500000, // 5 000 Kč pro všechny (Matej 13. 10. 2026)
+  trust: {
+    newMaxOpenHalere: 1500000, // nový poskytovatel: 3 × 5 000 Kč
+    provenMaxOpenHalere: 2500000, // po 5 dokončených bez problémů: 5 × 5 000 Kč
+    provenAfterCompleted: 5,
+    trustedAfterCompleted: 20, // pak bez limitu + štítek „Důvěryhodný“
+    alertChargeHalere: 500000, // 5 000 Kč → upozornění adminovi
+  },
   minLeadMinutes: 60, // parametr k potvrzení
   checkoutTtlMinutes: 30,
   confirmationWindowHours: 48,

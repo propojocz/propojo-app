@@ -1,13 +1,15 @@
 'use client'
 // components/ui/QuickSlotForm.tsx
-// Rychlé vypsání volného termínu z kalendářového panelu u zvonečku – den, od–do, karty.
-// Stejná serverová akce jako stránka Termíny (createSlot), včetně otázky „mimo otevírací dobu“.
+// Bleskový termín (⚡ v horní liště) – rychle jeden nebo víc volných termínů: den, od–do, karty
+// a u každé karty, které služby z ceníku v termínu nabízíte (13. 10. 2026; služby delší než okno
+// se nedají vybrat). Stejná serverová akce jako stránka Termíny (createSlot), včetně otázky
+// „mimo otevírací dobu“. Termíny dopředu se dál vypisují v Moje nabídky / Termíny.
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { CheckCircle2, Loader2, Zap } from 'lucide-react'
-import { createSlot } from '@/lib/actions/slots'
+import { createSlot, type QuickSlotCard } from '@/lib/actions/slots'
 
 function localDate(offsetDays = 0): string {
   const d = new Date(Date.now() + offsetDays * 24 * 3600_000)
@@ -23,7 +25,7 @@ export default function QuickSlotForm({
   cards,
   onClose,
 }: {
-  cards: { id: string; title: string }[]
+  cards: QuickSlotCard[]
   onClose: () => void
 }) {
   const router = useRouter()
@@ -36,6 +38,15 @@ export default function QuickSlotForm({
   const [err, setErr] = useState('')
   const [askOutside, setAskOutside] = useState(false)
   const [done, setDone] = useState<string | null>(null)
+  // Vybrané služby z ceníku podle karty – výchozí všechny
+  const [itemSel, setItemSel] = useState<Record<string, string[]>>(() =>
+    Object.fromEntries(cards.map((c) => [c.id, c.items.map((i) => i.id)])))
+
+  // Délka okna v minutách – služba delší než okno se do něj nevejde
+  const windowMin = from && to
+    ? (() => { const [fh, fm] = from.split(':').map(Number); const [th, tm] = to.split(':').map(Number); return th * 60 + tm - (fh * 60 + fm) })()
+    : null
+  const fits = (i: { duration_minutes: number | null }) => windowMin == null || windowMin <= 0 || !i.duration_minutes || i.duration_minutes <= windowMin
 
   if (cards.length === 0) {
     return (
@@ -50,6 +61,16 @@ export default function QuickSlotForm({
     setErr(''); setAskOutside(false)
     if (!date || !from || !to) { setErr('Vyplňte den a čas od–do.'); return }
     if (checked.length === 0) { setErr('Vyberte, co se v termínu nabízí.'); return }
+    // Jen vybrané služby, které se do okna vejdou; když jsou vybrané všechny, omezení se neukládá
+    const item_ids: Record<string, string[]> = {}
+    for (const cid of checked) {
+      const card = cards.find((c) => c.id === cid)
+      if (!card) continue
+      const fitting = card.items.filter(fits)
+      const chosen = fitting.filter((i) => (itemSel[cid] ?? []).includes(i.id))
+      if (chosen.length === 0) { setErr(`U karty „${card.title}“ vyberte aspoň jednu službu, která se do termínu vejde.`); return }
+      if (chosen.length < fitting.length) item_ids[cid] = chosen.map((i) => i.id)
+    }
     const startsAt = new Date(`${date}T${from}:00`)
     const endsAt = new Date(`${date}T${to}:00`)
     setBusy(true)
@@ -57,6 +78,7 @@ export default function QuickSlotForm({
       starts_at: startsAt.toISOString(),
       ends_at: endsAt.toISOString(),
       service_ids: checked,
+      item_ids,
       outsideHoursConfirmed,
     })
     setBusy(false)
@@ -105,8 +127,9 @@ export default function QuickSlotForm({
     <div className="flex max-h-[calc(100dvh-6rem)] flex-col rounded-2xl border border-orange-200 bg-white shadow-sm">
       <div className="min-h-0 flex-1 overflow-y-auto p-3.5">
       <p className="flex items-center gap-1.5 text-sm font-black text-slate-900">
-        <Zap className="h-4 w-4 fill-orange-400 text-orange-500" /> Vypsat volný termín
+        <Zap className="h-4 w-4 fill-orange-400 text-orange-500" /> Vypsat bleskový termín
       </p>
+      <p className="mt-0.5 text-[11px] text-slate-500">Rychle jeden nebo víc volných termínů. Termíny dopředu vypíšete v Termínech.</p>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {dayBtn(0, 'Dnes')}
@@ -133,22 +156,51 @@ export default function QuickSlotForm({
         </label>
       </div>
 
-      {cards.length > 1 && (
-        <div className="mt-2 space-y-1">
-          <p className="text-[11px] font-semibold text-slate-500">Co v termínu nabízíte</p>
-          {cards.map((c) => (
-            <label key={c.id} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={checked.includes(c.id)}
-                onChange={(e) => setChecked((prev) => (e.target.checked ? [...prev, c.id] : prev.filter((x) => x !== c.id)))}
-                className="h-4 w-4 accent-orange-500"
-              />
-              <span className="truncate">{c.title}</span>
-            </label>
-          ))}
-        </div>
-      )}
+      <div className="mt-3 space-y-2">
+        <p className="text-[11px] font-semibold text-slate-500">Co v termínu nabízíte</p>
+        {cards.map((c) => {
+          const on = checked.includes(c.id)
+          return (
+            <div key={c.id} className={`rounded-xl border px-3 py-2 ${on ? 'border-orange-300 bg-orange-50/50' : 'border-slate-200'}`}>
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={(e) => setChecked((prev) => (e.target.checked ? [...prev, c.id] : prev.filter((x) => x !== c.id)))}
+                  className="h-4 w-4 accent-orange-500"
+                />
+                <span className="truncate">{c.title}</span>
+              </label>
+              {/* Ceník karty – vyberte jen služby, které v termínu chcete nabídnout */}
+              {on && (
+                <div className="mt-1.5 space-y-1 border-t border-orange-100 pl-6 pt-1.5">
+                  {c.items.map((it) => {
+                    const ok = fits(it)
+                    const sel = (itemSel[c.id] ?? []).includes(it.id)
+                    return (
+                      <label key={it.id} className={`flex items-center gap-2 text-xs ${ok ? 'cursor-pointer text-slate-700' : 'text-slate-400'}`}>
+                        <input
+                          type="checkbox"
+                          disabled={!ok}
+                          checked={ok && sel}
+                          onChange={(e) => setItemSel((prev) => {
+                            const cur = prev[c.id] ?? []
+                            return { ...prev, [c.id]: e.target.checked ? [...cur, it.id] : cur.filter((x) => x !== it.id) }
+                          })}
+                          className="h-3.5 w-3.5 accent-orange-500"
+                        />
+                        <span className="min-w-0 flex-1 truncate">{it.name}</span>
+                        {it.duration_minutes ? <span className="shrink-0">{it.duration_minutes} min</span> : null}
+                        {!ok && <span className="shrink-0 font-semibold">nevejde se</span>}
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
 
       {err && <p className="mt-2 text-xs text-red-600">{err}</p>}
       </div>

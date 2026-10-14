@@ -17,6 +17,7 @@ import { getFreeTimes } from '@/lib/actions/free-times'
 import { releaseSlotAndMerge } from '@/lib/slot-merge'
 import { claimMatchingAvailabilitySlot } from '@/lib/slot-claim'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
+import { alertIfHighCharge } from '@/lib/booking/alerts'
 import { cas } from '@/lib/format'
 import { bookingBufferMs } from '@/lib/booking/rules'
 import { adminDb, checkNewBooking } from '@/lib/booking/payments'
@@ -298,6 +299,7 @@ export async function proposeTimes(
       }
       chargeHalere = price.kc * 100
       priceNote = price.note?.trim().slice(0, 200) || null
+      await alertIfHighCharge(price.kc, { providerId: order.provider_id, where: 'cena v návrhu termínu', url: `/dashboard/objednavky/${order.id}` })
     }
   }
 
@@ -463,6 +465,7 @@ export async function acceptProposal(orderId: string, start: string): Promise<Ac
       providerId: order.provider_id,
       start: new Date(proposal.starts_at),
       end: new Date(proposal.ends_at),
+      orderId,
     })
     if (!check.ok) return { success: false, error: check.error }
     v2Charge = { offerKind: check.offerKind, chargeKc: check.commission.chargeHalere / 100 }

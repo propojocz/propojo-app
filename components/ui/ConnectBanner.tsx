@@ -29,6 +29,8 @@ export default async function ConnectBanner() {
   if (profile?.is_provider !== true) return null
   const account = await getProviderAccount(adminDb(), user.id)
   if (account.blocks.length === 0) return null
+  // Stripe je v pořádku, chybí jen pokyn k vracení peněz / ověřené IČO → jiný text (vrstva 4)
+  const stripeOk = account.blocks.every((b) => b === 'missing_refund_instruction' || b === 'ico_unverified')
 
   return (
     <HideOnPath paths={['/dashboard/vyplaty', '/dashboard/predplatne']}>
@@ -37,10 +39,11 @@ export default async function ConnectBanner() {
           <div className="flex gap-3">
             <Landmark className="h-5 w-5 shrink-0 text-amber-600" />
             <div>
-              <p className="font-black text-amber-900">Napojte si účet pro platby</p>
+              <p className="font-black text-amber-900">{stripeOk ? 'Dokončete nastavení plateb' : 'Napojte si účet pro platby'}</p>
               <p className="mt-1 text-sm text-amber-800">
-                Dokud nemáte napojený a ověřený Stripe účet, zákazníci si u vás nemohou rezervovat termín s platbou.
-                Napojení zabere pár minut.
+                {stripeOk
+                  ? 'Stripe účet máte napojený. Ještě je potřeba odsouhlasit pokyn k automatickému vracení peněz (případně ověřit IČO) – do té doby si u vás zákazníci nemohou rezervovat termín s platbou.'
+                  : 'Dokud nemáte napojený a ověřený Stripe účet, zákazníci si u vás nemohou rezervovat termín s platbou. Napojení zabere pár minut.'}
               </p>
             </div>
           </div>
@@ -48,7 +51,7 @@ export default async function ConnectBanner() {
             href="/dashboard/vyplaty"
             className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-amber-700"
           >
-            Napojit účet <ArrowRight className="h-4 w-4" />
+            {stripeOk ? 'Dokončit' : 'Napojit účet'} <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
       </div>

@@ -16,6 +16,8 @@
 // při napojení výplat. Bez KYC se k penězům nikdo nedostane.
 
 import { revalidatePath } from 'next/cache'
+import { recordRefundInstruction } from '@/lib/booking/consents'
+import { headers } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import type { ActionResult } from './types'
@@ -79,10 +81,17 @@ export async function becomeProvider(values: {
   phone?: string
   /** Uživatel viděl výpis z ARES a potvrdil, že subjekt patří jemu. */
   confirmed: boolean
+  /** Souhlas s Podmínkami pro poskytovatele a pokyn k vracení peněz (vrstva 4) */
+  termsAccepted?: boolean
+  refundInstruction?: boolean
 }): Promise<ActionResult & { companyName?: string }> {
   const supabase = createClient()
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) return { success: false, error: 'Nejste přihlášeni.' }
+
+  if (values.termsAccepted !== true || values.refundInstruction !== true) {
+    return { success: false, error: 'Potvrďte prosím souhlas s podmínkami i pokyn k vracení peněz.' }
+  }
 
   const ico = (values.ico ?? '').trim()
   if (!/^\d{8}$/.test(ico)) {
@@ -140,6 +149,13 @@ export async function becomeProvider(values: {
   if (error) {
     console.error('[become-provider] uložení profilu selhalo:', error)
     return { success: false, error: 'Nepodařilo se aktivovat účet poskytovatele. Zkuste to prosím znovu.' }
+  }
+  {
+    const h = headers()
+    await recordRefundInstruction(admin as any, user.id, {
+      ip: (h.get('x-forwarded-for') ?? '').split(',')[0].trim() || null,
+      userAgent: h.get('user-agent'),
+    })
   }
 
   revalidatePath('/', 'layout')

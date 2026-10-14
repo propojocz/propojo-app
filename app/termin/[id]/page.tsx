@@ -92,8 +92,10 @@ export default async function TerminPage({ params }: Props) {
   // Karty nabízené v tomto okně
   const { data: links } = await supabase
     .from('slot_services')
-    .select('service_id')
-    .eq('slot_id', slot.id) as { data: { service_id: string }[] | null }
+    .select('service_id, item_ids')
+    .eq('slot_id', slot.id) as { data: { service_id: string; item_ids: string[] | null }[] | null }
+  // Bleskový termín může nabízet jen vybrané položky ceníku
+  const allowedItems = new Map((links ?? []).map((l) => [l.service_id, l.item_ids ?? null]))
   const serviceIds = Array.from(new Set((links ?? []).map((l) => l.service_id)))
   if (serviceIds.length === 0) notFound()
 
@@ -152,9 +154,11 @@ export default async function TerminPage({ params }: Props) {
       .in('service_id', serviceIds)
       .eq('is_active', true)
       .order('sort_order', { ascending: true }) as { data: ServiceItem[] | null }
-    items = (itemRows ?? []).filter(
-      (i) => i.payment_model !== 'B' && (!i.duration_minutes || i.duration_minutes <= minutes)
-    )
+    items = (itemRows ?? []).filter((i) => {
+      const allowed = allowedItems.get((i as any).service_id)
+      return i.payment_model !== 'B' && (!i.duration_minutes || i.duration_minutes <= minutes)
+        && (!allowed || allowed.length === 0 || allowed.includes(i.id))
+    })
   }
 
   // Mapa karta → údaje potřebné k objednávce

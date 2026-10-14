@@ -115,10 +115,12 @@ export default async function ServiceDetailPage({ params }: Props) {
   // Modal z nich zákazníkovi nabídne termíny (filtruje podle délky úkonu na klientu).
   const { data: slotLinks } = await supabase
     .from('slot_services')
-    .select('slot_id')
-    .eq('service_id', s.id) as { data: { slot_id: string }[] | null }
+    .select('slot_id, item_ids')
+    .eq('service_id', s.id) as { data: { slot_id: string; item_ids: string[] | null }[] | null }
+  // Okno může nabízet jen vybrané položky ceníku (bleskový termín) – modal podle toho filtruje
+  const itemIdsOfSlot = new Map((slotLinks ?? []).map((l) => [l.slot_id, l.item_ids ?? null]))
   const slotIds = Array.from(new Set((slotLinks ?? []).map((l) => l.slot_id)))
-  let freeSlots: { id: string; starts_at: string; ends_at: string }[] = []
+  let freeSlots: { id: string; starts_at: string; ends_at: string; itemIds?: string[] | null }[] = []
   if (slotIds.length > 0) {
     const { data: slotRows } = await supabase
       .from('availability_slots')
@@ -129,7 +131,7 @@ export default async function ServiceDetailPage({ params }: Props) {
       .eq('pending_confirm', false)
       .gte('starts_at', new Date().toISOString())
       .order('starts_at', { ascending: true }) as { data: { id: string; starts_at: string; ends_at: string }[] | null }
-    freeSlots = slotRows ?? []
+    freeSlots = (slotRows ?? []).map((r) => ({ ...r, itemIds: itemIdsOfSlot.get(r.id) ?? null }))
   }
 
   // Tři jména

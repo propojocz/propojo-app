@@ -7,13 +7,13 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, X, Zap } from 'lucide-react'
-import { getQuickSlotCards } from '@/lib/actions/slots'
+import { getQuickSlotCards, type QuickSlotCard } from '@/lib/actions/slots'
 import QuickSlotForm from '@/components/ui/QuickSlotForm'
 
 export default function QuickSlotButton() {
   const [open, setOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
-  const [cards, setCards] = useState<{ id: string; title: string }[] | null>(null)
+  const [cards, setCards] = useState<QuickSlotCard[] | null>(null)
 
   useEffect(() => setMounted(true), [])
 
@@ -52,8 +52,8 @@ export default function QuickSlotButton() {
         type="button"
         onClick={() => setOpen(true)}
         className="flex h-10 w-10 items-center justify-center rounded-full text-orange-500 transition hover:bg-orange-50"
-        aria-label="Vypsat volný termín"
-        title="Vypsat volný termín"
+        aria-label="Vypsat bleskový termín"
+        title="Vypsat bleskový termín – rychle jeden nebo víc volných termínů"
       >
         <Zap className="h-5 w-5 fill-orange-400" />
       </button>

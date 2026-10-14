@@ -127,3 +127,20 @@ export function offerSummary(kind: 'A' | 'B', chargeKc: number, quoteFeeDeductib
     ? `Cena výjezdu ${castka} · odečte se z ceny zakázky`
     : `Cena výjezdu ${castka} · do ceny zakázky se nezapočítává`
 }
+
+// ─── Pokyn poskytovatele k automatickým refundům (vrstva 4, AK bod 4, model §21) ─────────
+// Přesné znění se ukládá do booking_consents.text_snapshot. Změna znění nebo katalogu = nová verze
+// a nový výslovný souhlas všech poskytovatelů.
+export const AUTOREF_CATALOG_VERSION = 'autoref-2026-10-13-v1'
+export const TERMS_VERSION = 'VOP-4.1'
+export const AUTOREF_INSTRUCTION_TEXT = [
+  'Dávám provozovateli Propojo pokyn, aby mým jménem zadal poskytovateli platebních služeb Stripe plný refund částky, kterou mi zákazník zaplatil přes Propojo (Rezervační poplatek nebo Cena výjezdu), z mého platebního účtu – a to výhradně v těchto případech:',
+  '1. zruším potvrzenou rezervaci;',
+  '2. oznámím, že původní termín nemohu dodržet, a zákazník nový termín odmítne nebo na návrh včas nezareaguje;',
+  '3. zákazník nahlásí, že jsem se nedostavil, a já to uznám nebo do 72 hodin od výzvy nezareaguji;',
+  '4. zákazník zruší rezervaci včas podle podmínek (před začátkem termínu a před předáním Závazné nabídky, u Výjezdu bez platného check-inu);',
+  '5. platbu stržením potvrdím až po uplynutí lhůty k potvrzení – rezervace tím nevznikla;',
+  '6. zákazník nahlásí, že nedostal Závaznou nabídku, a já to uznám nebo do 72 hodin od výzvy nezareaguji.',
+  'Beru na vědomí, že automatický refund je technickým důsledkem předem popsané události, nikoli rozhodnutím provozovatele o nároku zákazníka nebo mém. Provize Propojo a poplatek Stripe se při refundu nevracejí a nesu je já. Probíhá-li k platbě spor (chargeback), automatický refund se neprovede. Rozšíření tohoto výčtu vyžaduje můj nový výslovný souhlas.',
+].join('\n')
+

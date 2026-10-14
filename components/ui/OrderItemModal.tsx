@@ -31,6 +31,29 @@ import { formatItemPrice, packageLabel } from '@/lib/price-format'
 import { vyzadujePotvrzeni, nejdrivejsiDenDodani } from '@/lib/product-confirmation'
 import SearchAutocomplete from '@/components/ui/SearchAutocomplete'
 import { getItemPaymentDisplay } from '@/lib/item-payment-display'
+import BookingWizard from '@/components/ui/BookingWizard'
+import { Info as InfoIcon } from 'lucide-react'
+import { setTimePreference, type TimePref } from '@/lib/actions/time-preference'
+
+// „Kdy se vám to hodí“ – stejné volby jako v chatu u poptávky (14. 10. 2026)
+const DAY_PART_LABEL: Record<TimePref, string> = {
+  kdykoli: 'kdykoli během dne', rano: 'ráno (8–12)', odpoledne: 'odpoledne (12–17)', vecer: 'večer (17–20)',
+}
+const denMesic = (iso: string) =>
+  new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'numeric', timeZone: 'Europe/Prague' }).format(new Date(`${iso}T12:00:00Z`))
+
+// Delší vysvětlení schované pod (i) – okno má zůstat přehledné (14. 10. 2026)
+function InfoTip({ label, children }: { label: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <span className="block">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-slate-700">
+        <InfoIcon className="h-3.5 w-3.5" /> {label}
+      </button>
+      {open && <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">{children}</span>}
+    </span>
+  )
+}
 
 export type SlotOption = {
   id: string
@@ -118,6 +141,12 @@ export default function OrderItemModal({
   const [city, setCity] = useState('')
   // Obec předvyplněná z profilu zákazníka – upozornit, ať ji přepíše, když jde o jiné místo.
   const [cityFromProfile, setCityFromProfile] = useState(false)
+  // Obec z profilu se načte až po otevření okna → změnou klíče se pole překreslí s hodnotou
+  const [cityKey, setCityKey] = useState(0)
+  // Kdy se to hodí (bez pevného termínu)
+  const [prefFrom, setPrefFrom] = useState('')
+  const [prefTo, setPrefTo] = useState('')
+  const [prefPart, setPrefPart] = useState<TimePref>('kdykoli')
   const [errorMsg, setErrorMsg] = useState('')
   // Vybraný konkrétní čas — okno i začátek dohromady.
   const [selected, setSelected] = useState<TimeOption | null>(null)
@@ -125,6 +154,8 @@ export default function OrderItemModal({
   const [cityGeo, setCityGeo] = useState<{ lat: number; lng: number } | null>(null)
   const [goingToPay, setGoingToPay] = useState(false)
   // Model v2: kam pokračovat po rezervaci času (průvodce na detailu objednávky)
+  // Model v2: po výběru termínu se rovnou otevře shrnutí a platba (stejné okno jako u poptávek)
+  const [wizardOrderId, setWizardOrderId] = useState<string | null>(null)
   const [nextUrl, setNextUrl] = useState<string | null>(null)
   // Modal může zůstat otevřený delší dobu. Každých 30 s ho přepočítáme, aby
   // časy, které mezitím přešly do minulosti, samy zmizely bez obnovy stránky.
@@ -195,6 +226,8 @@ export default function OrderItemModal({
     : slots
         .filter((s) => new Date(s.ends_at) > new Date())
         .filter((s) => !item.duration_minutes || windowMinutes(s) >= item.duration_minutes)
+        // Okno nabízí jen vybrané položky ceníku (bleskový termín)
+        .filter((s) => !(s as any).itemIds || (s as any).itemIds.length === 0 || (s as any).itemIds.includes(item.id))
         .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime())
 
   // Všechny nabízené časy, seskupené po dnech.
@@ -258,7 +291,7 @@ export default function OrderItemModal({
       if (!user) return
       const { data } = await supabase.from('profiles').select('city').eq('id', user.id).single()
       const c = (data as { city: string | null } | null)?.city
-      if (!cancelled && c) { setCity(c); setCityFromProfile(true) }
+      if (!cancelled && c) { setCity(c); setCityFromProfile(true); setCityKey((k) => k + 1) }
     }
     load()
     return () => { cancelled = true }
@@ -402,6 +435,8 @@ export default function OrderItemModal({
             // Model v2: žádné automatické přesměrování – zákazník si v klidu přečte, co se děje,
             // a sám pokračuje do průvodce (shrnutí a platba). Termín drží zámek 15 minut.
             setNextUrl(`/dashboard/objednavky/${res.id}?platba=pruvodce`)
+            // Rovnou shrnutí a platba v okně; zavřením zůstane tlačítko „Pokračovat k dokončení“
+            if (res.id) setWizardOrderId(res.id)
           } else {
             setTimeout(() => router.push(`/dashboard/objednavky/${res.id}`), 1200)
           }
@@ -415,17 +450,26 @@ export default function OrderItemModal({
     }
 
     // Cesta 2: poptávka bez termínu
+    // „Kdy se mi to hodí“ jako první řádek zprávy (poskytovatel ji vidí v chatu) + strukturovaně k objednávce
+    const prefText = prefFrom
+      ? `Hodí se mi: ${prefTo && prefTo !== prefFrom ? `${denMesic(prefFrom)} – ${denMesic(prefTo)}` : denMesic(prefFrom)}, ${DAY_PART_LABEL[prefPart]}.`
+      : ''
+    const fullMessage = [prefText, message.trim()].filter(Boolean).join('\n')
     const result = await createOrder({
       service_id: serviceId,
       service_item_id: item.id,
       provider_id: providerId,
-      message: message || undefined,
+      message: fullMessage || undefined,
       location_city: needsCity ? city.trim() : undefined,
       service_location: atCustomer ? 'u_zakaznika' : 'u_poskytovatele',
       billing: billingPayload(),
     })
-    if (result.success) setState('success')
-    else { setState('error'); setErrorMsg(result.error) }
+    if (result.success) {
+      if (prefFrom && (result as any).id) {
+        try { await setTimePreference((result as any).id, prefFrom, prefTo || prefFrom, prefPart) } catch { /* zpráva už odešla */ }
+      }
+      setState('success')
+    } else { setState('error'); setErrorMsg(result.error) }
   }
 
   const submitDisabled = state === 'loading'
@@ -444,6 +488,9 @@ export default function OrderItemModal({
           onClick={(e: MouseEvent) => e.stopPropagation()}
           className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl"
         >
+          {wizardOrderId && (
+            <BookingWizard orderId={wizardOrderId} onClose={() => setWizardOrderId(null)} />
+          )}
           {/* Hlavička */}
           <div className="mb-4 flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -590,10 +637,17 @@ export default function OrderItemModal({
                         <span>0 Kč</span>
                       </div>
                     )}
+                    {isV2 ? (
+                      <div className="pt-0.5 text-[11px] leading-relaxed text-slate-400">
+                        {(skipSlot || !hasSlots) ? 'Platí se až po domluvě termínu. ' : ''}Při placení služby se vám odečte z ceny.
+                        <InfoTip label="Kdy se platí a vrací">
+                          Částka se strhne, jakmile je rezervace potvrzená – u termínu, který poskytovatel sám vypsal, hned po zaplacení.
+                          Když se služba neuskuteční, poskytovatel vám ji vrátí – kromě případu, kdy bez omluvy nepřijdete.
+                        </InfoTip>
+                      </div>
+                    ) : (
                     <p className="pt-0.5 text-[11px] leading-relaxed text-slate-400">
-                      {isV2
-                        ? `${(skipSlot || !hasSlots) ? 'Platí se až po domluvě termínu. ' : ''}Strhne se, jakmile je rezervace potvrzená – u termínu, který poskytovatel sám vypsal, hned po zaplacení. Při placení služby se vám odečte z ceny. Když se služba neuskuteční, poskytovatel vám ho vrátí do 14 dnů – kromě případu, kdy bez omluvy nepřijdete.`
-                        : (skipSlot || !hasSlots)
+                      {(skipSlot || !hasSlots)
                         ? 'Platbu provedete až poté, co si s poskytovatelem potvrdíte konkrétní termín.'
                         : isFullPayment
                           ? 'Platíte celou cenu předem — na místě už nic nedoplácíte.'
@@ -601,6 +655,7 @@ export default function OrderItemModal({
                             ? 'Záloha se započítá do konečné ceny — na místě doplatíte jen rozdíl.'
                             : 'Záloha se započítá do konečné ceny. Zbytek doplatíte na místě podle skutečného rozsahu.'}
                     </p>
+                    )}
                   </div>
                 )}
 
@@ -909,15 +964,18 @@ export default function OrderItemModal({
                       <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
                         {dur ? `Úkon trvá ${dur}. ` : ''}
                         {deposit > 0
-                          ? 'Termín potvrdí zaplacení zálohy — po výběru vás rovnou pustíme k platbě.'
+                          ? (isV2 ? 'Po výběru času rovnou zkontrolujete údaje a zaplatíte.' : 'Termín potvrdí zaplacení zálohy — po výběru vás rovnou pustíme k platbě.')
                           : 'Vybraný čas je po rezervaci rovnou potvrzený — první bere.'}
                       </p>
                     </div>
                   ) : (
-                    <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2.5 text-xs leading-relaxed text-emerald-800">
-                      Objednávku odešlete bez pevného času. V detailu objednávky můžete napsat, kdy se vám to hodí,
-                      a poskytovatel vám navrhne konkrétní termíny. Dokud jeden nepotvrdíte, nic se nerezervuje ani neplatí.
-                    </p>
+                    <div className="mt-3 rounded-xl bg-emerald-50 px-3 py-2.5 text-xs leading-relaxed text-emerald-800">
+                      Bez pevného času – termín vám navrhne poskytovatel.
+                      <InfoTip label="Jak to proběhne">
+                        V detailu objednávky napíšete, kdy se vám to hodí, a poskytovatel vám navrhne konkrétní termíny.
+                        Dokud jeden nepotvrdíte, nic se nerezervuje ani neplatí.
+                      </InfoTip>
+                    </div>
                   )}
                 </div>
               )}
@@ -929,6 +987,7 @@ export default function OrderItemModal({
                     <MapPin className="h-3.5 w-3.5 text-slate-400" /> Město nebo obec *
                   </label>
                   <SearchAutocomplete
+                    key={`obec-${cityKey}`}
                     mode="obce"
                     defaultValue={city}
                     placeholder="Začněte psát a vyberte obec…"
@@ -980,21 +1039,38 @@ export default function OrderItemModal({
                 </div>
               )}
 
-              {!jeVyrobek && !isModelB && !hasSlots && (
-                <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-                  <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                  <p className="text-xs leading-relaxed text-emerald-800">
-                    Napište níže termín, který by vám vyhovoval — <strong>{providerName || 'poskytovatel'}</strong> se
-                    vám pak pokusí nabídnout konkrétní časy. Jakmile je pošle, přijde vám upozornění a termín
-                    potvrdíte zaplacením zálohy.
+              {!jeVyrobek && (skipSlot || !hasSlots) && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                  <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-800">
+                    <CalendarDays className="h-4 w-4 text-emerald-600" /> Kdy se vám to hodí? <span className="font-normal text-emerald-700">(nepovinné)</span>
                   </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <input type="date" value={prefFrom} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setPrefFrom(e.target.value)} aria-label="Od"
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" />
+                    <span className="text-slate-400">–</span>
+                    <input type="date" value={prefTo} min={prefFrom || undefined} onChange={(e) => setPrefTo(e.target.value)} aria-label="Do (nepovinné)"
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" />
+                    <select value={prefPart} onChange={(e) => setPrefPart(e.target.value as TimePref)}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-600 outline-none focus:border-emerald-400">
+                      <option value="kdykoli">kdykoli</option>
+                      <option value="rano">ráno (8–12)</option>
+                      <option value="odpoledne">odpoledne (12–17)</option>
+                      <option value="vecer">večer (17–20)</option>
+                    </select>
+                  </div>
+                  <div className="mt-1.5 text-xs leading-relaxed text-emerald-800">
+                    <InfoTip label="Co bude dál">
+                      {providerName || 'Poskytovatel'} vám podle toho nabídne konkrétní časy. Jakmile je pošle, přijde vám upozornění
+                      a termín potvrdíte zaplacením{isV2 ? (isModelB ? ' Ceny výjezdu' : ' Rezervačního poplatku') : ' zálohy'}.
+                    </InfoTip>
+                  </div>
                 </div>
               )}
 
               <textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                placeholder={jeVyrobek ? 'Poznámka k objednávce (volitelné)…' : isModelB ? 'Popište práci, kterou potřebujete nacenit…' : (skipSlot || !hasSlots) ? 'Napište, kdy se vám to hodí — např. „ideálně odpoledne příští týden"…' : 'Zpráva pro živnostníka (volitelné)…'}
+                placeholder={jeVyrobek ? 'Poznámka k objednávce (volitelné)…' : isModelB ? 'Popište práci, kterou potřebujete nacenit…' : (skipSlot || !hasSlots) ? 'Poznámka (nepovinné) — např. „ne ve středu“…' : 'Zpráva pro živnostníka (volitelné)…'}
                 rows={3}
                 className="form-input resize-none text-sm"
                 maxLength={500}
