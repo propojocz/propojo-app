@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ServiceCard from "@/components/ui/ServiceCard";
 import ProviderInvite from "@/components/ui/ProviderInvite";
+import HeroParallaxDots from "@/components/ui/HeroParallaxDots";
 import { Search, CalendarCheck, Handshake, ShieldCheck, CreditCard, CalendarClock } from "lucide-react";
 
 export default function Home() {
@@ -116,22 +117,30 @@ export default function Home() {
         .hero-badge .dot { width:8px; height:8px; background:var(--green); border-radius:50%; animation:pulseDot 2s infinite; }
         @keyframes pulseDot { 0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.45);} 50%{box-shadow:0 0 0 6px rgba(16,185,129,0);} }
 
-        /* Lítající barevné tečky na pozadí (barevný kód Propojo) */
+        /* Lítající barevné tečky na pozadí (barevný kód Propojo).
+           .fpar = parallax podle kurzoru (components/ui/HeroParallaxDots), .fdot = samovolné plování. */
         .hero-dots { position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:0; }
-        .fdot { position:absolute; border-radius:50%; opacity:.5; filter:blur(.5px); }
+        .fpar { position:absolute; display:block; will-change:transform; }
+        .fpar.p1 { left:8%;  top:24%; }
+        .fpar.p2 { left:88%; top:20%; }
+        .fpar.p3 { left:80%; top:62%; }
+        .fpar.p4 { left:16%; top:66%; }
+        .fpar.p5 { left:50%; top:12%; }
+        .fpar.p6 { left:30%; top:38%; }
+        .fdot { display:block; border-radius:50%; opacity:.5; filter:blur(.5px); }
         .fdot.g { background:var(--green); }
         .fdot.b { background:var(--blue); }
         .fdot.o { background:var(--orange); }
-        .fdot.d1 { width:14px; height:14px; left:8%;  top:24%; animation:float1 9s ease-in-out infinite; }
-        .fdot.d2 { width:10px; height:10px; left:88%; top:20%; animation:float2 11s ease-in-out infinite; }
-        .fdot.d3 { width:18px; height:18px; left:80%; top:62%; animation:float3 13s ease-in-out infinite; }
-        .fdot.d4 { width:8px;  height:8px;  left:16%; top:66%; animation:float2 10s ease-in-out infinite; }
-        .fdot.d5 { width:12px; height:12px; left:50%; top:12%; animation:float1 12s ease-in-out infinite; }
-        .fdot.d6 { width:9px;  height:9px;  left:30%; top:38%; animation:float3 14s ease-in-out infinite; }
+        .fdot.d1 { width:14px; height:14px; animation:float1 9s ease-in-out infinite; }
+        .fdot.d2 { width:10px; height:10px; animation:float2 11s ease-in-out infinite; }
+        .fdot.d3 { width:18px; height:18px; animation:float3 13s ease-in-out infinite; }
+        .fdot.d4 { width:8px;  height:8px;  animation:float2 10s ease-in-out infinite; }
+        .fdot.d5 { width:12px; height:12px; animation:float1 12s ease-in-out infinite; }
+        .fdot.d6 { width:9px;  height:9px;  animation:float3 14s ease-in-out infinite; }
         @keyframes float1 { 0%,100%{transform:translate(0,0);} 50%{transform:translate(18px,-24px);} }
         @keyframes float2 { 0%,100%{transform:translate(0,0);} 50%{transform:translate(-22px,18px);} }
         @keyframes float3 { 0%,100%{transform:translate(0,0);} 50%{transform:translate(16px,20px);} }
-        @media (prefers-reduced-motion: reduce) { .fdot { animation:none!important; } }
+        @media (prefers-reduced-motion: reduce) { .fdot { animation:none!important; } .fpar { transform:none!important; } }
         .hero h1 { font-size:clamp(38px,5.2vw,62px); font-weight:600; letter-spacing:-1.5px; line-height:1.04; max-width:840px; margin:0 auto 18px; color:var(--ink); position:relative; z-index:1; }
         .hero h1 .accent { color:var(--green); }
         .hero .sub { font-size:18px; color:var(--gray-600); max-width:540px; margin:0 auto 34px; position:relative; z-index:1; }
@@ -284,14 +293,7 @@ export default function Home() {
       <div className="home">
         {/* HERO */}
         <section className="hero">
-          <div className="hero-dots">
-            <span className="fdot g d1"></span>
-            <span className="fdot b d2"></span>
-            <span className="fdot o d3"></span>
-            <span className="fdot g d4"></span>
-            <span className="fdot b d5"></span>
-            <span className="fdot o d6"></span>
-          </div>
+          <HeroParallaxDots />
           <div className="hero-badge"><span className="dot"></span> Ověření živnostníci · Záloha = jistota</div>
           <h1> Nemusíte umět <br /> <span className="accent">všechno.</span></h1>
           <p className="sub">Najděte, domluvte a rezervujte služby na jednom místě.</p>
