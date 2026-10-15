@@ -351,7 +351,8 @@ async function ServiceList({
   const freeSlotServices = new Set<string>()
   const slotTimesOf: Record<string, string[]> = {}
   {
-    const ids = sorted.map((s) => s.id)
+    // Jen karty, které berou online rezervace – jinak by termín řadil kartu dopředu, i když na ní není vidět
+    const ids = sorted.filter((s) => acceptsOnline.has((s.profiles as any)?.id ?? s.provider_id)).map((s) => s.id)
     if (ids.length > 0) {
       const { data: slotRows } = await supabase
         .from('availability_slots')
@@ -430,6 +431,7 @@ async function ServiceList({
     const klic = (s: any) => s.brand_id ?? (s.profiles as any)?.id ?? s.provider_id ?? s.id
     // Rozdělíme do front podle poskytovatele, pořadí zachováme.
     const fronty = new Map<string, any[]>()
+    const poradi = new Map<any, number>(sorted.map((s, i) => [s, i]))
     for (const s of sorted) {
       const k = String(klic(s))
       if (!fronty.has(k)) fronty.set(k, [])
@@ -441,11 +443,11 @@ async function ServiceList({
       let poslednKlic: string | null = null
       let poRade = 0
       while (vysledek.length < sorted.length) {
-        // Fronty seřadíme podle délky (nejdelší první) — ať se nejvíc
-        // zastoupený poskytovatel průběžně „vyprazdňuje" a nezůstane na konci.
+        // Fronty podle pořadí jejich první karty – zvolené řazení (nejdřív volno, cena…) musí
+        // zůstat platit; dřív se bralo „nejdelší fronta první“ a řazení se tím rozbilo.
         const kandidati = [...fronty.entries()]
           .filter(([, v]) => v.length > 0)
-          .sort((a, b) => b[1].length - a[1].length)
+          .sort((a, b) => (poradi.get(a[1][0]) ?? 0) - (poradi.get(b[1][0]) ?? 0))
         if (kandidati.length === 0) break
 
         // Přednost má fronta, která neporušuje limit za sebou.

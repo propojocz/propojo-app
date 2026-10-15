@@ -418,6 +418,8 @@ export default function ServiceItemEditor({
       out.price_includes_material = null   // u nacenění na místě se materiál neřeší
     } else {
       out.payment_model = 'A'
+      // Model v2: u služby jen Rezervační poplatek – starou „celou cenu předem“ uložením převedeme
+      if (out.deposit_type === 'plna_platba') out.deposit_type = 'zaloha'
       if (zpusob === 'dohodou') { out.price = null; out.price_max = null }
       if (zpusob !== 'rozmezi') out.price_max = null
 
@@ -425,8 +427,6 @@ export default function ServiceItemEditor({
         out.deposit_amount = null
         out.no_show_fee = null
         out.fee_mode = 'zadny'
-      } else if (out.deposit_type === 'plna_platba') {
-        out.deposit_amount = null   // platí se celá cena, záloha se neřeší
       } else {
         if (out.deposit_amount == null || out.deposit_amount < MIN_DEPOSIT) out.deposit_amount = MIN_DEPOSIT
         // Strop až nakonec — u úkonu levnějšího než minimální záloha vyhrává cena.
@@ -441,9 +441,7 @@ export default function ServiceItemEditor({
       // co platforma drží. Stejné pravidlo běží i na serveru.
       const drzeno = out.deposit_type === 'bez_platby'
         ? 0
-        : out.deposit_type === 'plna_platba'
-          ? ((out.price ?? 0) > 0 ? (out.price as number) : null)
-          : (out.deposit_amount ?? null)
+        : (out.deposit_amount ?? null)
       if (out.no_show_fee != null && drzeno != null && out.no_show_fee > drzeno) {
         out.no_show_fee = drzeno > 0 ? drzeno : null
       }
@@ -463,7 +461,6 @@ export default function ServiceItemEditor({
     } else if (out.price_unit === 'hod') {
       out.duration_minutes = 60
       out.hourly_started_billing = !!out.hourly_started_billing
-      if (out.deposit_type === 'plna_platba') out.deposit_type = 'zaloha'
     } else {
       out.hourly_started_billing = false
       if (out.price_unit !== 'ukon') out.duration_minutes = null

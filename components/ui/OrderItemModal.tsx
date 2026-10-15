@@ -246,7 +246,10 @@ export default function OrderItemModal({
     }
     d.times.push(t)
   }
-  const hasSlots = allTimes.length > 0
+  // Položka se starým nastavením „celá cena předem“ (model v2 ji nedovolí) – bez výběru času, jen dotaz,
+  // ať zákazník nevyplní termín a teprve u platby nezjistí, že rezervovat nejde.
+  const noOnlineBooking = !isProductItem && !isModelB && depositType === 'plna_platba'
+  const hasSlots = allTimes.length > 0 && !noOnlineBooking
 
   const radius = providerGeo?.radiusKm ?? null
   const distance =
@@ -1037,6 +1040,12 @@ export default function OrderItemModal({
                       : <>Přijdete za poskytovatelem — adresu najdete na jeho kartě{hasSlots ? ' a v potvrzení termínu' : ' a v potvrzení objednávky'}.</>}
                   </span>
                 </div>
+              )}
+
+              {noOnlineBooking && (
+                <p className="rounded-xl bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-800">
+                  U této položky poskytovatel zatím nemá nastavenou online rezervaci. Pošlete mu dotaz a termín domluvíte spolu.
+                </p>
               )}
 
               {!jeVyrobek && (skipSlot || !hasSlots) && (
