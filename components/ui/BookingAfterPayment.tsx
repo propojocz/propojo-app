@@ -150,19 +150,22 @@ export default function BookingAfterPayment({
         <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-4">
           <p className="flex items-center gap-1.5 text-sm font-black text-amber-950"><CalendarClock className="h-4 w-4" /> Poskytovatel nemůže dodržet původní termín</p>
           <p className="mt-1 text-sm leading-relaxed text-amber-900">
-            Navrhuje nový termín <strong>{reschedule.open.proposedText}</strong>. Odpovězte do <strong>{reschedule.open.expiresText}</strong> –
-            když nový termín odmítnete nebo nezareagujete, rezervace se zruší a vrátí se vám celá částka {castka}.
+            Navrhuje nový termín <strong>{reschedule.open.proposedText}</strong>.
           </p>
-          <div className="mt-3 flex flex-wrap gap-2">
+          <p className="mt-3 text-sm font-bold text-amber-950">Vyhovuje vám nový termín?</p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
             <button type="button" onClick={() => answer(true)} disabled={busy}
-              className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Přijmout nový termín
+              className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Ano, nový termín beru
             </button>
             <button type="button" onClick={() => answer(false)} disabled={busy}
-              className="flex items-center gap-1.5 rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60">
-              <XCircle className="h-4 w-4" /> Odmítnout a vrátit peníze
+              className="flex items-center justify-center gap-1.5 rounded-xl border-2 border-red-200 bg-white px-3 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 disabled:opacity-60">
+              <XCircle className="h-4 w-4" /> Ne – zrušit a vrátit {castka}
             </button>
           </div>
+          <p className="mt-2 text-xs leading-relaxed text-amber-900">
+            Odpovězte do <strong>{reschedule.open.expiresText}</strong>. Když nezareagujete, rezervace se zruší a celá částka se vám vrátí sama.
+          </p>
         </div>
       )}
       {reschedule?.open && isProvider && (
@@ -256,7 +259,7 @@ export default function BookingAfterPayment({
         />
       )}
 
-      {!isProvider && customerCancel?.mode === 'auto' && (
+      {!isProvider && customerCancel?.mode === 'auto' && !reschedule?.open && (
         <div>
           <button
             type="button"
@@ -277,7 +280,7 @@ export default function BookingAfterPayment({
         </div>
       )}
 
-      {!isProvider && customerCancel?.mode === 'none' && (
+      {!isProvider && customerCancel?.mode === 'none' && !reschedule?.open && (
         <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-xs leading-relaxed text-slate-600">
           {customerCancel.text} Domluvte se s poskytovatelem ve zprávách.
         </p>

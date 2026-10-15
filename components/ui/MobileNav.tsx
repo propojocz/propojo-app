@@ -233,7 +233,7 @@ export default function MobileNav({
     <>
       <button
         onClick={() => setOpen(true)}
-        className="relative flex items-center gap-2 rounded-full border border-slate-200 py-1.5 pl-3 pr-1.5 text-slate-600 transition-colors hover:bg-slate-50"
+        className="relative flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 py-1.5 pl-2 pr-1.5 text-slate-600 transition-colors hover:bg-slate-50 sm:gap-2 sm:pl-3"
         aria-label="Otevřít menu"
       >
         <Menu className="h-5 w-5" />

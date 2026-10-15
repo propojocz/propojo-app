@@ -51,7 +51,7 @@ export default function QuickSlotButton() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex h-10 w-10 items-center justify-center rounded-full text-orange-500 transition hover:bg-orange-50"
+        className="flex h-9 w-9 items-center justify-center rounded-full sm:h-10 sm:w-10 text-orange-500 transition hover:bg-orange-50"
         aria-label="Vypsat bleskový termín"
         title="Vypsat bleskový termín – rychle jeden nebo víc volných termínů"
       >

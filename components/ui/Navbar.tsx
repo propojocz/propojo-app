@@ -2,6 +2,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Link from 'next/link'
+import { Store } from 'lucide-react'
 import NotificationBadge from './NotificationBadge'
 import UpcomingDrawer from './UpcomingDrawer'
 import QuickSlotButton from './QuickSlotButton'
@@ -92,7 +93,9 @@ export default async function Navbar() {
         {/* Mřížka o třech sloupcích na VŠECH velikostech.
             Prostřední sloupec je vždy vyplněný (na mobilu aspoň Marketplace),
             takže logo drží vlevo a zvoneček s pilulkou vpravo. */}
-        <nav className="mx-auto grid h-[88px] max-w-7xl grid-cols-[1fr_auto_1fr] items-center px-3 sm:px-6 lg:px-8">
+        {/* Mobil (15. 10. 2026): lišta se na úzkém telefonu nevešla (menu a avatar přetékaly doprava).
+            Pod sm menší logo a ikony; pod 430 px Marketplace jako zelená ikona (bez kolečka, jako ostatní). */}
+        <nav className="mx-auto grid h-[72px] max-w-7xl grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 px-2 sm:h-[88px] sm:grid-cols-[1fr_auto_1fr] sm:gap-0 sm:px-6 lg:px-8">
 
           {/* VLEVO — logo (vodorovná verze: symbol + nápis vedle sebe) */}
           <div className="flex justify-start">
@@ -102,7 +105,7 @@ export default async function Navbar() {
               <img
                 src="/propojo-logo-full.png"
                 alt="Propojo"
-                className="h-14 w-auto object-contain md:h-16"
+                className="h-10 w-auto object-contain sm:h-14 md:h-16"
               />
             </Link>
           </div>
@@ -114,9 +117,18 @@ export default async function Navbar() {
               Poptávky
             </Link>
 
+            {/* Úzký telefon: zelená ikona jako ostatní ikony v liště */}
             <Link
               href="/marketplace"
-              className="inline-flex items-center whitespace-nowrap rounded-full bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-600 hover:shadow-md"
+              aria-label="Marketplace"
+              title="Marketplace"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-emerald-600 transition hover:bg-emerald-50 min-[430px]:hidden"
+            >
+              <Store className="h-5 w-5" />
+            </Link>
+            <Link
+              href="/marketplace"
+              className="hidden items-center whitespace-nowrap rounded-full bg-emerald-500 px-4 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-all hover:bg-emerald-600 hover:shadow-md min-[430px]:inline-flex sm:px-6 sm:text-sm"
             >
               Marketplace
             </Link>
@@ -135,7 +147,7 @@ export default async function Navbar() {
           </div>
 
           {/* VPRAVO — zvoneček + pilulka ☰ profil */}
-          <div className="flex items-center justify-end gap-1.5">
+          <div className="flex items-center justify-end gap-0.5 sm:gap-1.5">
             {user && isProvider && <QuickSlotButton />}
             {user && <InboxButton />}
             {user && <UpcomingDrawer />}

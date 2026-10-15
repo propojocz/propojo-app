@@ -5,15 +5,27 @@
 // se nedají vybrat). Stejná serverová akce jako stránka Termíny (createSlot), včetně otázky
 // „mimo otevírací dobu“. Termíny dopředu se dál vypisují v Moje nabídky / Termíny.
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { CheckCircle2, Loader2, Zap } from 'lucide-react'
-import { createSlot, type QuickSlotCard } from '@/lib/actions/slots'
+import { CheckCircle2, Loader2, Trash2, Zap } from 'lucide-react'
+import { createSlot, deleteSlot, type QuickSlotCard } from '@/lib/actions/slots'
+import { getMyUpcomingSlots, type MyQuickSlot } from '@/lib/actions/slot-share'
+import ShareSlotButton from '@/components/ui/ShareSlotButton'
 
 function localDate(offsetDays = 0): string {
   const d = new Date(Date.now() + offsetDays * 24 * 3600_000)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** Výchozí okno: nejbližší čtvrthodina (aspoň za 15 min) a hodina po ní – pole nejsou prázdná */
+function defaultWindow(): { from: string; to: string } {
+  const d = new Date(Date.now() + 15 * 60_000)
+  let min = Math.ceil((d.getHours() * 60 + d.getMinutes()) / 15) * 15
+  if (min > 22 * 60) min = 9 * 60
+  const end = Math.min(min + 60, 23 * 60 + 55)
+  const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+  return { from: hhmm(min), to: hhmm(end) }
 }
 
 const fmt = (iso: string) =>
@@ -30,14 +42,29 @@ export default function QuickSlotForm({
 }) {
   const router = useRouter()
   const [date, setDate] = useState(localDate(0))
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
+  const [from, setFrom] = useState(() => defaultWindow().from)
+  const [to, setTo] = useState(() => defaultWindow().to)
   // Jedna karta = rovnou vybraná
   const [checked, setChecked] = useState<string[]>(cards.length === 1 ? [cards[0].id] : [])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [askOutside, setAskOutside] = useState(false)
-  const [done, setDone] = useState<string | null>(null)
+  const [done, setDone] = useState<{ text: string; slotId: string | null } | null>(null)
+  // Už vypsané volné termíny (nejbližší 3) – ať poskytovatel vidí, co už nabízí, a může je sdílet
+  const [mine, setMine] = useState<MyQuickSlot[] | null>(null)
+  const loadMine = () => { getMyUpcomingSlots(3).then(setMine).catch(() => setMine([])) }
+  useEffect(() => { loadMine() }, [])
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const removeSlot = async (m: MyQuickSlot) => {
+    if (!confirm(`Smazat volný termín ${fmt(m.startsAt)}–${fmtTime(m.endsAt)}? Zákazníci ho přestanou vidět.`)) return
+    setDeleting(m.id); setErr('')
+    const res = await deleteSlot(m.id)
+    setDeleting(null)
+    if (!res.success) { setErr(res.error); return }
+    setMine((prev) => (prev ?? []).filter((x) => x.id !== m.id))
+    loadMine()
+    router.refresh()
+  }
   // Vybrané služby z ceníku podle karty – výchozí všechny
   const [itemSel, setItemSel] = useState<Record<string, string[]>>(() =>
     Object.fromEntries(cards.map((c) => [c.id, c.items.map((i) => i.id)])))
@@ -83,7 +110,8 @@ export default function QuickSlotForm({
     })
     setBusy(false)
     if (res.success) {
-      setDone(`${fmt(startsAt.toISOString())}–${fmtTime(endsAt.toISOString())}`)
+      setDone({ text: `${fmt(startsAt.toISOString())}–${fmtTime(endsAt.toISOString())}`, slotId: res.id ?? null })
+      loadMine()
       router.refresh()
       return
     }
@@ -95,13 +123,18 @@ export default function QuickSlotForm({
     return (
       <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3.5 text-sm text-emerald-900">
         <p className="flex items-center gap-1.5 font-bold">
-          <CheckCircle2 className="h-4 w-4" /> Vypsáno: {done}
+          <CheckCircle2 className="h-4 w-4" /> Vypsáno: {done.text}
         </p>
         <p className="mt-1 text-xs leading-relaxed text-emerald-800">
-          Zákazníci si ho teď můžou rovnou zarezervovat. Rozeslat ho svým zákazníkům můžete v Termínech.
+          Zákazníci si ho teď můžou rovnou zarezervovat. Pošlete ho dál – na Facebook, Instagram, WhatsApp nebo jako QR kód.
         </p>
+        {done.slotId && (
+          <div className="mt-2.5">
+            <ShareSlotButton slotId={done.slotId} variant="button" />
+          </div>
+        )}
         <div className="mt-2 flex gap-3 text-xs font-semibold">
-          <button type="button" onClick={() => { setDone(null); setFrom(''); setTo('') }} className="text-emerald-700 underline">
+          <button type="button" onClick={() => { setDone(null); const d = defaultWindow(); setFrom(d.from); setTo(d.to) }} className="text-emerald-700 underline">
             Vypsat další
           </button>
           <Link href="/dashboard/terminy" className="text-emerald-700 underline">Otevřít Termíny</Link>
@@ -131,6 +164,35 @@ export default function QuickSlotForm({
       </p>
       <p className="mt-0.5 text-[11px] text-slate-500">Rychle jeden nebo víc volných termínů. Termíny dopředu vypíšete v Termínech.</p>
 
+      {/* Už vypsané volné termíny – jeden řádek na termín + sdílení */}
+      {mine && mine.length > 0 && (
+        <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-2.5">
+          <p className="mb-1.5 text-[11px] font-semibold text-emerald-800">Už vypsané</p>
+          <ul className="space-y-1.5">
+            {mine.map((m) => (
+              <li key={m.id} className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-bold text-slate-900">{fmt(m.startsAt)}–{fmtTime(m.endsAt)}</p>
+                  {m.label && <p className="truncate text-[11px] text-slate-500">{m.label}</p>}
+                </div>
+                <ShareSlotButton slotId={m.id} variant="icon" />
+                <button
+                  type="button"
+                  onClick={() => removeSlot(m)}
+                  disabled={deleting === m.id}
+                  title="Smazat termín"
+                  aria-label="Smazat termín"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-red-300 hover:text-red-600 disabled:opacity-60"
+                >
+                  {deleting === m.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <Link href="/dashboard/terminy" className="mt-1.5 inline-block text-[11px] font-semibold text-emerald-700 underline">Všechny termíny</Link>
+        </div>
+      )}
+
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {dayBtn(0, 'Dnes')}
         {dayBtn(1, 'Zítra')}
@@ -144,15 +206,15 @@ export default function QuickSlotForm({
       </div>
 
       <div className="mt-2 grid grid-cols-2 gap-2">
-        <label className="text-[11px] font-semibold text-slate-500">
+        <label className="min-w-0 text-[11px] font-semibold text-slate-500">
           Od
           <input type="time" step={300} value={from} onChange={(e) => setFrom(e.target.value)}
-            className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-900 outline-none focus:border-orange-400" />
+            className="mt-0.5 block w-full min-w-0 rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-900 outline-none focus:border-orange-400" />
         </label>
-        <label className="text-[11px] font-semibold text-slate-500">
+        <label className="min-w-0 text-[11px] font-semibold text-slate-500">
           Do
           <input type="time" step={300} value={to} onChange={(e) => setTo(e.target.value)}
-            className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-900 outline-none focus:border-orange-400" />
+            className="mt-0.5 block w-full min-w-0 rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-900 outline-none focus:border-orange-400" />
         </label>
       </div>
 

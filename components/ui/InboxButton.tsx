@@ -139,7 +139,7 @@ export default function InboxButton() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="relative flex h-10 w-10 items-center justify-center rounded-full text-slate-600 transition hover:bg-slate-100"
+        className="relative flex h-9 w-9 items-center justify-center rounded-full sm:h-10 sm:w-10 text-slate-600 transition hover:bg-slate-100"
         aria-label="Zprávy"
         title="Zprávy"
       >

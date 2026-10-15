@@ -181,7 +181,10 @@ export async function applyTransition(
   if (!data || data.length === 0) return { ok: false }
 
   if (mirror.releasesSlot && order.slot_id) {
-    await releaseSlotAndMerge(db, order.slot_id, order.id)
+    // Poskytovatel termín nemůže / nechce dodržet → čas se nevrací mezi volné (nabízel by se ostatním
+    // v době, kdy poskytovatel nemůže). Jinak (zákazník zrušil, platba vypršela…) se termín uvolní.
+    if (t.cancelReason && PROVIDER_SIDE_CANCEL.includes(t.cancelReason)) await closeSlot(db, order.slot_id, order.id)
+    else await releaseSlotAndMerge(db, order.slot_id, order.id)
   }
 
   if (from !== t.next) {
@@ -189,6 +192,16 @@ export async function applyTransition(
   }
   Object.assign(order, update)
   return { ok: true, next: t.next }
+}
+
+const PROVIDER_SIDE_CANCEL = ['provider_cancelled', 'reschedule_rejected', 'reschedule_expired', 'no_show_agreed', 'no_show_no_response']
+
+/** Úsek kalendáře, který se už nemá nabízet (poskytovatel v tu dobu nemůže) */
+export async function closeSlot(db: Db, slotId: string, orderId?: string | null) {
+  let q = db.from('availability_slots').update({ status: 'zruseno', order_id: null, pending_confirm: false }).eq('id', slotId)
+  if (orderId) q = q.eq('order_id', orderId)
+  const { error } = await q
+  if (error) console.error('[booking] zavření úseku:', error.message)
 }
 
 /** Přímá rezervace času / okna (ne domluva) – po vypršení platby se ruší, nevrací do domluvy */

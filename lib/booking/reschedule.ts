@@ -11,8 +11,8 @@ import { createNotification } from '@/lib/actions/notifications'
 import { sendEmail } from '@/lib/email/send'
 import { bookingCancelledEmail, rescheduleProposedEmail } from '@/lib/email/templates'
 import { datumCas, terminDlouze } from '@/lib/format'
-import { releaseSlotAndMerge } from '@/lib/slot-merge'
-import { applyTransition, loadBookingOrder, logOrderEvent, type BookingOrder, type Db } from './payments'
+import { claimMatchingAvailabilitySlot } from '@/lib/slot-claim'
+import { applyTransition, closeSlot, loadBookingOrder, logOrderEvent, type BookingOrder, type Db } from './payments'
 import { BOOKING_POLICY, policyFromSnapshot } from './policy'
 import { runAutoRefund } from './refunds'
 import { cannotKeepExpiry, earliestBookableStart, toDate } from './state'
@@ -199,13 +199,35 @@ export async function resolveReschedule(
   await logOrderEvent(db, order.id, 'reschedule_resolved', actor, { reschedule_id: open.id, resolution })
 
   if (resolution === 'accepted') {
+    // Nový čas mezitím mohl obsadit někdo jiný (z volného okna poskytovatele)
+    const { data: clash } = await db
+      .from('orders')
+      .select('id')
+      .eq('provider_id', order.provider_id)
+      .eq('status', 'prijato')
+      .neq('id', order.id)
+      .lt('scheduled_at', open.proposedEnd)
+      .gt('scheduled_end', open.proposedStart)
+      .limit(1)
+    if ((clash ?? []).length > 0) {
+      await db.from('order_reschedules').update({ status: 'open', resolved_at: null }).eq('id', open.id)
+      return { ok: false, error: 'Nový termín mezitím obsadil někdo jiný. Odmítněte ho prosím, peníze se vám vrátí.' }
+    }
     const oldSlot = order.slot_id
     const r = await applyTransition(db, order, 'reschedule_accepted', actor, {
       extra: { scheduled_at: open.proposedStart, scheduled_end: open.proposedEnd, slot_id: null },
       payload: { reschedule_id: open.id },
     })
     if (!r.ok) return { ok: false, error: 'Rezervace se mezitím změnila. Obnovte stránku.' }
-    if (oldSlot) await releaseSlotAndMerge(db, oldSlot, order.id)
+    // Původní čas poskytovatel dodržet nemůže → nenabízet ho ostatním; nový čas vyříznout z volného okna
+    if (oldSlot) await closeSlot(db, oldSlot, order.id)
+    if (order.service_id) {
+      const claimed = await claimMatchingAvailabilitySlot(db, {
+        orderId: order.id, providerId: order.provider_id, serviceId: order.service_id,
+        startsAt: open.proposedStart, endsAt: open.proposedEnd,
+      })
+      if (claimed) await db.from('orders').update({ slot_id: claimed }).eq('id', order.id)
+    }
     await notify({
       userId: order.provider_id,
       type: 'status_change',

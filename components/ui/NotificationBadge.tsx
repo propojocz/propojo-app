@@ -86,7 +86,7 @@ export default function NotificationBadge() {
   }
 
   return (
-    <div ref={wrapRef} className="relative ml-1">
+    <div ref={wrapRef} className="relative sm:ml-1">
       <button
         onClick={toggleOpen}
         className="relative rounded-xl p-2 text-slate-600 transition-colors hover:bg-slate-100"
