@@ -5,7 +5,9 @@
 //  1) propadnutí – poskytovatel nepotvrdil do confirm_deadline_at (48 h, nejpozději začátek termínu):
 //     uvolní se preautorizace ve Stripe, termín se vrátí do kalendáře, obě strany dostanou oznámení;
 //  2) připomínka poskytovateli před koncem lhůty (jednou, evidováno v order_events);
-//  3) opuštěné zámky přímé rezervace a záchrana rozpracovaných plateb (dřív jen 1× denně).
+//  3) opuštěné zámky přímé rezervace a záchrana rozpracovaných plateb (dřív jen 1× denně);
+//  4) automatické refundy, které Stripe nepřijal – nový pokus, po 24 h oznámení o selhání (vrstva 4);
+//  5) potvrzení odstoupení od smlouvy, které se nepodařilo odeslat e-mailem.
 //
 // Každý krok běží zvlášť – chyba v jednom nesmí zastavit ostatní.
 
@@ -20,6 +22,8 @@ import {
   type BookingOrder,
   type Db,
 } from './payments'
+import { retryQueuedRefunds } from './refunds'
+import { retryWithdrawalConfirmations } from './cancellation'
 
 const HOUR = 3_600_000
 
@@ -137,13 +141,15 @@ export async function remindUnconfirmedBookings(db: Db, now = new Date()): Promi
 
 /** Celý pětiminutový běh. */
 export async function runBookingTick(db: Db) {
-  const [propadle, pripominky, zamky, platby] = await Promise.allSettled([
+  const [propadle, pripominky, zamky, platby, refundy, odstoupeni] = await Promise.allSettled([
     expireUnconfirmedBookings(db),
     remindUnconfirmedBookings(db),
     // Opuštěné zámky přímé rezervace (zákazník neprošel shrnutím) – nic není předautorizováno.
     autoReleaseUnpaidReservations(),
     // Rozpracované platby a nedokončený capture – stav vždy ověří ve Stripe.
     rescueBookings(db),
+    retryQueuedRefunds(db),
+    retryWithdrawalConfirmations(db),
   ])
   const val = <T,>(r: PromiseSettledResult<T>) => (r.status === 'fulfilled' ? r.value : { chyba: String(r.reason) })
   return {
@@ -151,5 +157,7 @@ export async function runBookingTick(db: Db) {
     pripominky: val(pripominky),
     zamky: val(zamky),
     platby: val(platby),
+    refundy: val(refundy),
+    odstoupeni: val(odstoupeni),
   }
 }

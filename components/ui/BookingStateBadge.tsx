@@ -1,6 +1,6 @@
 // components/ui/BookingStateBadge.tsx
 // Model v2: stav rezervace s platbou (orders.booking_state) v detailu objednávky.
-// Jen pro čtení – akce (potvrdit, odmítnout, zrušit) přijdou s vrstvou 3.
+// Jen pro čtení – akce jsou v BookingProviderActions (potvrzení) a BookingAfterPayment (zrušení, odstoupení).
 // Nikde neříká „potvrzeno“ dřív, než proběhne capture.
 
 import { Clock, CheckCircle2, XCircle, AlertTriangle, CreditCard } from 'lucide-react'
@@ -20,7 +20,7 @@ function texty(
   isProvider: boolean,
   deadline: string | null,
   paymentReturned: boolean,
-  f: { authorized: boolean; captured: boolean; cancelReason: string | null },
+  f: { authorized: boolean; captured: boolean; cancelReason: string | null; withdrawn: boolean },
 ): { tone: Tone; title: string; text: string } | null {
   switch (state) {
     case 'pending_payment':
@@ -83,9 +83,26 @@ function texty(
           ? { tone: 'off', title: byCustomer ? 'Zákazník rezervaci zrušil' : 'Rezervace zrušena', text: 'Rezervace nebyla potvrzena, nic nebylo strženo.' }
           : { tone: 'off', title: byCustomer ? 'Rezervaci jste zrušili' : 'Rezervace zrušena', text: 'Nic vám nebylo strženo, blokace na kartě se uvolnila. Banka ji může ještě pár dní ukazovat jako čekající platbu.' }
       }
+      // Odstoupení od smlouvy (VOP 9.1): peníze se automaticky nevrací, vrací je poskytovatel do 14 dnů.
+      if (f.withdrawn) {
+        return isProvider
+          ? { tone: 'warn', title: 'Zákazník odstoupil od smlouvy', text: 'Rezervace skončila a termín je znovu volný. Zaplacenou částku mu vraťte do 14 dnů, nejlépe refundem ve Stripe Dashboardu.' }
+          : { tone: 'off', title: 'Od smlouvy jste odstoupili', text: 'Rezervace skončila. Zaplacenou částku vám vrací poskytovatel, nejpozději do 14 dnů. Potvrzení jsme vám poslali e-mailem.' }
+      }
+      // Po stržení platby (vrstva 4): zákazníkovi se vrací celá částka z účtu poskytovatele, stav je níže.
+      if (f.cancelReason === 'provider_cancelled') {
+        return isProvider
+          ? { tone: 'off', title: 'Rezervaci jste zrušili', text: 'Zákazníkovi se z vašeho Stripe účtu vrací celá zaplacená částka. Stav vrácení vidíte níže.' }
+          : { tone: 'off', title: 'Poskytovatel rezervaci zrušil', text: 'Vrací se vám celá zaplacená částka. Stav vrácení vidíte níže.' }
+      }
+      if (f.cancelReason === 'customer_cancelled') {
+        return isProvider
+          ? { tone: 'off', title: 'Zákazník rezervaci zrušil', text: 'Zrušil ji včas, proto se mu z vašeho Stripe účtu vrací celá zaplacená částka. Termín je znovu volný.' }
+          : { tone: 'off', title: 'Rezervaci jste zrušili', text: 'Vrací se vám celá zaplacená částka. Stav vrácení vidíte níže.' }
+      }
       return isProvider
-        ? { tone: 'off', title: 'Rezervace zrušena', text: 'Platba byla stržena. Stav vrácení peněz zákazníkovi sledujeme ve Stripe a uvidíte ho zde.' }
-        : { tone: 'off', title: 'Rezervace zrušena', text: 'Stav vrácení peněz uvidíte zde, jakmile ho Stripe zpracuje.' }
+        ? { tone: 'off', title: 'Rezervace zrušena', text: 'Platba byla stržena. Stav vrácení peněz zákazníkovi vidíte níže.' }
+        : { tone: 'off', title: 'Rezervace zrušena', text: 'Stav vrácení peněz uvidíte níže, jakmile ho Stripe zpracuje.' }
     case 'no_show_reported':
       return { tone: 'warn', title: 'Nahlášeno nedostavení', text: 'Čeká se na vyjádření poskytovatele.' }
     case 'no_show_disputed':
@@ -103,6 +120,7 @@ export default function BookingStateBadge({
   authorizedAt = null,
   confirmedAt = null,
   cancelReason = null,
+  withdrawn = false,
   farNote = null,
 }: {
   state: string | null
@@ -115,6 +133,8 @@ export default function BookingStateBadge({
   /** Kdy se platba strhla (null = nic strženo) */
   confirmedAt?: string | null
   cancelReason?: string | null
+  /** Zákazník odstoupil od smlouvy (withdrawals) */
+  withdrawn?: boolean
   /** Zákazník, čekající rezervace s adresou daleko: sloučí se sem místo samostatného oranžového boxu */
   farNote?: string | null
 }) {
@@ -123,6 +143,7 @@ export default function BookingStateBadge({
     authorized: !!authorizedAt,
     captured: !!confirmedAt,
     cancelReason,
+    withdrawn,
   })
   if (!t) return null
   const far = farNote && state === 'awaiting_confirmation' ? farNote : null

@@ -15,6 +15,10 @@ import { haversineKm, KNOWN_PLACE_TOLERANCE_KM } from '@/lib/geo'
 import { getProposals } from '@/lib/actions/time-proposals'
 import { markThreadRead } from '@/lib/actions/inbox'
 import TimePreferenceForm from '@/components/ui/TimePreferenceForm'
+import BookingAfterPayment, { type RefundView } from '@/components/ui/BookingAfterPayment'
+import { customerCancelOutcome, noAutoRefundText, providerCancelCheck, withdrawalInfo } from '@/lib/booking/cancellation'
+import { orderRefunds } from '@/lib/booking/refunds'
+import { datum, datumCas } from '@/lib/format'
 
 interface Props { params: { id: string }; searchParams: { platba?: string; rezervovat?: string } }
 
@@ -236,6 +240,39 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
   // Rezervace nového modelu s rozběhnutou nebo hotovou platbou: termín se tudy nemění
   // (změna potvrzené rezervace má vlastní pravidla, model §10).
   const v2BookingState = ((order as any).booking_state ?? null) as string | null
+
+  // Vrstva 4: zaplacená rezervace – zrušení s vrácením peněz, odstoupení, stav refundů
+  let afterPayment: {
+    providerCanCancel: boolean
+    customerCancel: { mode: 'auto' } | { mode: 'none'; text: string } | null
+    withdrawal: { mode: 'available'; untilText: string } | { mode: 'done'; atText: string } | null
+    refunds: RefundView[]
+  } | null = null
+  if ((order as any).confirmed_at && v2BookingState) {
+    const db = adminDb()
+    const bo = await loadBookingOrder(db, order.id)
+    if (bo) {
+      const refunds = (await orderRefunds(db, order.id)).map((r) => ({
+        id: r.id, amountKc: r.amount_halere / 100, status: r.status, createdText: datumCas(r.created_at),
+      }))
+      let customerCancel: { mode: 'auto' } | { mode: 'none'; text: string } | null = null
+      if (!isProvider && bo.booking_state === 'confirmed') {
+        const outcome = await customerCancelOutcome(db, bo)
+        if (outcome.allowed && outcome.money === 'auto_refund') customerCancel = { mode: 'auto' }
+        else if (outcome.allowed && outcome.money === 'no_auto_refund') customerCancel = { mode: 'none', text: noAutoRefundText(outcome.reason) }
+      }
+      const w = await withdrawalInfo(db, bo)
+      const withdrawal = w.available
+        ? (isProvider ? null : { mode: 'available' as const, untilText: datum(w.until) })
+        : w.reason === 'already' && w.at ? { mode: 'done' as const, atText: datumCas(w.at) } : null
+      afterPayment = {
+        providerCanCancel: isProvider && providerCancelCheck(bo).allowed,
+        customerCancel,
+        withdrawal,
+        refunds,
+      }
+    }
+  }
   const v2PaymentStarted = v2BookingState !== null && v2BookingState !== 'payment_expired'
   const proposalFlowOpen =
     !v2PaymentStarted &&
@@ -322,6 +359,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
         authorizedAt={(order as any).authorized_at ?? null}
         confirmedAt={(order as any).confirmed_at ?? null}
         cancelReason={(order as any).cancel_reason ?? null}
+        withdrawn={afterPayment?.withdrawal?.mode === 'done'}
         farNote={!isProvider && outOfRange
           ? `Pozor, je to daleko – asi ${outOfRange.distanceKm} km ${outOfRange.fromObec ? `od obce z poptávky (${outOfRange.fromObec})` : 'mimo obvyklý dosah poskytovatele'}. Proto rezervaci potvrzuje ručně. Když tam nedojede, odmítne ji a blokace se uvolní, nic nezaplatíte.`
           : null}
@@ -357,6 +395,19 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
           deadlineAt={(order as any).confirm_deadline_at ?? null}
           offerKind={(order as any).offer_kind ?? null}
           quoteFeeDeductible={(order as any).quote_fee_deductible === true}
+        />
+      )}
+
+      {afterPayment && (
+        <BookingAfterPayment
+          orderId={order.id}
+          isProvider={isProvider}
+          amountKc={Number((order as any).charge_halere ?? 0) / 100}
+          offerKind={(order as any).offer_kind ?? null}
+          providerCanCancel={afterPayment.providerCanCancel}
+          customerCancel={afterPayment.customerCancel}
+          withdrawal={afterPayment.withdrawal}
+          refunds={afterPayment.refunds}
         />
       )}
 

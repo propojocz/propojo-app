@@ -1,6 +1,6 @@
 # Plán vrstvy 4 – refundy, zrušení po zaplacení, ochrana proti podvodu
 
-Stav: SCHVÁLENO 13. 10. 2026 (stavba po částech: 1) strop, limity, štítky, upozornění, pokyn; 2) zrušení + refund + odstoupení; 3) „nemohu dodržet“ + Stripe Dashboard). Model §7, §8, §10, §11, §13, §21 (katalog AUTOREF), stanovisko AK body 2, 4, 5, 7.
+Stav: část 1 hotová a commitnutá (d314ac9), část 2 napsaná 15. 10. 2026 (čeká na test). SCHVÁLENO 13. 10. 2026 (stavba po částech: 1) strop, limity, štítky, upozornění, pokyn; 2) zrušení + refund + odstoupení; 3) „nemohu dodržet“ + Stripe Dashboard). Model §7, §8, §10, §11, §13, §21 (katalog AUTOREF), stanovisko AK body 2, 4, 5, 7.
 Navazuje na vrstvu 1: `lib/booking/rules.ts` (decideAutoRefund, stavy refundu), tabulky `order_refunds`,
 `order_reschedules`, `booking_consents`, `withdrawals` a webhook `refund.*` (už synchronizuje `order_refunds`).
 

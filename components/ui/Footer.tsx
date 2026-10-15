@@ -23,7 +23,7 @@ export default function Footer() {
               { href: '/pridat-sluzbu', label: 'Přidat službu' },
               { href: '/faq', label: 'FAQ' },
               { href: '/pravidla-komunity', label: 'Pravidla' },
-              { href: '/storno', label: 'Storno' },
+              { href: '/storno', label: 'Zrušení a vrácení peněz' },
               { href: '/podminky', label: 'Podmínky' },
               { href: '/soukromi', label: 'Soukromí' },
             ].map((link) => (

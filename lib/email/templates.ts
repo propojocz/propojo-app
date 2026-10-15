@@ -701,3 +701,124 @@ export function welcomeEmail(data: {
     ),
   }
 }
+// ════════════════════════════════════════════════════════════
+//  ZRUŠENÍ, VRÁCENÍ PENĚZ A ODSTOUPENÍ (model v2, vrstva 4)
+// ════════════════════════════════════════════════════════════
+
+/** Rezervace zrušena po zaplacení → ZÁKAZNÍKOVI (trvalý záznam o zrušení a vrácení peněz) */
+export function bookingCancelledEmail(data: {
+  serviceTitle: string
+  termText: string | null
+  byProvider: boolean
+  amountText: string | null
+  reason?: string | null
+  orderUrl: string
+}): { subject: string; html: string } {
+  return {
+    subject: `Rezervace zrušena: ${data.serviceTitle}`,
+    html: emailWrapper(`
+      ${heading(
+        data.byProvider ? 'Poskytovatel rezervaci zrušil' : 'Rezervaci jste zrušili',
+        data.amountText
+          ? 'Vrácení celé zaplacené částky jsme zadali do platební brány Stripe. Na účtu se obvykle objeví do několika pracovních dnů – podle vaší banky.'
+          : undefined,
+      )}
+
+      ${detailBox([
+        ['Služba', data.serviceTitle],
+        ['Termín', data.termText],
+        ['Vrací se', data.amountText],
+        ['Zpráva od poskytovatele', data.reason],
+      ])}
+
+      ${noteBox('Peníze se vrací z účtu poskytovatele, kam jste platili. Propojo platby nedrží. Kdyby vrácení neproběhlo, dáme vám vědět.', 'info')}
+
+      ${button('Zobrazit objednávku', data.orderUrl)}
+    `),
+  }
+}
+
+/** Potvrzení odstoupení od Rezervační smlouvy → ZÁKAZNÍKOVI (VOP čl. 9.1, s datem a časem) */
+export function withdrawalConfirmationEmail(data: {
+  serviceTitle: string
+  providerName: string
+  termText: string | null
+  requestedAtText: string
+  amountText: string | null
+  orderUrl: string
+}): { subject: string; html: string } {
+  return {
+    subject: `Potvrzení odstoupení od rezervace: ${data.serviceTitle}`,
+    html: emailWrapper(`
+      ${heading('Odstoupení od smlouvy jsme přijali', 'Potvrzujeme, že jste odstoupili od Rezervační smlouvy. Tento e-mail si uschovejte.')}
+
+      ${detailBox([
+        ['Služba', data.serviceTitle],
+        ['Poskytovatel', data.providerName],
+        ['Termín', data.termText],
+        ['Odstoupení přijato', data.requestedAtText],
+        ['Zaplaceno', data.amountText],
+      ])}
+
+      ${noteBox('Zaplacenou částku vám vrací poskytovatel, nejpozději do 14 dnů od odstoupení. Propojo platby nedrží, poskytovateli jsme vaše odstoupení předali.', 'info')}
+
+      ${button('Zobrazit objednávku', data.orderUrl)}
+    `),
+  }
+}
+
+/** Zákazník odstoupil od smlouvy → POSKYTOVATELI */
+export function withdrawalNoticeEmail(data: {
+  serviceTitle: string
+  termText: string | null
+  requestedAtText: string
+  amountText: string | null
+  orderUrl: string
+}): { subject: string; html: string } {
+  return {
+    subject: `Zákazník odstoupil od rezervace: ${data.serviceTitle}`,
+    html: emailWrapper(`
+      ${heading('Zákazník odstoupil od smlouvy', 'Zákazník využil právo odstoupit od Rezervační smlouvy.')}
+
+      ${detailBox([
+        ['Služba', data.serviceTitle],
+        ['Termín', data.termText],
+        ['Odstoupení přijato', data.requestedAtText],
+        ['Zaplaceno', data.amountText],
+      ])}
+
+      ${noteBox('Zaplacenou částku vraťte zákazníkovi nejpozději do 14 dnů od odstoupení – nejjednodušeji refundem platby ve svém Stripe Dashboardu. Propojo vrácení automaticky neprovádí; stav se v objednávce zobrazí sám.', 'warn')}
+
+      ${button('Zobrazit objednávku', data.orderUrl)}
+    `),
+  }
+}
+
+/** Automatické vrácení peněz selhalo → ZÁKAZNÍKOVI i POSKYTOVATELI */
+export function refundFailedEmail(data: {
+  serviceTitle: string
+  amountText: string
+  forProvider: boolean
+  orderUrl: string
+}): { subject: string; html: string } {
+  return {
+    subject: `Vrácení peněz se nezdařilo: ${data.serviceTitle}`,
+    html: emailWrapper(`
+      ${heading('Vrácení peněz se nezdařilo')}
+
+      ${detailBox([
+        ['Služba', data.serviceTitle],
+        ['Částka', data.amountText],
+      ])}
+
+      ${noteBox(
+        data.forProvider
+          ? 'Stripe vrácení peněz zákazníkovi z vašeho účtu neprovedl (například kvůli nedostatku prostředků). Povinnost částku zákazníkovi vrátit trvá – vraťte ji prosím co nejdřív, třeba refundem ve Stripe Dashboardu.'
+          : 'Stripe vrácení peněz z účtu poskytovatele neprovedl. Povinnost vrátit vám částku má dál poskytovatel – dali jsme mu vědět. Pokud se to do několika dnů nevyřeší, napište nám na admin@propojo.cz.',
+        'danger',
+      )}
+
+      ${button('Zobrazit objednávku', data.orderUrl)}
+    `),
+  }
+}

@@ -34,8 +34,21 @@ import { createClient } from '@/lib/supabase/server'
 import { createNotification } from '@/lib/actions/notifications'
 import { providerSeesCustomerContact } from '@/lib/booking/state'
 import { updateOrderStatus } from '@/lib/actions/orders'
+import { sendEmail } from '@/lib/email/send'
+import { bookingCancelledEmail } from '@/lib/email/templates'
+import { terminDlouze } from '@/lib/format'
+import { runAutoRefund } from '@/lib/booking/refunds'
+import {
+  WITHDRAWAL_DAYS,
+  customerCancelOutcome,
+  noAutoRefundText,
+  providerCancelCheck,
+  sendWithdrawalEmails,
+  withdrawalInfo,
+} from '@/lib/booking/cancellation'
 import {
   adminDb,
+  applyTransition,
   cancelPendingPayment,
   logOrderEvent,
   captureBooking,
@@ -140,7 +153,159 @@ export async function cancelBeforePayment(orderId: string, reason?: string | nul
     return res.success ? { success: true } : { success: false, error: res.error ?? 'Nepodařilo se zrušit.' }
   }
 
-  return { success: false, error: 'Potvrzenou rezervaci zatím nelze zrušit v aplikaci – tato možnost bude doplněna.' }
+  if (order.booking_state === 'confirmed') return cancelConfirmedBooking(orderId, reason)
+
+  return { success: false, error: 'Tuto rezervaci teď nelze zrušit. Obnovte stránku.' }
+}
+
+// ─── Zrušení potvrzené (zaplacené) rezervace – vrstva 4, AUTOREF-001 a 004 ─────────
+
+async function emailOf(db: ReturnType<typeof adminDb>, userId: string): Promise<string | null> {
+  try {
+    const { data } = await db.auth.admin.getUserById(userId)
+    return data?.user?.email ?? null
+  } catch {
+    return null
+  }
+}
+
+function kcText(halere: number | null | undefined): string | null {
+  const h = Number(halere ?? 0)
+  return h > 0 ? `${(h / 100).toLocaleString('cs-CZ')} Kč` : null
+}
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://propojo.cz'
+
+/**
+ * Poskytovatel ruší potvrzenou rezervaci (do začátku termínu) → zákazníkovi se automaticky vrátí celá částka.
+ * Zákazník ruší před hranicí §8 → totéž; za hranicí se zrušit nedá (jen odstoupení / domluva).
+ * Nejdřív se zapíše zrušení (zámek stavu), potom refund – kdyby Stripe zrovna nešel, dožene ho cron.
+ */
+export async function cancelConfirmedBooking(orderId: string, reason?: string | null): Promise<Result> {
+  const ctx = await loadForUser(orderId)
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  const { db, order, by, userId } = ctx
+  if (order.booking_state !== 'confirmed') return { success: false, error: 'Rezervaci teď nelze zrušit. Obnovte stránku.' }
+
+  if (by === 'provider') {
+    const check = providerCancelCheck(order)
+    if (!check.allowed) {
+      return {
+        success: false,
+        error: check.reason === 'started'
+          ? 'Termín už začal, rezervaci už nejde zrušit. Domluvte se se zákazníkem ve zprávách.'
+          : 'Rezervaci teď nelze zrušit. Obnovte stránku.',
+      }
+    }
+  } else {
+    const outcome = await customerCancelOutcome(db, order)
+    if (!outcome.allowed) return { success: false, error: 'Rezervaci teď nelze zrušit. Obnovte stránku.' }
+    if (outcome.money === 'no_auto_refund') {
+      return { success: false, error: `${noAutoRefundText(outcome.reason)} Domluvte se s poskytovatelem, případně využijte odstoupení od smlouvy.` }
+    }
+  }
+
+  const event = by === 'provider' ? 'provider_cancelled' : 'customer_cancelled'
+  const r = await applyTransition(db, order, event, { type: by, id: userId }, { payload: { phase: 'after_capture' } })
+  if (!r.ok) return { success: false, error: 'Rezervaci se nepodařilo zrušit – mezitím se změnila. Obnovte stránku.' }
+
+  const text = by === 'provider' ? await postReason(db, orderId, userId, reason) : null
+  const refund = await runAutoRefund(db, order, event, by)
+  const amount = refund.kind === 'skipped' ? null : kcText(refund.amountHalere)
+  const termText = order.scheduled_at ? terminDlouze(order.scheduled_at) : null
+
+  if (by === 'provider') {
+    await createNotification({
+      userId: order.customer_id,
+      type: 'status_change',
+      orderId,
+      actorId: userId,
+      title: 'Poskytovatel rezervaci zrušil',
+      preview: withReason(`${orderName(order)} · ${amount ? `vrácení ${amount} bylo zahájeno.` : 'stav vrácení peněz najdete v objednávce.'}`, text),
+    })
+  } else {
+    await createNotification({
+      userId: order.provider_id,
+      type: 'status_change',
+      orderId,
+      actorId: userId,
+      title: 'Zákazník rezervaci zrušil',
+      preview: `${orderName(order)} · ${amount ? `zákazníkovi se z vašeho Stripe účtu vrací ${amount} (podle pokynu, který jste odsouhlasili).` : 'termín je znovu volný.'}`,
+    })
+  }
+
+  // Trvalý záznam pro zákazníka (oběma směry): co se zrušilo a kolik se vrací
+  const email = await emailOf(db, order.customer_id)
+  if (email) {
+    const mail = bookingCancelledEmail({
+      serviceTitle: orderName(order),
+      termText,
+      byProvider: by === 'provider',
+      amountText: amount,
+      reason: text,
+      orderUrl: `${APP_URL}/dashboard/objednavky/${orderId}`,
+    })
+    await sendEmail(email, mail.subject, mail.html)
+  }
+
+  revalidateOrder(orderId)
+  return { success: true }
+}
+
+// ─── Odstoupení od Rezervační smlouvy (VOP 9.1) ──────────────────────────────
+
+/**
+ * Samostatná funkce vedle „Zrušit rezervaci“: 14 dní od vzniku rezervace, i po předání nabídky.
+ * Uloží se do withdrawals, zákazník dostane potvrzení e-mailem s datem a časem, poskytovatel oznámení.
+ * Peníze automaticky nehýbe – vrací je poskytovatel (VOP 9.4), nejlépe refundem ve Stripe Dashboardu.
+ */
+export async function withdrawFromBooking(orderId: string, note?: string | null): Promise<Result> {
+  const ctx = await loadForUser(orderId)
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  const { db, order, by, userId } = ctx
+  if (by !== 'customer') return { success: false, error: 'Od smlouvy odstupuje zákazník.' }
+
+  const info = await withdrawalInfo(db, order)
+  if (!info.available) {
+    const why = {
+      already: 'Od této rezervace jste už odstoupili.',
+      expired: `Lhůta ${WITHDRAWAL_DAYS} dní pro odstoupení už uplynula.`,
+      not_applicable: 'U výrobku na míru právo odstoupit nevzniká.',
+      not_confirmed: 'Odstoupit jde jen od potvrzené rezervace.',
+    }[info.reason]
+    return { success: false, error: why }
+  }
+
+  const cleanNote = (note ?? '').trim().slice(0, REASON_MAX) || null
+  const { data: row, error } = await db
+    .from('withdrawals')
+    .insert({ order_id: orderId, customer_id: userId, channel: 'online', note: cleanNote })
+    .select('id')
+    .single()
+  if (error || !row) {
+    console.error('[booking] withdrawals:', error?.message)
+    return { success: false, error: 'Odstoupení se nepodařilo uložit. Zkuste to prosím znovu.' }
+  }
+  const withdrawalId = (row as { id: string }).id
+  await logOrderEvent(db, orderId, 'withdrawal_requested', { type: 'customer', id: userId }, { withdrawal_id: withdrawalId })
+
+  // Odstoupením Rezervační smlouva zaniká → rezervace končí, termín se uvolní, připomínky se nepošlou.
+  // Peníze se automaticky nehýbou (odstoupení není spouštěč z katalogu AUTOREF) – vrací je poskytovatel.
+  await applyTransition(db, order, 'customer_cancelled', { type: 'customer', id: userId }, { payload: { withdrawal_id: withdrawalId } })
+
+  await sendWithdrawalEmails(db, withdrawalId, true)
+  const amountText = kcText(order.charge_halere)
+  await createNotification({
+    userId: order.provider_id,
+    type: 'status_change',
+    orderId,
+    actorId: userId,
+    title: 'Zákazník odstoupil od smlouvy',
+    preview: `${orderName(order)} · rezervace skončila. Vraťte mu prosím ${amountText ?? 'zaplacenou částku'} do 14 dnů (refundem ve Stripe Dashboardu).`,
+  })
+
+  revalidateOrder(orderId)
+  return { success: true }
 }
 
 export async function confirmBooking(orderId: string): Promise<Result> {

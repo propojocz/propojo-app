@@ -20,6 +20,7 @@ import {
   handleCaptured,
   handleChargeRefunded,
   handleCheckoutExpired,
+  handleDeauthorized,
   handleDispute,
   handleRefund,
   syncStripeAccount,
@@ -87,6 +88,7 @@ async function processEvent(db: Db, event: Stripe.Event, accountId: string) {
         .from('stripe_accounts')
         .update({ deauthorized_at: now, charges_enabled: false, updated_at: now })
         .eq('stripe_account_id', accountId)
+      await handleDeauthorized(db, accountId)
       break
     }
 

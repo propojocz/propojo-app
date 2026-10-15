@@ -23,6 +23,7 @@ import { finalizeRequestSelection, requestStillAvailable } from './request-selec
 import { providerTrust } from './trust'
 import { alertAdmins } from './alerts'
 import { AUTOREF_CATALOG_VERSION } from './texts'
+import { notifyRefundFailed, notifyRefundSucceeded } from './refunds'
 import {
   confirmationDeadline,
   isAuthorizationTooLate,
@@ -1041,6 +1042,11 @@ export async function handleRefund(db: Db, accountId: string, refund: Stripe.Ref
 
   // Refund zahájený naším enginem nese id svého řádku; jinak ho poznáme podle stripe_refund_id.
   const ownRowId = refund.metadata?.order_refund_id
+  // Předchozí stav kvůli oznámení jen při skutečné změně (webhook chodí i opakovaně)
+  const { data: prevRows } = ownRowId
+    ? await db.from('order_refunds').select('status, refund_trigger').eq('id', ownRowId)
+    : await db.from('order_refunds').select('status, refund_trigger').eq('stripe_refund_id', refund.id)
+  const prev = ((prevRows ?? [])[0] as { status: string; refund_trigger: string } | undefined) ?? null
   let updated = false
   if (ownRowId) {
     const { data } = await db.from('order_refunds').update(fields).eq('id', ownRowId).select('id')
@@ -1049,6 +1055,12 @@ export async function handleRefund(db: Db, accountId: string, refund: Stripe.Ref
   if (!updated) {
     const { data } = await db.from('order_refunds').update(fields).eq('stripe_refund_id', refund.id).select('id')
     updated = (data ?? []).length > 0
+  }
+  if (prev?.status !== status) {
+    if (status === 'succeeded') await notifyRefundSucceeded(order, refund.amount)
+    else if ((status === 'failed' || status === 'canceled') && prev && prev.refund_trigger !== 'stripe_dashboard') {
+      await notifyRefundFailed(db, order.id, refund.amount)
+    }
   }
   if (!updated) {
     const { error } = await db.from('order_refunds').insert({
@@ -1076,6 +1088,45 @@ export async function handleDispute(db: Db, dispute: Stripe.Dispute) {
   if (!order) return
   await db.from('orders').update({ stripe_dispute_status: dispute.status }).eq('id', order.id)
   await logOrderEvent(db, order.id, 'stripe_event', { type: 'stripe' }, { dispute: dispute.id, status: dispute.status })
+}
+
+// ─── Odpojení Stripe účtu poskytovatelem (vrstva 4, plán F) ──────────────
+
+/**
+ * Poskytovatel odpojil Standard účet od Propoja: nové rezervace blokuje accountBlocks (deauthorized).
+ * Platforma ztratila přístup k účtu → refund ani capture přes API už nejdou. Zákazníci s otevřenou
+ * zaplacenou rezervací to musí vědět (nárok uplatní u poskytovatele, případně reklamací u banky), admin dostane upozornění.
+ */
+export async function handleDeauthorized(db: Db, accountId: string) {
+  const { data } = await db
+    .from('orders')
+    .select(BOOKING_ORDER_COLUMNS)
+    .eq('stripe_account_id', accountId)
+    .in('booking_state', ['awaiting_confirmation', 'capture_in_progress', 'confirmed', 'no_show_reported'])
+    .limit(500)
+  const now = Date.now()
+  const open = ((data ?? []) as unknown as BookingOrder[]).filter((o) =>
+    o.booking_state !== 'confirmed' || !o.scheduled_end || new Date(o.scheduled_end).getTime() + 48 * 3600_000 > now)
+  for (const o of open) {
+    await logOrderEvent(db, o.id, 'stripe_event', { type: 'stripe' }, { account: accountId, event: 'account.application.deauthorized' })
+    await notify({
+      userId: o.customer_id,
+      type: 'status_change',
+      orderId: o.id,
+      title: 'Poskytovatel odpojil platební účet',
+      preview: o.booking_state === 'confirmed' || o.booking_state === 'no_show_reported'
+        ? `${orderName(o)} · rezervace dál platí, ale kdyby ji poskytovatel nesplnil, Propojo už peníze nevrátí automaticky. Obraťte se na něj, případně reklamujte platbu u své banky.`
+        : `${orderName(o)} · rezervaci už nejde potvrdit. Blokace na kartě se během několika dní sama uvolní, nic se nestrhne.`,
+    })
+  }
+  const { data: acc } = await db.from('stripe_accounts').select('provider_id').eq('stripe_account_id', accountId).maybeSingle()
+  const providerId = (acc as { provider_id: string } | null)?.provider_id ?? null
+  await alertAdmins({
+    title: 'Poskytovatel odpojil Stripe účet',
+    preview: `Otevřených zaplacených rezervací: ${open.length}. Nové rezervace jsou zablokované.`,
+    url: providerId ? `/profil/${providerId}` : null,
+    actorId: providerId,
+  })
 }
 
 // ─── Záchrana (když webhook nedorazil) ───────────────────────────────────
