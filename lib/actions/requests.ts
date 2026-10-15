@@ -237,10 +237,12 @@ export async function expressInterest(
   // Poptávka musí existovat, být otevřená, nevypršelá a ne vlastní.
   const { data: req } = await admin
     .from('requests')
-    .select('id, customer_id, status, expires_at')
+    .select('id, customer_id, status, expires_at, target_provider_id')
     .eq('id', requestId)
-    .single() as { data: { id: string; customer_id: string | null; status: string; expires_at: string } | null }
+    .single() as { data: { id: string; customer_id: string | null; status: string; expires_at: string; target_provider_id: string | null } | null }
   if (!req) return { success: false, error: 'Poptávka nebyla nalezena.' }
+  // Soukromá poptávka: reagovat (doplnit nabídku) smí jen poskytovatel, pro kterého je
+  if (req.target_provider_id && req.target_provider_id !== user.id) return { success: false, error: 'Poptávka nebyla nalezena.' }
   if (req.customer_id === user.id) {
     return { success: false, error: 'Na vlastní poptávku reagovat nelze.' }
   }
@@ -254,10 +256,10 @@ export async function expressInterest(
   // Už jednou reagoval? (drží i UNIQUE(request_id, provider_id)) Nezakládat druhou.
   const { data: existing } = await admin
     .from('request_responses')
-    .select('id, status')
+    .select('id, status, service_id')
     .eq('request_id', requestId)
     .eq('provider_id', user.id)
-    .maybeSingle() as { data: { id: string; status: string } | null }
+    .maybeSingle() as { data: { id: string; status: string; service_id: string | null } | null }
   const offerCheck = checkOffer(offer)
   const placeCheck = placeOf(offer)
   if (!placeCheck.ok) return { success: false, error: placeCheck.error }
@@ -268,7 +270,12 @@ export async function expressInterest(
     if (offer && (ACTIVE_STATUSES as readonly string[]).includes(existing.status)) {
       if (!offerCheck.ok) return { success: false, error: offerCheck.error }
       await (admin.from('request_responses') as any)
-        .update({ offer_kind: offerCheck.kind, charge_halere: offerCheck.halere, quote_fee_deductible: offerCheck.deductible, service_id: serviceId ?? null, ...placeCols, updated_at: new Date().toISOString() })
+        .update({
+          offer_kind: offerCheck.kind, charge_halere: offerCheck.halere, quote_fee_deductible: offerCheck.deductible, service_id: serviceId ?? null, ...placeCols,
+          // Jiná karta → položka ceníku z původní karty (soukromá poptávka) už neplatí
+          ...((serviceId ?? null) !== existing.service_id ? { service_item_id: null } : {}),
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', existing.id)
     }
     // Aktivní = beze změny (idempotentní). Dřív odmítnutý zájem znovu otevřeme.
@@ -433,6 +440,9 @@ export type RenewableRequest = {
 
 /** Lze poptávku obnovit? (vypršela / uzavřená / objednávka padla před zaplacením) */
 async function renewCheck(admin: ReturnType<typeof getAdminClient>, req: any): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Soukromý dotaz se neobnovuje (obnovou by vznikla veřejná poptávka) – zákazník napíše poskytovateli znovu
+  const { data: t } = await admin.from('requests').select('target_provider_id').eq('id', req.id).maybeSingle() as { data: { target_provider_id: string | null } | null }
+  if (t?.target_provider_id) return { ok: false, error: 'Soukromý dotaz se neobnovuje – napište poskytovateli znovu z jeho karty.' }
   const expired = req.expires_at && new Date(req.expires_at).getTime() < Date.now()
   if (req.status === 'open' && !expired) return { ok: false, error: 'Poptávka je pořád aktivní.' }
   if (req.status === 'selected' && req.selected_response_id) {

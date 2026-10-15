@@ -60,6 +60,8 @@ export default async function PoptavkyPage() {
     .from('requests')
     .select('id, customer_id, category, subcategory_id, city, city_lat, city_lng, description, preferred_date, photos, created_at, budget_from_kc, budget_to_kc, place_pref')
     .eq('status', 'open')
+    // Soukromé poptávky (dotaz pro jednoho poskytovatele) na veřejnou nástěnku nepatří
+    .is('target_provider_id', null)
     .gt('expires_at', new Date().toISOString())
     .order('created_at', { ascending: false })
     .limit(100) as { data: Array<{

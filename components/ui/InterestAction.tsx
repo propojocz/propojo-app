@@ -61,6 +61,7 @@ export default function InterestAction({
   requestId, category, subcategoryId, isFull,
   initialMyStatus = null, initialConversationId = null,
   myCards, isLoggedIn, isProvider = true, myCity = null, placePref = null, block = false, onReacted,
+  chatMode = false, initialCardId = null, initialOffer = null,
 }: {
   requestId: string
   category: string | null
@@ -78,6 +79,12 @@ export default function InterestAction({
   placePref?: string | null
   block?: boolean
   onReacted?: (conversationId: string | null) => void
+  /** V chatu jednání (15. 10. 2026): jen tlačítko „Doplnit / Upravit nabídku“, bez „Mám zájem“ / „Otevřít chat“ */
+  chatMode?: boolean
+  /** Předvybraná karta (soukromá poptávka z karty) */
+  initialCardId?: string | null
+  /** Dosavadní nabídka – předvyplní formulář */
+  initialOffer?: { kind: 'A' | 'B'; chargeKc: number; deductible: boolean } | null
 }) {
   const router = useRouter()
   const [myStatus, setMyStatus] = useState<string | null>(initialMyStatus)
@@ -157,6 +164,41 @@ export default function InterestAction({
     )
   }
 
+  // Chat jednání: jen doplnění / úprava nabídky přímo u domluvy
+  if (chatMode) {
+    return (
+      <div className={wrap}>
+        {canEditOffer && (
+          <button
+            type="button"
+            onClick={() => { setError(null); setPickerOpen(true) }}
+            className={initialOffer
+              ? 'text-xs font-semibold text-emerald-700 underline hover:text-emerald-800'
+              : 'inline-flex items-center gap-1 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-amber-600'}
+          >
+            {initialOffer ? 'Upravit nabídku' : 'Doplnit nabídku'}
+          </button>
+        )}
+        {error && <p className="mt-1.5 text-xs text-red-600">{error}</p>}
+        {pickerOpen && (
+          <OfferPicker
+            category={category}
+            subcategoryId={subcategoryId}
+            cards={myCards}
+            myCity={myCity}
+            placePref={placePref}
+            busy={busy}
+            editing={!!initialOffer}
+            initialCardId={initialCardId}
+            initialOffer={initialOffer}
+            onSubmit={react}
+            onClose={() => setPickerOpen(false)}
+          />
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className={wrap}>
       {control}
@@ -194,6 +236,7 @@ const MAX_OFFER_PHOTOS = 4
 
 function OfferPicker({
   category, subcategoryId, cards, myCity, placePref, busy, editing, onSubmit, onClose,
+  initialCardId = null, initialOffer = null,
 }: {
   category: string | null
   subcategoryId: string | null
@@ -204,12 +247,15 @@ function OfferPicker({
   editing: boolean
   onSubmit: (cardId: string | null, offer: OfferInput) => Promise<string | null>
   onClose: () => void
+  initialCardId?: string | null
+  initialOffer?: { kind: 'A' | 'B'; chargeKc: number; deductible: boolean } | null
 }) {
   // NO_CARD = obecná nabídka bez karty; null = ještě nevybráno
-  const [cardId, setCardId] = useState<string | null>(cards.length === 0 ? NO_CARD : null)
-  const [kind, setKind] = useState<'A' | 'B' | null>(null)
-  const [charge, setCharge] = useState('')
-  const [deductible, setDeductible] = useState(false)
+  const [cardId, setCardId] = useState<string | null>(
+    initialCardId && cards.some((c) => c.id === initialCardId) ? initialCardId : cards.length === 0 ? NO_CARD : null)
+  const [kind, setKind] = useState<'A' | 'B' | null>(initialOffer?.kind ?? null)
+  const [charge, setCharge] = useState(initialOffer ? String(initialOffer.chargeKc) : '')
+  const [deductible, setDeductible] = useState(initialOffer?.deductible ?? false)
   const [estFrom, setEstFrom] = useState('')
   const [estTo, setEstTo] = useState('')
   const [estMaterial, setEstMaterial] = useState<'with' | 'without' | null>(null)

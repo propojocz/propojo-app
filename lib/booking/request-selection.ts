@@ -46,12 +46,13 @@ export async function createDraftOrderFromResponse(
 ): Promise<DraftResult> {
   const { data: req } = await db
     .from('requests')
-    .select('id, customer_id, status, expires_at, description, city, address, address_lat, address_lng')
+    .select('id, customer_id, status, expires_at, description, city, address, address_lat, address_lng, billing')
     .eq('id', args.requestId)
     .maybeSingle()
   const r = req as {
     id: string; customer_id: string | null; status: string; expires_at: string | null; description: string | null; city: string | null
     address: string | null; address_lat: number | null; address_lng: number | null
+    billing: { is_company?: boolean; name?: string | null; ico?: string | null; dic?: string | null; address?: string | null } | null
   } | null
   if (!r || r.customer_id !== args.customerId) return { ok: false, error: 'Poptávka nebyla nalezena.' }
   if (r.status !== 'open' || (r.expires_at && new Date(r.expires_at).getTime() < Date.now())) {
@@ -60,11 +61,11 @@ export async function createDraftOrderFromResponse(
 
   const { data: resp } = await db
     .from('request_responses')
-    .select('id, request_id, provider_id, service_id, status, offer_kind, charge_halere, quote_fee_deductible, place, place_address, place_lat, place_lng')
+    .select('id, request_id, provider_id, service_id, service_item_id, status, offer_kind, charge_halere, quote_fee_deductible, place, place_address, place_lat, place_lng')
     .eq('id', args.responseId)
     .maybeSingle()
   const rr = resp as {
-    id: string; request_id: string; provider_id: string; service_id: string | null; status: string
+    id: string; request_id: string; provider_id: string; service_id: string | null; service_item_id: string | null; status: string
     offer_kind: string | null; charge_halere: number | null; quote_fee_deductible: boolean | null
     place: string | null; place_address: string | null; place_lat: number | null; place_lng: number | null
   } | null
@@ -72,6 +73,17 @@ export async function createDraftOrderFromResponse(
   if (!ACTIVE.includes(rr.status)) return { ok: false, error: 'Tento poskytovatel už není ve hře.' }
   if ((rr.offer_kind !== 'A' && rr.offer_kind !== 'B') || !rr.charge_halere) {
     return { ok: false, error: 'Tento poskytovatel zatím neuvedl, kolik se platí přes Propojo. Napište mu, ať nabídku doplní.' }
+  }
+
+  // Položka ceníku (soukromá poptávka) jen tehdy, když s nabídkou souhlasí – platba bere typ a započtení
+  // z položky; kdyby je poskytovatel v chatu změnil, rozešlo by se shrnutí s nabídkou.
+  let itemId: string | null = null
+  if (rr.service_item_id) {
+    const { data: it } = await db.from('service_items').select('id, service_id, offer_kind, quote_fee_deductible').eq('id', rr.service_item_id).maybeSingle()
+    const item = it as { id: string; service_id: string; offer_kind: string | null; quote_fee_deductible: boolean | null } | null
+    const sameKind = !!item && item.offer_kind === rr.offer_kind && item.service_id === rr.service_id
+    const sameDeduct = rr.offer_kind !== 'B' || (item?.quote_fee_deductible === true) === (rr.quote_fee_deductible === true)
+    if (item && sameKind && sameDeduct) itemId = item.id
   }
 
   // Rozpracovaná objednávka k téže reakci (zákazník se vrací k jinému termínu) → znovu použít
@@ -88,6 +100,13 @@ export async function createDraftOrderFromResponse(
     if (ord && ord.status !== 'zruseno' && (ord.booking_state === null || ord.booking_state === 'payment_expired' || ord.booking_state === 'pending_payment')) {
       // Zákazník se vrátil do chatu uprostřed platby (jiný termín) → rozpracovanou platbu uvolnit
       await resetDraftPayment(db, ord.id, args.customerId)
+      // Poskytovatel mohl mezitím v chatu upravit nabídku → platí aktuální (cena, typ, započtení, položka)
+      await db.from('orders').update({
+        offer_kind: rr.offer_kind,
+        agreed_charge_halere: rr.charge_halere,
+        quote_fee_deductible: rr.offer_kind === 'B' ? rr.quote_fee_deductible === true : null,
+        service_item_id: itemId,
+      }).eq('id', ord.id)
       // Adresa doplněná mezitím v chatu → do objednávky (jen u zákazníka a jen když tam ještě není)
       if (r.address && rr.place !== 'u_poskytovatele') {
         await db.from('orders')
@@ -104,6 +123,16 @@ export async function createDraftOrderFromResponse(
     .from('orders')
     .insert({
       service_id: rr.service_id, // může být null – reakce bez karty (obecná nabídka)
+      // Soukromá poptávka s vybranou položkou ceníku („Nejdřív se domluvit“) – název, délka, pauza z položky
+      service_item_id: itemId,
+      // „Nakupuji na firmu“ zadané u soukromé poptávky
+      ...(r.billing?.is_company ? {
+        billing_is_company: true,
+        billing_name: r.billing.name ?? null,
+        billing_ico: r.billing.ico ?? null,
+        billing_dic: r.billing.dic ?? null,
+        billing_address: r.billing.address ?? null,
+      } : {}),
       provider_id: rr.provider_id,
       customer_id: args.customerId,
       status: 'cekajici',

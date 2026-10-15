@@ -188,6 +188,15 @@ pracovníci vlastní účet a profil, kde sbírají body a hodnocení (motivace:
 majitel / recepční spravuje obě v jednom kalendáři. Volba společnosti: pracovníci **se přesouvají mezi pobočkami**
 (jeden společný kalendář pracovníka přes pobočky, kolize se hlídají napříč) / **nepřesouvají** (pracovník patří k jedné pobočce).
 
+### Doplnění Mateje (15. 10. 2026)
+- **Přiřazení pracovníka k pobočkám:** majitel u každého pracovníka zapne, ke kterým pobočkám patří – jedna, dvě i víc
+  (`org_members` ↔ `org_locations` N:M). Kalendář pracovníka je jeden přes všechny jeho pobočky, kolize se hlídají napříč.
+- **Dva režimy (oba ano):** (A) pracovníky spravuje salon – smluvní strana, platba a Stripe = salon;
+  (B) pracovník je samostatný poskytovatel (vlastní IČO, Stripe, profil) a salon je nadřazený profil, pod kterým vystupuje.
+  **Kdo inkasuje peníze** si majitel salonu a pracovník domluví přes Propojo – volba u pracovníka „platby přijímá: salon / pracovník“
+  (podmínka: kdo inkasuje, musí mít funkční Stripe účet, pokyn k refundům a ověřené IČO). Smluvní stranou je vždy ten, kdo inkasuje.
+- **Název nadřazeného profilu:** návrh „Firma“ (nad ní pobočky a pracovníci; obecné pro salon, dílnu, studio, řemeslníky) – potvrdit.
+
 ## LEGAL_REVIEW_NEEDED
 - Souhlas zákazníka se změnou konkrétního pracovníka (`specific_required`) a co přesně je „interní zdroj“.
 - Viditelnost údajů zákazníka jednotlivým pracovníkům a recepci (Poskytovatel = správce, pracovníci = jeho lidé;

@@ -11,6 +11,7 @@ import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import PoptavkaChat, { type ThreadItem } from '@/components/ui/PoptavkaChat'
+import InterestAction, { type PickerCard } from '@/components/ui/InterestAction'
 import { offerSummary } from '@/lib/booking/texts'
 import { markThreadRead } from '@/lib/actions/inbox'
 import { haversineKm } from '@/lib/geo'
@@ -47,7 +48,7 @@ export default async function JednaniPage({
 
   const { data: rr } = await admin
     .from('request_responses')
-    .select('id, request_id, provider_id, service_id, status, offer_kind, charge_halere, quote_fee_deductible, place, place_address, place_lat, place_lng')
+    .select('id, request_id, provider_id, service_id, service_item_id, status, offer_kind, charge_halere, quote_fee_deductible, place, place_address, place_lat, place_lng')
     .eq('id', conv.request_response_id)
     .maybeSingle() as { data: {
       id: string; request_id: string; provider_id: string; service_id: string | null; status: string
@@ -58,7 +59,7 @@ export default async function JednaniPage({
 
   const { data: req } = await admin
     .from('requests')
-    .select('id, customer_id, category, city, city_lat, city_lng, description, preferred_date, photos, status, budget_from_kc, budget_to_kc, place_pref, address, inspiration_photos')
+    .select('id, customer_id, category, subcategory_id, city, city_lat, city_lng, description, preferred_date, photos, status, budget_from_kc, budget_to_kc, place_pref, address, inspiration_photos, target_provider_id, target_service_id')
     .eq('id', requestId)
     .maybeSingle() as { data: {
       id: string; customer_id: string | null; category: string | null; city: string
@@ -67,6 +68,7 @@ export default async function JednaniPage({
       address: string | null
       description: string; preferred_date: string | null; photos: string[] | null; status: string
       inspiration_photos: string[] | null
+      subcategory_id: string | null; target_provider_id: string | null; target_service_id: string | null
     } | null }
   if (!req) notFound()
 
@@ -209,8 +211,51 @@ export default async function JednaniPage({
     if (base) distanceKm = Math.round(haversineKm(base.lat, base.lng, Number(req.city_lat), Number(req.city_lng)))
   }
 
+  // Vybraná položka ceníku (soukromá poptávka z „Nejdřív se domluvit“) → délka navrhovaného termínu
+  let itemMinutes: number | null = null
+  if ((rr as any).service_item_id) {
+    const { data: it } = await admin.from('service_items').select('duration_minutes').eq('id', (rr as any).service_item_id).maybeSingle() as { data: { duration_minutes: number | null } | null }
+    itemMinutes = it?.duration_minutes ?? null
+  }
+
+  // Poskytovatel: doplnění / úprava nabídky přímo v chatu (u soukromé poptávky hlavně – nikde jinde ji nevidí)
+  let offerEditor: React.ReactNode = null
+  if (isProvider && !conv.order_id && conv.status === 'open' && (rr.status === 'interested' || rr.status === 'negotiating') && req.status === 'open') {
+    const { data: prof } = await admin.from('profiles').select('city').eq('id', user.id).maybeSingle() as { data: { city: string | null } | null }
+    const { data: cards } = await admin
+      .from('services')
+      .select('id, title, category, subcategory_id, location_type, address, address_lat, address_lng')
+      .eq('provider_id', user.id)
+      .eq('is_active', true) as { data: Array<{ id: string; title: string | null; category: string | null; subcategory_id: string | null; location_type: string | null; address: string | null; address_lat: number | null; address_lng: number | null }> | null }
+    const myCards: PickerCard[] = (cards ?? []).map((c) => ({
+      id: c.id, title: c.title ?? 'Nabídka', category: c.category, subcategoryId: c.subcategory_id,
+      locationType: c.location_type, address: c.address ? { text: c.address, lat: c.address_lat, lng: c.address_lng } : null,
+    }))
+    offerEditor = (
+      <InterestAction
+        chatMode
+        requestId={requestId}
+        category={req.category}
+        subcategoryId={req.subcategory_id}
+        isFull={false}
+        initialMyStatus={rr.status}
+        initialConversationId={conversationId}
+        myCards={myCards}
+        isLoggedIn
+        isProvider
+        myCity={prof?.city ?? null}
+        placePref={req.place_pref}
+        initialCardId={rr.service_id ?? req.target_service_id ?? null}
+        initialOffer={hasOffer ? { kind: rr.offer_kind as 'A' | 'B', chargeKc: Number(rr.charge_halere) / 100, deductible: rr.quote_fee_deductible === true } : null}
+      />
+    )
+  }
+
   return (
     <PoptavkaChat
+      offerEditor={offerEditor}
+      isPrivate={!!req.target_provider_id}
+      defaultTermMinutes={itemMinutes}
       conversationId={conversationId}
       requestId={requestId}
       responseId={rr.id}

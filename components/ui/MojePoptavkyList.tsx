@@ -19,6 +19,8 @@ export type MyRequest = {
   activeCount: number
   isSelected: boolean
   orderId: string | null
+  /** Soukromá poptávka (dotaz pro jednoho poskytovatele): přímý odkaz do chatu */
+  privateUrl?: string | null
 }
 
 function timeAgo(iso: string) {
@@ -120,6 +122,8 @@ export default function MojePoptavkyList({ items, showBoardHint = false }: {
                   <p className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
                     <CheckCircle2 className="h-3.5 w-3.5" /> Poskytovatel vybrán
                   </p>
+                ) : r.privateUrl ? (
+                  <p className="mt-3 text-xs text-slate-500">Soukromý dotaz – vidí ho jen tento poskytovatel.</p>
                 ) : (
                   <p className="mt-3 inline-flex items-center gap-1.5 text-xs text-slate-500">
                     <Users className="h-3.5 w-3.5" /> {r.activeCount} {r.activeCount === 1 ? 'aktivní zájemce' : r.activeCount < 5 ? 'aktivní zájemci' : 'aktivních zájemců'}
@@ -136,12 +140,12 @@ export default function MojePoptavkyList({ items, showBoardHint = false }: {
                     </Link>
                   )}
                   <Link
-                    href={`/dashboard/poptavky/${r.id}`}
+                    href={r.privateUrl ?? `/dashboard/poptavky/${r.id}`}
                     className={r.canRenew
                       ? 'inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50'
                       : 'inline-flex items-center gap-1 rounded-xl bg-emerald-500 px-3.5 py-2 text-sm font-bold text-white transition hover:bg-emerald-600'}
                   >
-                    Zobrazit zájemce ({r.activeCount}) <ChevronRight className="h-4 w-4" />
+                    {r.privateUrl ? 'Otevřít chat' : <>Zobrazit zájemce ({r.activeCount})</>} <ChevronRight className="h-4 w-4" />
                   </Link>
                   {r.orderId && (
                     <Link

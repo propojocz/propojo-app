@@ -55,6 +55,7 @@ export default function PoptavkaChat({
   conversationId, requestId, responseId,
   isProvider, readOnly, orderId, canSelect, hasServiceForOrder, offerText = null, offerKind = null,
   otherName, distanceKm = null, draftOrderId = null, place = null, customerAddress = null, declinedBy = null, request, threads, initialMessages, myUserId, senderNames,
+  offerEditor = null, isPrivate = false, defaultTermMinutes = null,
 }: {
   conversationId: string
   requestId: string
@@ -84,6 +85,12 @@ export default function PoptavkaChat({
   initialMessages: any[]
   myUserId: string
   senderNames: Record<string, string>
+  /** Poskytovatel: „Doplnit / Upravit nabídku“ přímo v chatu (InterestAction v režimu chatu) */
+  offerEditor?: React.ReactNode
+  /** Soukromá poptávka – dotaz pro jednoho poskytovatele (mimo veřejnou nástěnku) */
+  isPrivate?: boolean
+  /** Délka navrhovaného termínu z vybrané položky ceníku (min) */
+  defaultTermMinutes?: number | null
 }) {
   const router = useRouter()
   const [messages, setMessages] = useState<any[]>(initialMessages)
@@ -120,7 +127,7 @@ export default function PoptavkaChat({
   const [termOpen, setTermOpen] = useState(false)
   const [termDate, setTermDate] = useState('')
   const [termClock, setTermClock] = useState('')
-  const [termMinutes, setTermMinutes] = useState<number>(offerKind === 'B' ? BOOKING_POLICY.arrivalWindow.defaultMinutes : 60)
+  const [termMinutes, setTermMinutes] = useState<number>(offerKind === 'B' ? BOOKING_POLICY.arrivalWindow.defaultMinutes : (defaultTermMinutes || 60))
   const [termBusy, setTermBusy] = useState(false)
   const [bookBusy, setBookBusy] = useState<string | null>(null)
   // Shrnutí a platba (BookingWizard) otevřené přímo v chatu
@@ -393,7 +400,7 @@ export default function PoptavkaChat({
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Poptávka</p>
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">{isPrivate ? 'Soukromý dotaz' : 'Poptávka'}</p>
                 <h2 className="mt-1 text-lg font-black text-slate-900">{request.heading}</h2>
               </div>
               <span className="shrink-0 rounded-full bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
@@ -524,7 +531,8 @@ export default function PoptavkaChat({
                 <dd className={offerText ? 'font-semibold text-slate-900' : 'text-amber-700'}>
                   {offerText
                     ? <>{offerText} <span className="font-normal text-slate-500">· platí se přes Propojo při rezervaci</span></>
-                    : isProvider ? 'Doplňte u poptávky přes „Upravit nabídku“, kolik zákazník zaplatí přes Propojo.' : 'Poskytovatel zatím neuvedl, kolik se platí přes Propojo.'}
+                    : isProvider ? 'Doplňte nabídku – kolik zákazník zaplatí přes Propojo. Bez ní nejde rezervovat.' : 'Poskytovatel zatím neuvedl, kolik se platí přes Propojo – rezervovat půjde, až ji doplní.'}
+                  {offerEditor && <div className="mt-1.5">{offerEditor}</div>}
                 </dd>
                 <dt className="text-slate-500">Odhad ceny</dt>
                 <dd className={lastEstimateMsg ? 'text-slate-900' : 'text-slate-400'}>

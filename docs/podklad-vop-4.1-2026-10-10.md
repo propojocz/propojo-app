@@ -71,6 +71,8 @@ Popsat jako samostatný způsob, jak dojde k odeslání Rezervace.
 
 Dotčené části: nový článek v obou podmínkách; Zásady (kdo poptávku vidí, chat, fotky, obec); anti-bypass (čl. 16.3) se vztahuje i na kontakt z jednání o poptávce.
 
+**Soukromá poptávka (dotaz) – 15. 10. 2026:** „Napsat poskytovateli“ a „Nejdřív se domluvit“ zakládají poptávku, kterou vidí jen jeden vybraný Poskytovatel (není na nástěnce). Průběh je stejný jako u veřejné poptávky (chat, nabídka, výběr s termínem, rekapitulace, platba); aktivní 30 dní. Vybraná položka ceníku předvyplní nabídku. Konkretizace článku o poptávce – doplnit jako variantu.
+
 ### A6. Adresa mimo obvyklý dosah
 - Zákazník smí poslat poptávku/rezervaci i mimo dosah Poskytovatele.
 - Poskytovatel vidí vzdálenost a rozhodne sám. U adresy daleko od dohodnuté obce se Rezervace nikdy nepotvrdí automaticky.

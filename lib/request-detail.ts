@@ -40,7 +40,7 @@ export async function loadRequestDetail(requestId: string): Promise<RequestDetai
 
   const { data: req } = await admin
     .from('requests')
-    .select('id, customer_id, category, subcategory_id, city, description, preferred_date, photos, status, created_at, expires_at, budget_from_kc, budget_to_kc, place_pref, inspiration_photos')
+    .select('id, customer_id, category, subcategory_id, city, description, preferred_date, photos, status, created_at, expires_at, budget_from_kc, budget_to_kc, place_pref, inspiration_photos, target_provider_id')
     .eq('id', requestId)
     .maybeSingle() as { data: {
       id: string; customer_id: string | null; category: string | null; subcategory_id: string | null
@@ -48,8 +48,11 @@ export async function loadRequestDetail(requestId: string): Promise<RequestDetai
       inspiration_photos: string[] | null
       budget_from_kc: number | null; budget_to_kc: number | null; place_pref: string | null
       status: string; created_at: string; expires_at: string
+      target_provider_id: string | null
     } | null }
   if (!req) return null
+  // Soukromou poptávku vidí jen zákazník a poskytovatel, pro kterého je
+  if (req.target_provider_id && (!user || (user.id !== req.customer_id && user.id !== req.target_provider_id))) return null
 
   const isOwner = !!user && req.customer_id === user.id
   const isOpen = req.status === 'open' && new Date(req.expires_at).getTime() > Date.now()

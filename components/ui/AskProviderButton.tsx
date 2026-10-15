@@ -1,8 +1,8 @@
 'use client'
 // components/ui/AskProviderButton.tsx
-// Kolečko s ikonou zprávy na kartě nabídky — otevře konverzaci s tímhle
-// poskytovatelem o TÉHLE službě. Vlákno je jen jedno; při druhém kliknutí
-// se otevře to původní, ať se domluva netříští.
+// Kolečko s ikonou zprávy na kartě nabídky — založí soukromou poptávku pro tohoto
+// poskytovatele a otevře chat jednání (15. 10. 2026). Vlákno je jen jedno; při druhém
+// kliknutí se otevře to původní, ať se domluva netříští.
 //
 // Nepřihlášeného pošleme na přihlášení a po něm zpátky sem.
 
@@ -31,7 +31,8 @@ export default function AskProviderButton({
     setBusy(true); setErr(null)
     const res = await zacniDotaz(serviceId)
     setBusy(false)
-    if (res.success) router.push(`/dashboard/objednavky/${res.orderId}`)
+    // Soukromá poptávka: rovnou chat jednání se stejnými nástroji jako u poptávky
+    if (res.success) router.push(res.url)
     else setErr(res.error)
   }
 

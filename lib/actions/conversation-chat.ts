@@ -19,6 +19,7 @@
 //   - zákazník     = requests.customer_id (přes request_response.request_id)
 
 import { createClient } from '@/lib/supabase/server'
+import { customerPreferenceMessage, type CustomerPreference } from '@/lib/chat-preference'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { createNotification } from './notifications'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
@@ -705,13 +706,7 @@ export async function sendProviderAvailability(conversationId: string, from: str
 // Strukturovaná zpráva do chatu jednání. Poskytovatel podle ní pošle odhad a termíny; souhrn
 // „Co je domluveno“ bere vždy poslední hodnotu. Nic se tím nerezervuje ani neplatí.
 
-export type CustomerPreference =
-  | { kind: 'time_preference'; from: string; to: string | null; dayPart: 'kdykoli' | 'rano' | 'odpoledne' | 'vecer'; note?: string | null }
-  | { kind: 'budget'; from: number | null; to: number }
-
-const DAY_PARTS: Record<string, string> = {
-  kdykoli: 'kdykoli během dne', rano: 'ráno (8–12)', odpoledne: 'odpoledne (12–17)', vecer: 'večer (17–20)',
-}
+export type { CustomerPreference } from '@/lib/chat-preference'
 
 export async function sendCustomerPreference(conversationId: string, pref: CustomerPreference): Promise<SendResult> {
   const supabase = createClient()
@@ -724,26 +719,9 @@ export async function sendCustomerPreference(conversationId: string, pref: Custo
   if (user.id !== conv.customerId) return { success: false, error: 'Tohle posílá zákazník.' }
   if (conv.status !== 'open' || conv.orderId) return { success: false, error: 'Tahle konverzace je uzavřená.' }
 
-  let content: string
-  let payload: Record<string, unknown>
-  const den = (iso: string) => new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'numeric', timeZone: 'Europe/Prague' }).format(new Date(`${iso}T12:00:00Z`))
-  if (pref.kind === 'time_preference') {
-    const iso = /^\d{4}-\d{2}-\d{2}$/
-    if (!iso.test(pref.from) || (pref.to && !iso.test(pref.to))) return { success: false, error: 'Vyberte datum.' }
-    if (pref.to && pref.to < pref.from) return { success: false, error: 'Konec nemůže být dřív než začátek.' }
-    const part = DAY_PARTS[pref.dayPart] ?? DAY_PARTS.kdykoli
-    const note = pref.note?.trim().slice(0, 200) || null
-    content = `Hodí se mi: ${pref.to && pref.to !== pref.from ? `${den(pref.from)} – ${den(pref.to)}` : den(pref.from)}, ${part}${note ? ` (${note})` : ''}.`
-    payload = { kind: 'time_preference', from: pref.from, to: pref.to && pref.to !== pref.from ? pref.to : null, day_part: pref.dayPart, note }
-  } else {
-    const to = Math.round(Number(pref.to))
-    const from = pref.from != null ? Math.round(Number(pref.from)) : null
-    if (!Number.isFinite(to) || to <= 0) return { success: false, error: 'Zadejte rozpočet v Kč.' }
-    if (from != null && (!Number.isFinite(from) || from <= 0 || from > to)) return { success: false, error: 'Rozpočet „od“ musí být nižší než „do“.' }
-    const castka = from != null ? `${from.toLocaleString('cs-CZ')} – ${to.toLocaleString('cs-CZ')} Kč` : `do ${to.toLocaleString('cs-CZ')} Kč`
-    content = `Můj rozpočet: ${castka}.`
-    payload = { kind: 'budget', from, to }
-  }
+  const built = customerPreferenceMessage(pref)
+  if (!built.ok) return { success: false, error: built.error }
+  const { content, payload } = built
 
   const { data, error } = await (admin.from('messages') as any)
     .insert({ conversation_id: conversationId, order_id: null, sender_id: user.id, content, type: 'message', payload })

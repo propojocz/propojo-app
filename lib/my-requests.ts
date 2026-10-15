@@ -12,21 +12,40 @@ export async function loadMyRequests(userId: string): Promise<MyRequest[]> {
 
   const { data: reqs } = await admin
     .from('requests')
-    .select('id, category, city, preferred_date, status, created_at, selected_response_id, expires_at')
+    .select('id, category, city, preferred_date, status, created_at, selected_response_id, expires_at, target_provider_id')
     .eq('customer_id', userId)
     .order('created_at', { ascending: false }) as { data: Array<{
       id: string; category: string | null; city: string; preferred_date: string | null
       status: string; created_at: string; selected_response_id: string | null; expires_at: string | null
+      target_provider_id: string | null
     }> | null }
   const requests = reqs ?? []
   const reqIds = requests.map((r) => r.id)
 
   // Počet aktivních zájemců.
-  let responses: Array<{ request_id: string; status: string }> = []
+  let responses: Array<{ id: string; request_id: string; status: string }> = []
   if (reqIds.length) {
     const { data } = await admin
-      .from('request_responses').select('request_id, status').in('request_id', reqIds) as { data: typeof responses | null }
+      .from('request_responses').select('id, request_id, status').in('request_id', reqIds) as { data: typeof responses | null }
     responses = data ?? []
+  }
+
+  // Soukromé poptávky (dotaz pro jednoho poskytovatele): jméno poskytovatele a přímý odkaz do chatu
+  const privateReqs = requests.filter((r) => r.target_provider_id)
+  const providerName = new Map<string, string>()
+  const chatOf = new Map<string, string>()
+  if (privateReqs.length) {
+    const pids = Array.from(new Set(privateReqs.map((r) => r.target_provider_id!)))
+    const { data: pp } = await admin.from('profiles').select('id, full_name, company_name').in('id', pids) as { data: Array<{ id: string; full_name: string | null; company_name: string | null }> | null }
+    for (const p of pp ?? []) providerName.set(p.id, p.company_name || p.full_name || 'Poskytovatel')
+    const respIds = responses.filter((x) => privateReqs.some((r) => r.id === x.request_id)).map((x) => x.id)
+    if (respIds.length) {
+      const { data: cv } = await admin.from('conversations').select('id, request_response_id').in('request_response_id', respIds) as { data: Array<{ id: string; request_response_id: string }> | null }
+      for (const c of cv ?? []) {
+        const resp = responses.find((x) => x.id === c.request_response_id)
+        if (resp) chatOf.set(resp.request_id, `/poptavky/${resp.request_id}/jednani/${c.id}`)
+      }
+    }
   }
 
   // Objednávka u vybraných poptávek (přes konverzaci vybrané reakce).
@@ -55,16 +74,18 @@ export async function loadMyRequests(userId: string): Promise<MyRequest[]> {
 
   return requests.map((r) => ({
     id: r.id,
-    heading: r.category ?? 'Poptávka',
+    heading: r.target_provider_id ? `Dotaz – ${providerName.get(r.target_provider_id) ?? 'poskytovatel'}` : (r.category ?? 'Poptávka'),
+    privateUrl: r.target_provider_id ? (chatOf.get(r.id) ?? null) : null,
     category: r.category,
     city: r.city,
     preferredDate: r.preferred_date,
     // Otevřená, ale prošlá poptávka se tváří jako vypršelá
     status: r.status === 'open' && r.expires_at && new Date(r.expires_at).getTime() < now ? 'expired' : r.status,
     createdAt: r.created_at,
-    canRenew: (r.status === 'open' && !!r.expires_at && new Date(r.expires_at).getTime() < now)
+    // Soukromá poptávka se neobnovuje (obnovou by vznikla veřejná) – zákazník napíše poskytovateli znovu
+    canRenew: !r.target_provider_id && ((r.status === 'open' && !!r.expires_at && new Date(r.expires_at).getTime() < now)
       || r.status === 'closed' || r.status === 'expired'
-      || (r.status === 'selected' && (!orderByReq.get(r.id) || orderFailed.has(orderByReq.get(r.id)!))),
+      || (r.status === 'selected' && (!orderByReq.get(r.id) || orderFailed.has(orderByReq.get(r.id)!)))),
     activeCount: responses.filter((x) => x.request_id === r.id && ACTIVE.has(x.status)).length,
     isSelected: !!r.selected_response_id,
     orderId: orderByReq.get(r.id) ?? null,

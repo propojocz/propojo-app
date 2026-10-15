@@ -12,8 +12,8 @@
 //  1) Úkon má volná okna dost dlouhá na jeho délku → zákazník vybere čas,
 //     jde přes reserveSlotForItem. Má-li úkon zálohu, rezervace rovnou vrátí
 //     odkaz na platbu — termín se drží 30 minut, pak se sám uvolní.
-//  2) Žádné vhodné okno / model B (nacenění) → poptávka bez termínu přes
-//     createOrder (poskytovatel se ozve).
+//  2) Žádné vhodné okno / „Nejdřív se domluvit“ / model B (nacenění) → soukromá poptávka
+//     (startPrivateRequest, 15. 10. 2026): chat jednání, objednávka vznikne až zaplacením.
 //
 // Cena, model I PODMÍNKY VÝJEZDU se řídí ÚKONEM (service_item), ne kartou.
 
@@ -22,7 +22,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { CheckCircle2, Loader2, MapPin, Store, X, Clock, Wallet, CalendarDays, Truck, AlertTriangle, MessageCircle, Package, Minus, Plus } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { createOrder, getOpenOrderForItem } from '@/lib/actions/orders'
+import { getOpenOrderForItem } from '@/lib/actions/orders'
+import { startPrivateRequest } from '@/lib/actions/inquiry'
 import { reserveSlotForItem } from '@/lib/actions/slots'
 import { orderProduct } from '@/lib/actions/product-order'
 import { createClient, getBrowserUser } from '@/lib/supabase/client'
@@ -33,7 +34,7 @@ import SearchAutocomplete from '@/components/ui/SearchAutocomplete'
 import { getItemPaymentDisplay } from '@/lib/item-payment-display'
 import BookingWizard from '@/components/ui/BookingWizard'
 import { Info as InfoIcon } from 'lucide-react'
-import { setTimePreference, type TimePref } from '@/lib/actions/time-preference'
+import type { TimePref } from '@/lib/actions/time-preference'
 
 // „Kdy se vám to hodí“ – stejné volby jako v chatu u poptávky (14. 10. 2026)
 const DAY_PART_LABEL: Record<TimePref, string> = {
@@ -457,21 +458,20 @@ export default function OrderItemModal({
     const prefText = prefFrom
       ? `Hodí se mi: ${prefTo && prefTo !== prefFrom ? `${denMesic(prefFrom)} – ${denMesic(prefTo)}` : denMesic(prefFrom)}, ${DAY_PART_LABEL[prefPart]}.`
       : ''
-    const fullMessage = [prefText, message.trim()].filter(Boolean).join('\n')
-    const result = await createOrder({
-      service_id: serviceId,
-      service_item_id: item.id,
-      provider_id: providerId,
-      message: fullMessage || undefined,
-      location_city: needsCity ? city.trim() : undefined,
-      service_location: atCustomer ? 'u_zakaznika' : 'u_poskytovatele',
-      billing: billingPayload(),
+    // 15. 10. 2026: domluva = soukromá poptávka (jeden způsob domlouvání). Objednávka vznikne až zaplacením,
+    // vybraná položka předvyplní nabídku, „Kdy se vám to hodí“ a zpráva jdou do chatu jednání.
+    void prefText
+    const result = await startPrivateRequest({
+      serviceId,
+      itemId: item.id,
+      message: message.trim() || null,
+      pref: prefFrom ? { from: prefFrom, to: prefTo || prefFrom, dayPart: prefPart } : null,
+      city: needsCity ? city.trim() : null,
+      billing: billingPayload() ?? null,
     })
     if (result.success) {
-      if (prefFrom && (result as any).id) {
-        try { await setTimePreference((result as any).id, prefFrom, prefTo || prefFrom, prefPart) } catch { /* zpráva už odešla */ }
-      }
       setState('success')
+      router.push(result.url)
     } else { setState('error'); setErrorMsg(result.error) }
   }
 
@@ -521,7 +521,7 @@ export default function OrderItemModal({
                   <p className="text-lg font-black text-emerald-800">
                     {bookedIso
                       ? (goingToPay || isV2 ? 'Termín pro vás držíme' : 'Termín je váš! 🎉')
-                      : jeVyrobek ? 'Objednávka vytvořena' : isModelB && isV2 ? 'Poptávka výjezdu odeslána' : 'Objednávka odeslána'}
+                      : jeVyrobek ? 'Objednávka vytvořena' : 'Otevírám chat s poskytovatelem…'}
                   </p>
                   {bookedIso ? (
                     <>
@@ -1166,7 +1166,7 @@ export default function OrderItemModal({
                           : <><CalendarDays className="h-4 w-4" /> {selected ? `Rezervovat ${fmtTime(selected.startIso)}` : 'Rezervovat termín'}</>)
                       : openOrder && orderAgain
                         ? 'Ano, objednat další'
-                        : isModelB ? 'Odeslat poptávku' : skipSlot ? 'Odeslat objednávku bez termínu' : 'Odeslat objednávku'}
+                        : 'Napsat poskytovateli a domluvit se'}
               </button>
 
               <p className="text-center text-[11px] leading-relaxed text-slate-400">
