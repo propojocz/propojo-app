@@ -44,3 +44,42 @@ export async function alertIfHighCharge(kc: number | null | undefined, ctx: { pr
     actorId: ctx.providerId,
   })
 }
+
+// ─── Zákazník opakovaně ruší zaplacené rezervace (15. 10. 2026) ─────────────
+// Zrušení zákazníkem v hranicích §8 nese poskytovatel (provize + poplatek Stripe, AUTOREF-004).
+// Ochrana proti zneužití: zatím jen upozornění adminovi – žádná automatická sankce (omezení spotřebitele
+// = LEGAL_REVIEW_NEEDED, otázka pro právničku v podkladu VOP, sekce C). Odstoupení od smlouvy se nepočítá
+// (zákonné právo).
+export const CUSTOMER_CANCEL_ALERT = { windowDays: 30, threshold: 3 }
+
+export async function alertIfCustomerCancelsOften(customerId: string): Promise<void> {
+  try {
+    const db = admin()
+    const since = new Date(Date.now() - CUSTOMER_CANCEL_ALERT.windowDays * 24 * 3600_000).toISOString()
+    const { data } = await db
+      .from('orders')
+      .select('id, cancelled_at')
+      .eq('customer_id', customerId)
+      .eq('cancel_reason', 'customer_cancelled')
+      .not('confirmed_at', 'is', null)
+      .gte('cancelled_at', since)
+      .limit(50)
+    const ids = ((data ?? []) as Array<{ id: string }>).map((o) => o.id)
+    if (ids.length < CUSTOMER_CANCEL_ALERT.threshold) return
+    // Odstoupení od smlouvy taky končí jako customer_cancelled – ty nepočítat
+    const { data: w } = await db.from('withdrawals').select('order_id').in('order_id', ids)
+    const withdrawn = new Set(((w ?? []) as Array<{ order_id: string }>).map((r) => r.order_id))
+    const count = ids.filter((id) => !withdrawn.has(id)).length
+    if (count < CUSTOMER_CANCEL_ALERT.threshold) return
+    const { data: p } = await db.from('profiles').select('full_name').eq('id', customerId).maybeSingle()
+    const name = (p as { full_name: string | null } | null)?.full_name || 'Zákazník'
+    await alertAdmins({
+      title: `Zákazník opakovaně ruší zaplacené rezervace (${count}× za ${CUSTOMER_CANCEL_ALERT.windowDays} dní)`,
+      preview: `${name} – zrušení nesou poskytovatelé (provize + poplatek Stripe). Zkontrolujte, jestli nejde o zneužití.`,
+      url: '/admin/uzivatele',
+      actorId: customerId,
+    })
+  } catch (err) {
+    console.error('[alertIfCustomerCancelsOften]', err)
+  }
+}

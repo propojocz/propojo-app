@@ -39,7 +39,8 @@ import { sendEmail } from '@/lib/email/send'
 import { bookingCancelledEmail } from '@/lib/email/templates'
 import { terminDlouze } from '@/lib/format'
 import { runAutoRefund, runProviderRefund } from '@/lib/booking/refunds'
-import { proposeCannotKeep, resolveReschedule } from '@/lib/booking/reschedule'
+import { alertIfCustomerCancelsOften } from '@/lib/booking/alerts'
+import { openRescheduleOf, proposeCannotKeep, resolveReschedule } from '@/lib/booking/reschedule'
 import {
   WITHDRAWAL_DAYS,
   customerCancelOutcome,
@@ -200,6 +201,13 @@ export async function cancelConfirmedBooking(orderId: string, reason?: string | 
       }
     }
   } else {
+    // Poskytovatel oznámil, že původní termín nemůže dodržet → zrušení zákazníkem je odmítnutí nového termínu
+    // (AUTOREF-002, počítá se poskytovateli, ne jako zrušení zákazníkem)
+    if (await openRescheduleOf(db, order.id)) {
+      const res = await resolveReschedule(db, order, 'rejected')
+      revalidateOrder(orderId)
+      return res.ok ? { success: true } : { success: false, error: res.error }
+    }
     const outcome = await customerCancelOutcome(db, order)
     if (!outcome.allowed) return { success: false, error: 'Rezervaci teď nelze zrušit. Obnovte stránku.' }
     if (outcome.money === 'no_auto_refund') {
@@ -226,6 +234,7 @@ export async function cancelConfirmedBooking(orderId: string, reason?: string | 
       preview: withReason(`${orderName(order)} · ${amount ? `vrácení ${amount} bylo zahájeno.` : 'stav vrácení peněz najdete v objednávce.'}`, text),
     })
   } else {
+    await alertIfCustomerCancelsOften(order.customer_id)
     await createNotification({
       userId: order.provider_id,
       type: 'status_change',

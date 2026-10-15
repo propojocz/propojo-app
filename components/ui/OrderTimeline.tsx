@@ -38,9 +38,12 @@ export default function OrderTimeline({
   fulfillmentStatus = null,
   readyAt = null,
   handedOverAt = null,
+  v2 = null,
 }: {
   /** Model v2: stav rezervace s platbou. Když je vyplněný, osa se řídí jím, ne starými sloupci. */
   bookingState?: string | null
+  /** Model v2: podrobnosti pro osobní texty (kdo rušil, kde se služba koná) */
+  v2?: V2Info | null
   status: string
   depositStatus: string | null
   createdAt: string
@@ -88,7 +91,7 @@ export default function OrderTimeline({
   // ── MODEL V2: rezervace s předautorizací ─────────────────────────
   // „Potvrzeno“ až po úspěšném stržení platby (capture), nikdy dřív.
   if (bookingState && bookingState !== 'payment_expired') {
-    return <Osa kroky={v2Kroky(bookingState, createdAt, scheduledAt, isCustomer)} tema={V2_UKONCENE.includes(bookingState) ? 'zruseno' : 'normal'} />
+    return <Osa kroky={v2Kroky(bookingState, createdAt, scheduledAt, isCustomer, v2)} tema={V2_UKONCENE.includes(bookingState) ? 'zruseno' : 'normal'} />
   }
 
   const zaplaceno = depositStatus === 'paid' || depositStatus === 'released'
@@ -310,9 +313,70 @@ export default function OrderTimeline({
 
 const V2_UKONCENE = ['declined', 'expired', 'capture_failed', 'cancelled']
 
-function v2Kroky(state: string, createdAt: string, scheduledAt: string | null, isCustomer: boolean): Krok[] {
+export type V2Info = {
+  /** Platba byla stržena (orders.confirmed_at) */
+  captured: boolean
+  cancelReason: string | null
+  cancelledAt: string | null
+  /** Zákazník odstoupil od smlouvy */
+  withdrawn: boolean
+  /** Jméno druhé strany (zákazník vidí poskytovatele a naopak) */
+  otherName: string | null
+  /** Služba u zákazníka / výjezd (true), nebo u poskytovatele (false) */
+  atCustomer: boolean
+  /** Výjezd: termín je okno příjezdu */
+  arrivalWindow: boolean
+}
+
+/** Kdo rezervaci zrušil – osobně podle toho, kdo se dívá */
+function zruseniNadpis(v2: V2Info | null, isCustomer: boolean): { nadpis: string; popis: string | null } {
+  const jmeno = v2?.otherName ? ` – ${v2.otherName}` : ''
+  if (v2?.withdrawn) {
+    return isCustomer
+      ? { nadpis: 'Odstoupili jste od smlouvy', popis: 'Zaplacenou částku vám vrací poskytovatel do 14 dnů.' }
+      : { nadpis: `Zákazník odstoupil od smlouvy${jmeno}`, popis: 'Zaplacenou částku mu vraťte do 14 dnů.' }
+  }
+  switch (v2?.cancelReason) {
+    case 'provider_cancelled':
+      return isCustomer
+        ? { nadpis: `Zrušeno poskytovatelem${jmeno}`, popis: v2.captured ? 'Vrací se vám celá částka.' : null }
+        : { nadpis: 'Zrušili jste rezervaci', popis: v2.captured ? 'Zákazníkovi se vrací celá částka.' : null }
+    case 'customer_cancelled':
+      return isCustomer
+        ? { nadpis: 'Zrušili jste rezervaci', popis: v2.captured ? 'Vrací se vám celá částka.' : 'Nic nebylo strženo.' }
+        : { nadpis: `Zrušeno zákazníkem${jmeno}`, popis: v2.captured ? 'Zákazníkovi se vrací celá částka.' : 'Nic nebylo strženo.' }
+    case 'reschedule_rejected':
+    case 'reschedule_expired': {
+      const proc = v2.cancelReason === 'reschedule_rejected' ? 'odmítnut' : 'nepřijat včas'
+      return { nadpis: `Zrušeno – nový termín ${proc}`, popis: isCustomer ? 'Vrací se vám celá částka.' : 'Zákazníkovi se vrací celá částka.' }
+    }
+    default:
+      return { nadpis: 'Rezervace zrušena', popis: null }
+  }
+}
+
+/** Poslední krok osy: co se v termínu stane, podle role a místa */
+function terminPopis(v2: V2Info | null, isCustomer: boolean): string {
+  if (v2?.arrivalWindow) {
+    return isCustomer
+      ? 'Poskytovatel k vám přijede v okně příjezdu na zadanou adresu.'
+      : 'Dorazte k zákazníkovi v okně příjezdu – adresu najdete výše.'
+  }
+  if (v2?.atCustomer) {
+    return isCustomer
+      ? 'Poskytovatel k vám přijede v potvrzený termín na zadanou adresu.'
+      : 'Dorazte k zákazníkovi v potvrzený termín – adresu najdete výše.'
+  }
+  return isCustomer
+    ? 'Dostavte se v potvrzený termín na adresu poskytovatele (najdete ji výše).'
+    : 'Zákazník k vám přijde v potvrzený termín.'
+}
+
+function v2Kroky(state: string, createdAt: string, scheduledAt: string | null, isCustomer: boolean, v2: V2Info | null = null): Krok[] {
   const predautorizovano = state !== 'pending_payment'
-  const potvrzeno = state === 'confirmed' || state === 'no_show_reported' || state === 'no_show_disputed' || state === 'cancelled'
+  // Zrušená rezervace byla potvrzená jen tehdy, když se opravdu strhla platba
+  const potvrzeno = state === 'confirmed' || state === 'no_show_reported' || state === 'no_show_disputed'
+    || (state === 'cancelled' && (v2 ? v2.captured : true))
   const kroky: Krok[] = [
     { nadpis: 'Objednávka vytvořena', cas: fmt(createdAt), stav: 'hotovo' },
     { nadpis: 'Termín vybrán', cas: fmt(scheduledAt), stav: 'hotovo' },
@@ -345,13 +409,15 @@ function v2Kroky(state: string, createdAt: string, scheduledAt: string | null, i
   })
 
   if (state === 'cancelled') {
-    kroky.push({ nadpis: 'Rezervace zrušena', stav: 'hotovo' })
+    const z = zruseniNadpis(v2, isCustomer)
+    kroky.push({ nadpis: z.nadpis, popis: z.popis, cas: fmt(v2?.cancelledAt ?? null), stav: 'hotovo' })
     return kroky
   }
 
   kroky.push({
-    nadpis: 'Termín služby',
-    popis: potvrzeno ? (isCustomer ? 'Dostavte se v potvrzený termín.' : 'Proveďte službu v potvrzeném termínu.') : null,
+    nadpis: v2?.arrivalWindow ? 'Výjezd' : 'Termín služby',
+    cas: potvrzeno ? fmt(scheduledAt) : null,
+    popis: potvrzeno ? terminPopis(v2, isCustomer) : null,
     stav: potvrzeno ? 'ted' : 'ceka',
   })
   return kroky

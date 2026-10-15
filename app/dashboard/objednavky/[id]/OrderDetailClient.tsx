@@ -175,6 +175,7 @@ export default function OrderDetailClient({
   userId,
   platbaStav,
   hasTimeProposals = false,
+  withdrawn = false,
 }: {
   order: OrderRow
   myProfile: ProfileLite | null
@@ -186,6 +187,8 @@ export default function OrderDetailClient({
   userId: string
   platbaStav?: string | null
   hasTimeProposals?: boolean
+  /** Zákazník odstoupil od smlouvy (osobní text na časové ose) */
+  withdrawn?: boolean
 }) {
   const router = useRouter()
   const [messages, setMessages] = useState<MessageRow[]>(initialMessages)
@@ -1318,6 +1321,15 @@ export default function OrderDetailClient({
           fulfillmentStatus={order.product_fulfillment_status}
           readyAt={order.product_ready_at}
           handedOverAt={order.product_handed_over_at}
+          v2={bookingState ? {
+            captured: !!(order as any).confirmed_at,
+            cancelReason: (order as any).cancel_reason ?? null,
+            cancelledAt: (order as any).cancelled_at ?? null,
+            withdrawn,
+            otherName: otherProfile?.full_name ?? null,
+            atCustomer: !!atCustomer,
+            arrivalWindow: isModelB,
+          } : null}
         />
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

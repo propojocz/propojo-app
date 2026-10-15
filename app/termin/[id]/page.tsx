@@ -20,6 +20,7 @@ import { CalendarDays, Clock, MapPin, ArrowRight, CircleCheck, CircleAlert } fro
 import type { ServiceItem } from '@/types/database'
 import Avatar from '@/components/ui/Avatar'
 import SlotBooking from './SlotBooking'
+import ResumeBooking from './ResumeBooking'
 import type { Metadata } from 'next'
 
 interface Props { params: { id: string } }
@@ -233,12 +234,16 @@ export default async function TerminPage({ params }: Props) {
                 ? 'Termín pro vás krátce držíme. Zbývá potvrdit údaje a zaplatit.'
                 : 'Stav rezervace najdete v detailu objednávky.'}
             </p>
-            <Link
-              href={`/dashboard/objednavky/${myOrder.id}${myOrderNeedsPayment ? '?platba=pruvodce' : ''}`}
-              className="mt-4 inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-2.5 font-bold text-white transition hover:bg-emerald-600"
-            >
-              {myOrderNeedsPayment ? 'Pokračovat k dokončení' : 'Detail rezervace'} <ArrowRight className="h-4 w-4" />
-            </Link>
+            {myOrderNeedsPayment ? (
+              <ResumeBooking orderId={myOrder.id} />
+            ) : (
+              <Link
+                href={`/dashboard/objednavky/${myOrder.id}`}
+                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-2.5 font-bold text-white transition hover:bg-emerald-600"
+              >
+                Detail rezervace <ArrowRight className="h-4 w-4" />
+              </Link>
+            )}
           </div>
         ) : gone ? (
           <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-6 text-center">

@@ -69,7 +69,7 @@ export default function BookingAfterPayment({
   const castka = `${amountKc.toLocaleString('cs-CZ')} Kč`
   const [rOpen, setROpen] = useState(false)
   const [rStart, setRStart] = useState('')
-  const [rDur, setRDur] = useState(String(reschedule?.durationMin || 60))
+  const rDur = String(reschedule?.durationMin || 60)
   const [rNote, setRNote] = useState('')
   const [refOpen, setRefOpen] = useState(false)
   const [refAmount, setRefAmount] = useState(String(providerRefundMaxKc || ''))
@@ -187,18 +187,16 @@ export default function BookingAfterPayment({
             (nejpozději do začátku původního termínu) nezareaguje, rezervace se zruší a zákazníkovi se z vašeho Stripe účtu
             vrátí celá částka {castka}. Nepřijatý termín se započítává do důvěryhodnosti účtu.
           </p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            <label className="block text-xs font-semibold text-slate-600">
-              Nový začátek
-              <input type="datetime-local" value={rStart} onChange={(e) => setRStart(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-amber-400" />
-            </label>
-            <label className="block text-xs font-semibold text-slate-600">
-              Délka (minuty)
-              <input type="number" min={15} step={15} value={rDur} onChange={(e) => setRDur(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-amber-400" />
-            </label>
-          </div>
+          <label className="mt-3 block text-xs font-semibold text-slate-600">
+            Nový termín – začátek
+            <input type="datetime-local" value={rStart} onChange={(e) => setRStart(e.target.value)}
+              className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-amber-400 sm:w-72" />
+          </label>
+          <p className="mt-1 text-xs text-slate-400">
+            {offerKind === 'B'
+              ? `Okno příjezdu zůstane stejně dlouhé jako původní (${rDur} min).`
+              : `Délka zůstane stejná jako u původního termínu (${rDur} min).`}
+          </p>
           <label className="mt-2 block text-xs font-semibold text-slate-600">
             Zpráva zákazníkovi <span className="font-normal text-slate-400">(nepovinné)</span>
             <textarea value={rNote} onChange={(e) => setRNote(e.target.value)} maxLength={500} rows={2}

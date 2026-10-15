@@ -282,7 +282,10 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
           }
         : null
       // Poskytovatel: ruční vrácení a co ho stojí zrušení (provize + poplatek Stripe se nevracejí)
-      const providerRefundMaxKc = isProvider ? (await refundableHalere(db, bo)) / 100 : 0
+      // „Vrátit peníze“ jen u rezervace, která už neběží (zrušená, odstoupení) nebo po termínu –
+      // u platné rezervace před termínem se ruší tlačítkem „Zrušit rezervaci“ (to vrací celou částku samo)
+      const stillUpcoming = bo.booking_state === 'confirmed' && (!bo.scheduled_end || new Date(bo.scheduled_end).getTime() > Date.now())
+      const providerRefundMaxKc = isProvider && !stillUpcoming ? (await refundableHalere(db, bo)) / 100 : 0
       const cost = isProvider ? await cancellationCostHalere(bo) : null
       afterPayment = {
         providerCanCancel: isProvider && providerCancelCheck(bo).allowed,
@@ -492,6 +495,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
         isProvider={isProvider}
         userId={user.id}
         platbaStav={searchParams.platba ?? null}
+        withdrawn={afterPayment?.withdrawal?.mode === 'done'}
       />
     </div>
   )
