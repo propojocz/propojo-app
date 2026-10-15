@@ -117,15 +117,6 @@ export default async function Navbar() {
               Poptávky
             </Link>
 
-            {/* Úzký telefon: zelená ikona jako ostatní ikony v liště */}
-            <Link
-              href="/marketplace"
-              aria-label="Marketplace"
-              title="Marketplace"
-              className="flex h-9 w-9 items-center justify-center rounded-full text-emerald-600 transition hover:bg-emerald-50 min-[430px]:hidden"
-            >
-              <Store className="h-5 w-5" />
-            </Link>
             <Link
               href="/marketplace"
               className="hidden items-center whitespace-nowrap rounded-full bg-emerald-500 px-4 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-all hover:bg-emerald-600 hover:shadow-md min-[430px]:inline-flex sm:px-6 sm:text-sm"
@@ -148,6 +139,15 @@ export default async function Navbar() {
 
           {/* VPRAVO — zvoneček + pilulka ☰ profil */}
           <div className="flex items-center justify-end gap-0.5 sm:gap-1.5">
+            {/* Úzký telefon: Marketplace jako zelená ikona ve stejné řadě a se stejnými rozestupy jako ostatní */}
+            <Link
+              href="/marketplace"
+              aria-label="Marketplace"
+              title="Marketplace"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-emerald-600 transition hover:bg-emerald-50 min-[430px]:hidden"
+            >
+              <Store className="h-5 w-5" />
+            </Link>
             {user && isProvider && <QuickSlotButton />}
             {user && <InboxButton />}
             {user && <UpcomingDrawer />}

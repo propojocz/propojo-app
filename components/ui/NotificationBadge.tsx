@@ -89,7 +89,7 @@ export default function NotificationBadge() {
     <div ref={wrapRef} className="relative sm:ml-1">
       <button
         onClick={toggleOpen}
-        className="relative rounded-xl p-2 text-slate-600 transition-colors hover:bg-slate-100"
+        className="relative flex h-9 w-9 items-center justify-center rounded-full text-slate-600 transition-colors hover:bg-slate-100 sm:h-10 sm:w-10"
         title="Oznámení"
         aria-label="Oznámení"
       >

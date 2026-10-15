@@ -171,6 +171,23 @@ volitelně. Snižuje odpor („barber nechce administrativu“) a nevyžaduje re
 Doporučení pro V1: ano (firma se 2 pobočkami má karty pro každou pobočku; ceník lze kopírovat). Karta sdílená
 více pobočkami s výběrem pobočky v rezervaci = V2.
 
+## Rozhodnutí Mateje k ADN (15. 10. 2026)
+
+**ADN-1 → konkrétní pracovník + proklik na salon.** Zákazník si primárně vybírá konkrétního pracovníka (holiče).
+Když nemá čas, zákazník se proklikne na salon, kde vidí ostatní pracovníky. Profil salonu spravuje recepční / majitel.
+- Pracovník si buduje vlastní jméno a hodnocení. **Salon nemá vlastní hodnocení – počítá se jen z hodnocení jeho pracovníků.**
+- Když pracovník odejde (k jinému salonu nebo na sebe), změní si v profilu salon a **jeho vlastní hodnocení mu zůstane**.
+- Otevřené: dva režimy, které se zákazníkovi tváří stejně – (A) zaměstnanci salonu (smluvní strana a Stripe = salon)
+  a (B) samostatní holiči s vlastním IČO a Stripe pod značkou salonu (dnešní „Značka“). Smluvní strana = držitel Stripe účtu a IČO,
+  ukázaný ve shrnutí (bez otázky pro AK). Otevřené jen hodnocení (podklad VOP, C 19).
+
+**ADN-2 → a)** Pracovník může být jen jméno spravované majitelem / recepcí – **zobrazí se jen křestní jméno** (bez fotky). Produktově ale směřujeme k tomu, aby měli
+pracovníci vlastní účet a profil, kde sbírají body a hodnocení (motivace: přenosná reputace).
+
+**ADN-3 → jedna karta = jedna pobočka, nad pobočkami společnost.** Např. Wallachian Barber má pobočku v Rožnově a ve Valmezu;
+majitel / recepční spravuje obě v jednom kalendáři. Volba společnosti: pracovníci **se přesouvají mezi pobočkami**
+(jeden společný kalendář pracovníka přes pobočky, kolize se hlídají napříč) / **nepřesouvají** (pracovník patří k jedné pobočce).
+
 ## LEGAL_REVIEW_NEEDED
 - Souhlas zákazníka se změnou konkrétního pracovníka (`specific_required`) a co přesně je „interní zdroj“.
 - Viditelnost údajů zákazníka jednotlivým pracovníkům a recepci (Poskytovatel = správce, pracovníci = jeho lidé;
