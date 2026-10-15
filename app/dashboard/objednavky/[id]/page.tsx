@@ -17,8 +17,9 @@ import { markThreadRead } from '@/lib/actions/inbox'
 import TimePreferenceForm from '@/components/ui/TimePreferenceForm'
 import BookingAfterPayment, { type RefundView } from '@/components/ui/BookingAfterPayment'
 import { customerCancelOutcome, noAutoRefundText, providerCancelCheck, withdrawalInfo } from '@/lib/booking/cancellation'
-import { orderRefunds } from '@/lib/booking/refunds'
-import { datum, datumCas } from '@/lib/format'
+import { cancellationCostHalere, orderRefunds, refundableHalere } from '@/lib/booking/refunds'
+import { canDeclareCannotKeep, openRescheduleOf } from '@/lib/booking/reschedule'
+import { datum, datumCas, terminDlouze } from '@/lib/format'
 
 interface Props { params: { id: string }; searchParams: { platba?: string; rezervovat?: string } }
 
@@ -119,7 +120,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
   // Návrat ze Stripe přes „zpět" nic automaticky neruší.
   // Zákazník může platbu zkusit znovu; jiný termín uvolní až explicitním tlačítkem.
 
-  const ORDER_SELECT = '*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee, location_type, address, address_lat, address_lng, address_public, phone), service_items(name, price, price_unit, deposit_amount, deposit_type, payment_model, duration_minutes, quote_fee, fee_mode, item_type, stock_mode, lead_time_days, pickup_mode, pickup_timing, offer_kind, quote_fee_deductible)'
+  const ORDER_SELECT = '*, services(id, title, price, price_unit, category, city, description, payment_model, deposit_amount, quote_fee, location_type, address, address_lat, address_lng, address_public, phone), service_items(name, price, price_type, price_unit, deposit_amount, deposit_type, payment_model, duration_minutes, quote_fee, fee_mode, item_type, stock_mode, lead_time_days, pickup_mode, pickup_timing, offer_kind, quote_fee_deductible)'
 
   const { data: order, error } = await supabase
     .from('orders')
@@ -247,6 +248,9 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
     customerCancel: { mode: 'auto' } | { mode: 'none'; text: string } | null
     withdrawal: { mode: 'available'; untilText: string } | { mode: 'done'; atText: string } | null
     refunds: RefundView[]
+    reschedule: { open: { proposedText: string; expiresText: string } | null; canDeclare: boolean; durationMin: number } | null
+    providerRefundMaxKc: number
+    cancelCost: { commissionKc: number; stripeFeeKc: number | null } | null
   } | null = null
   if ((order as any).confirmed_at && v2BookingState) {
     const db = adminDb()
@@ -265,11 +269,29 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
       const withdrawal = w.available
         ? (isProvider ? null : { mode: 'available' as const, untilText: datum(w.until) })
         : w.reason === 'already' && w.at ? { mode: 'done' as const, atText: datumCas(w.at) } : null
+      // „Nemohu dodržet termín“ (část 3)
+      const openR = bo.booking_state === 'confirmed' ? await openRescheduleOf(db, bo.id) : null
+      const durationMin = bo.scheduled_at && bo.scheduled_end
+        ? Math.max(15, Math.round((new Date(bo.scheduled_end).getTime() - new Date(bo.scheduled_at).getTime()) / 60_000))
+        : 60
+      const reschedule = openR || (isProvider && canDeclareCannotKeep(bo))
+        ? {
+            open: openR ? { proposedText: terminDlouze(openR.proposedStart), expiresText: datumCas(openR.expiresAt) } : null,
+            canDeclare: isProvider && canDeclareCannotKeep(bo),
+            durationMin,
+          }
+        : null
+      // Poskytovatel: ruční vrácení a co ho stojí zrušení (provize + poplatek Stripe se nevracejí)
+      const providerRefundMaxKc = isProvider ? (await refundableHalere(db, bo)) / 100 : 0
+      const cost = isProvider ? await cancellationCostHalere(bo) : null
       afterPayment = {
         providerCanCancel: isProvider && providerCancelCheck(bo).allowed,
         customerCancel,
         withdrawal,
         refunds,
+        reschedule,
+        providerRefundMaxKc,
+        cancelCost: cost ? { commissionKc: cost.commission / 100, stripeFeeKc: cost.stripeFee != null ? cost.stripeFee / 100 : null } : null,
       }
     }
   }
@@ -408,6 +430,9 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
           customerCancel={afterPayment.customerCancel}
           withdrawal={afterPayment.withdrawal}
           refunds={afterPayment.refunds}
+          reschedule={afterPayment.reschedule}
+          providerRefundMaxKc={afterPayment.providerRefundMaxKc}
+          cancelCost={afterPayment.cancelCost}
         />
       )}
 

@@ -1,6 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
+import { restOnSiteKc } from '@/lib/booking/texts'
 import { useRouter } from 'next/navigation'
 import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2, CreditCard, ShieldCheck, Clock, XCircle, Flag, AlertTriangle, ImagePlus, X, RotateCcw, Package } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -301,6 +302,10 @@ export default function OrderDetailClient({
   // Objednávka položky nového modelu (má typ nabídky) – platí se Rezervační poplatek / Cena výjezdu
   // Typ se na objednávku zapíše až při platbě – do té doby rozhoduje typ položky.
   const jeV2Polozka = !!(order as any).offer_kind || !!(order as any).service_items?.offer_kind || bookingState !== null
+  // Služba s pevnou cenou: „zbytek X Kč na místě“ (jen informace z ceníku, doplatek Propojo nevybírá)
+  const zbytekNaMiste = jeV2Polozka && !isModelB && !bezPolozky
+    ? restOnSiteKc('A', item as any, (order as any).charge_halere != null ? Number((order as any).charge_halere) / 100 : depositAmount)
+    : null
   // Štítek v hlavičce: u nového modelu podle booking_state („Potvrzeno“ až po stržení platby).
   const statusBadge = bookingStatusBadge({
     status: order.status,
@@ -538,7 +543,11 @@ export default function OrderDetailClient({
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h1 className="text-xl font-black text-slate-900">{service?.title ?? 'Neznámá služba'}</h1>
+              <h1 className="text-xl font-black text-slate-900">
+                {service?.id
+                  ? <Link href={`/sluzby/${service.id}`} className="hover:text-emerald-700 hover:underline">{service.title}</Link>
+                  : (service?.title ?? 'Neznámá služba')}
+              </h1>
               <p className="mt-1 text-sm text-slate-500">
                 Vytvořeno {datumCas(order.created_at)}
               </p>
@@ -583,6 +592,13 @@ export default function OrderDetailClient({
                     ? 'odečte se z ceny zakázky'
                     : 'do ceny zakázky se nezapočítává'}
               </span>
+              {zbytekNaMiste && (
+                <span className="mt-0.5 block">
+                  Zbytek <strong>{zbytekNaMiste.restKc.toLocaleString('cs-CZ')} Kč</strong>{' '}
+                  {isProvider ? 'vám zákazník zaplatí na místě' : 'zaplatíte poskytovateli na místě'}
+                  <span className="opacity-80"> (cena služby {zbytekNaMiste.totalKc.toLocaleString('cs-CZ')} Kč podle ceníku)</span>
+                </span>
+              )}
             </div>
           )}
           {!jeV2Polozka && !isModelB && depositType !== 'bez_platby' && depositAmount > 0 && (

@@ -266,6 +266,9 @@ export const ORDER_EVENT_TYPES = [
   'refund_skipped',
   'withdrawal_requested',
   'withdrawal_confirmation_sent',
+  'booking_confirmation_sent', // potvrzení rezervace e-mailem (VOP 8.3)
+  'capture_amount_mismatch', // stržená částka ≠ blokovaná (úkon ve Stripe Dashboardu)
+  'reschedule_reminder_sent',
 ] as const
 
 export type OrderEventType = (typeof ORDER_EVENT_TYPES)[number]

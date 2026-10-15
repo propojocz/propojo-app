@@ -29,6 +29,7 @@ import {
   paymentLabel,
   paymentMeaning,
   quoteFeeDeductionNote,
+  restOnSiteKc,
 } from '@/lib/booking/texts'
 import { createClient } from '@/lib/supabase/server'
 import { createNotification } from '@/lib/actions/notifications'
@@ -37,7 +38,8 @@ import { updateOrderStatus } from '@/lib/actions/orders'
 import { sendEmail } from '@/lib/email/send'
 import { bookingCancelledEmail } from '@/lib/email/templates'
 import { terminDlouze } from '@/lib/format'
-import { runAutoRefund } from '@/lib/booking/refunds'
+import { runAutoRefund, runProviderRefund } from '@/lib/booking/refunds'
+import { proposeCannotKeep, resolveReschedule } from '@/lib/booking/reschedule'
 import {
   WITHDRAWAL_DAYS,
   customerCancelOutcome,
@@ -369,6 +371,8 @@ export type BookingRecap = {
   itemName: string
   paymentLabel: string
   chargeKc: number
+  /** Služba s pevnou cenou: cena podle ceníku a zbytek k doplacení na místě */
+  restOnSite: { totalKc: number; restKc: number } | null
   /** Cena z nabídky, když ji poskytovatel u této objednávky upravil (jinak null) */
   originalChargeKc: number | null
   /** Důvod úpravy ceny od poskytovatele */
@@ -430,7 +434,7 @@ export async function getBookingRecap(
 
   const { data: row } = await db
     .from('orders')
-    .select('service_location, location_address, location_lat, location_lng, location_city, provider_place_address, provider_place_lat, provider_place_lng, agreed_charge_halere, offer_kind, service_item_id, quote_fee_deductible, service_items(name, offer_kind, deposit_amount, quote_fee, deposit_type, quote_fee_deductible), services(title, location_type, address, address_lat, address_lng, city, phone)')
+    .select('service_location, location_address, location_lat, location_lng, location_city, provider_place_address, provider_place_lat, provider_place_lng, agreed_charge_halere, offer_kind, service_item_id, quote_fee_deductible, service_items(name, offer_kind, deposit_amount, quote_fee, deposit_type, quote_fee_deductible, price, price_type, price_unit), services(title, location_type, address, address_lat, address_lng, city, phone)')
     .eq('id', orderId)
     .maybeSingle()
   const o = row as any
@@ -533,6 +537,7 @@ export async function getBookingRecap(
       itemName: item.name ?? o.services?.title ?? 'Služba',
       paymentLabel: paymentLabel(charge.offerKind),
       chargeKc: charge.commission.chargeHalere / 100,
+      restOnSite: restOnSiteKc(charge.offerKind, itemless ? null : item, charge.commission.chargeHalere / 100),
       originalChargeKc,
       priceNote: originalChargeKc != null ? priceNote : null,
       paymentMeaning: paymentMeaning(charge.offerKind, item.quote_fee_deductible === true),
@@ -547,9 +552,9 @@ export async function getBookingRecap(
       paymentShortManual: PAYMENT_SHORT,
       cancellationRulesAuto: cancellationRules(charge.offerKind, true),
       cancellationRulesManual: cancellationRules(charge.offerKind, false),
-      consentText: recapCheckbox(charge.offerKind),
-      consentWhy: recapCheckboxWhy(charge.offerKind),
-      withdrawalNote: withdrawalNote(charge.offerKind),
+      consentText: recapCheckbox(charge.offerKind, proposalStart ?? order.scheduled_at),
+      consentWhy: recapCheckboxWhy(charge.offerKind, proposalStart ?? order.scheduled_at),
+      withdrawalNote: withdrawalNote(charge.offerKind, proposalStart ?? order.scheduled_at),
       submitLabel: submitLabel(charge.commission.chargeHalere / 100),
       scheduledAt: order.scheduled_at,
       scheduledEnd: order.scheduled_end,
@@ -596,7 +601,8 @@ export async function startBookingPayment(
   const { data: row } = await db.from('orders').select('agreed_charge_halere, offer_kind, quote_fee_deductible, service_items(offer_kind, quote_fee_deductible)').eq('id', orderId).maybeSingle()
   const kind = (row as any)?.service_items?.offer_kind ?? (row as any)?.offer_kind
   if (!isOfferKind(kind)) return { success: false, error: 'Tuto objednávku nelze v novém modelu rezervovat.' }
-  if (recapCheckbox(kind) && !consent) {
+  const checkbox = recapCheckbox(kind, order.scheduled_at)
+  if (checkbox && !consent) {
     return { success: false, error: 'Pro pokračování prosím zaškrtněte políčko ve shrnutí.' }
   }
 
@@ -604,7 +610,8 @@ export async function startBookingPayment(
   const ip = (h.get('x-forwarded-for') ?? '').split(',')[0].trim() || null
   const userAgent = h.get('user-agent')
 
-  if (kind === 'B') {
+  // Výjezd vždy, služba s termínem do 14 dní: žádost o provedení před uplynutím lhůty pro odstoupení
+  if ((kind === 'A' || kind === 'B') && checkbox && consent) {
     const { error } = await db.from('booking_consents').insert({
       user_id: userId,
       kind: 'customer_early_performance_request',
@@ -623,7 +630,7 @@ export async function startBookingPayment(
   await logOrderEvent(db, orderId, 'recap_accepted', { type: 'customer', id: userId }, {
     document_version: RECAP_DOCUMENT_VERSION,
     offer_kind: kind,
-    checkbox: recapCheckbox(kind),
+    checkbox,
     confirmed: consent,
     // Cena upravená poskytovatelem, kterou zákazník přijal (null = cena z nabídky)
     agreed_charge_halere: (row as any)?.agreed_charge_halere ?? null,
@@ -704,4 +711,49 @@ export async function getUpcomingBookings(): Promise<UpcomingBooking[]> {
       place,
     }
   })
+}
+// ─── „Původní termín nemohu dodržet“ (vrstva 4, část 3 – AUTOREF-002) ─────────
+
+export async function declareCannotKeep(orderId: string, startIso: string, endIso: string, note?: string | null): Promise<Result> {
+  const ctx = await loadForUser(orderId)
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  const { db, order, by } = ctx
+  if (by !== 'provider') return { success: false, error: 'Termín mění poskytovatel.' }
+  const start = new Date(startIso)
+  const end = new Date(endIso)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return { success: false, error: 'Vyberte nový termín.' }
+  const res = await proposeCannotKeep(db, order, { start, end, note: note ?? null })
+  revalidateOrder(orderId)
+  return res.ok ? { success: true } : { success: false, error: res.error }
+}
+
+export async function answerReschedule(orderId: string, accept: boolean): Promise<Result> {
+  const ctx = await loadForUser(orderId)
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  const { db, order, by } = ctx
+  if (by !== 'customer') return { success: false, error: 'Na nový termín odpovídá zákazník.' }
+  const res = await resolveReschedule(db, order, accept ? 'accepted' : 'rejected')
+  revalidateOrder(orderId)
+  return res.ok ? { success: true } : { success: false, error: res.error }
+}
+
+// ─── Vrácení peněz poskytovatelem („Vrátit peníze zákazníkovi“) ─────────────
+
+export async function refundByProvider(orderId: string, amountKc: number): Promise<Result> {
+  const ctx = await loadForUser(orderId)
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  const { db, order, by, userId } = ctx
+  if (by !== 'provider') return { success: false, error: 'Peníze vrací poskytovatel.' }
+  const res = await runProviderRefund(db, order, Math.round(Number(amountKc) * 100))
+  if (!res.ok) return { success: false, error: res.error }
+  await createNotification({
+    userId: order.customer_id,
+    type: 'status_change',
+    orderId,
+    actorId: userId,
+    title: 'Poskytovatel vám vrací peníze',
+    preview: `${orderName(order)} · ${Number(amountKc).toLocaleString('cs-CZ')} Kč. Banka je může připsat až za několik pracovních dnů.`,
+  })
+  revalidateOrder(orderId)
+  return { success: true }
 }

@@ -5,18 +5,41 @@
 // před uplynutím lhůty pro odstoupení potvrdí právnička. Po jejím stanovisku se mění jen
 // tento soubor a RECAP_DOCUMENT_VERSION (ukládá se k souhlasu do booking_consents).
 
-import type { OfferKind } from './policy'
+import { BOOKING_POLICY, type OfferKind } from './policy'
 
 /** Verze znění rekapitulace a souhlasu. Při každé změně textů zvýšit. */
-export const RECAP_DOCUMENT_VERSION = 'recap-2026-10-10-v7'
+export const RECAP_DOCUMENT_VERSION = 'recap-2026-10-15-v8'
 
 // Podle pracovních VOP (v4.1, 3. 10. 2026), čl. 9:
-//  A služba – zákazník může od Rezervační smlouvy odstoupit do 14 dnů; nic se nezaškrtává, jen poučení.
+//  A služba – zákazník může od Rezervační smlouvy odstoupit do 14 dnů. U termínu do 14 dní navíc výslovná
+//    žádost o provedení před uplynutím lhůty (§ 1837 písm. a OZ) – provedením služby právo zaniká
+//    (Matej 15. 10. 2026, LEGAL_REVIEW_NEEDED: VOP 4.1 u služby počítá jen s poučením). Termín za víc než
+//    14 dní: jen poučení, lhůta skončí dřív, než služba proběhne.
 //  B výjezd – výslovná žádost o provedení před uplynutím lhůty + poučení o zániku práva (čl. 9.6).
 //  C výrobek na míru – právo odstoupit nevzniká; zákazník to musí před odesláním potvrdit (čl. 9.2, 9.3).
 
+// Lhůta pro odstoupení běží od potvrzení (stržení), ne od platby – poskytovatel může potvrzovat až
+// confirmationWindowHours. Proto se k 14 dnům přičítá i lhůta k potvrzení (jinak by u termínu za ~14,5 dne
+// mohla lhůta skončit až po službě, aniž by zákazník o provedení požádal).
+const WITHDRAWAL_WINDOW_MS = (14 * 24 + BOOKING_POLICY.confirmationWindowHours) * 3600_000
+
+/**
+ * Služba: termín může začít dřív, než uplyne 14denní lhůta pro odstoupení → je potřeba žádost o provedení.
+ * Neznámý termín se bere jako blízký (raději pole ukázat, než ho na serveru nečekaně vyžadovat).
+ */
+export function serviceNeedsEarlyRequest(start: Date | string | null | undefined, now = new Date()): boolean {
+  if (!start) return true
+  const t = new Date(start).getTime()
+  return Number.isNaN(t) || t - now.getTime() < WITHDRAWAL_WINDOW_MS
+}
+
 /** Zaškrtávací pole před odesláním (null = u tohoto typu se nic nepotvrzuje) */
-export function recapCheckbox(kind: OfferKind): string | null {
+export function recapCheckbox(kind: OfferKind, start?: Date | string | null): string | null {
+  if (kind === 'A') {
+    return serviceNeedsEarlyRequest(start)
+      ? 'Chci, aby služba proběhla v tomto termínu, i když je to dřív než za 14 dní. Beru na vědomí, že provedením služby právo odstoupit zaniká.'
+      : null
+  }
   if (kind === 'B') {
     return 'Chci, aby výjezd proběhl v tomto termínu, i když je to dřív než za 14 dní. Beru na vědomí, že provedením výjezdu právo odstoupit zaniká.'
   }
@@ -25,7 +48,12 @@ export function recapCheckbox(kind: OfferKind): string | null {
 }
 
 /** Rozbalovací „Proč?“ u zaškrtávacího pole */
-export function recapCheckboxWhy(kind: OfferKind): string | null {
+export function recapCheckboxWhy(kind: OfferKind, start?: Date | string | null): string | null {
+  if (kind === 'A') {
+    return serviceNeedsEarlyRequest(start)
+      ? 'Ze zákona máte 14 dní na odstoupení. Bez této žádosti by služba mohla proběhnout až po nich. Do začátku termínu můžete rezervaci zrušit a poplatek se vám vrátí.'
+      : null
+  }
   if (kind === 'B') {
     return 'Ze zákona máte 14 dní na odstoupení. Bez této žádosti by výjezd mohl proběhnout až po nich. Když odstoupíte po zahájení výjezdu, platíte jeho poměrnou část.'
   }
@@ -33,9 +61,11 @@ export function recapCheckboxWhy(kind: OfferKind): string | null {
   return null
 }
 
-/** Krátké poučení u služby (bez zaškrtávání) */
-export function withdrawalNote(kind: OfferKind): string | null {
-  return kind === 'A' ? 'Od rezervace můžete do 14 dnů odstoupit, poskytovatel vám pak poplatek vrátí.' : null
+/** Krátké poučení u služby s termínem za víc než 14 dní (bez zaškrtávání) */
+export function withdrawalNote(kind: OfferKind, start?: Date | string | null): string | null {
+  return kind === 'A' && !serviceNeedsEarlyRequest(start)
+    ? 'Od rezervace můžete do 14 dnů odstoupit, poskytovatel vám pak poplatek vrátí.'
+    : null
 }
 
 /** Text tlačítka: musí být jasné, že odesláním vzniká povinnost zaplatit, i s částkou (VOP čl. 7.9) */
@@ -111,6 +141,23 @@ export function cancellationRules(kind: OfferKind, autoConfirm = false): string[
     ]
   }
   return [...common, 'Po potvrzení můžete rezervaci zrušit s vrácením celé částky do začátku termínu.']
+}
+
+/**
+ * Služba s pevnou cenou za úkon: kolik zákazník doplatí poskytovateli na místě („400 Kč teď, zbytek 450 Kč na místě“).
+ * Jen informace z ceníku – doplatek Propojo nevybírá ani neeviduje (model §19). Jinde (hodinová sazba,
+ * rozmezí, cena dohodou, výjezd) přesnou částku dopředu neznáme → null.
+ */
+export function restOnSiteKc(
+  kind: OfferKind,
+  item: { price?: number | null; price_type?: string | null; price_unit?: string | null } | null | undefined,
+  chargeKc: number,
+): { totalKc: number; restKc: number } | null {
+  if (kind !== 'A' || !item) return null
+  if (item.price_type !== 'fixed' || item.price_unit !== 'ukon') return null
+  const total = Number(item.price ?? 0)
+  if (!(total > chargeKc)) return null
+  return { totalKc: total, restKc: Math.round((total - chargeKc) * 100) / 100 }
 }
 
 export const PAYMENT_NOTE =

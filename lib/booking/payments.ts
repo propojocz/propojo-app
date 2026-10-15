@@ -23,7 +23,8 @@ import { finalizeRequestSelection, requestStillAvailable } from './request-selec
 import { providerTrust } from './trust'
 import { alertAdmins } from './alerts'
 import { AUTOREF_CATALOG_VERSION } from './texts'
-import { notifyRefundFailed, notifyRefundSucceeded } from './refunds'
+import { notifyRefundFailed, notifyRefundSucceeded, runAutoRefund } from './refunds'
+import { sendBookingConfirmedEmail } from './notices'
 import {
   confirmationDeadline,
   isAuthorizationTooLate,
@@ -789,6 +790,56 @@ export async function handleCaptured(db: Db, accountId: string, pi: Stripe.Payme
       : order.booking_state === 'awaiting_confirmation' ? 'external_capture'
         : null
 
+  // Stržena jiná částka, než byla zablokovaná (částečný capture ve Stripe Dashboardu) = porušení pravidel
+  // (stanovisko AK) – zapsat a upozornit admina. Stav se řídí dál podle Stripe.
+  const blocked = Number(order.charge_halere ?? pi.amount)
+  if (event && pi.amount_received !== blocked) {
+    await logOrderEvent(db, order.id, 'capture_amount_mismatch', { type: 'stripe' }, { blocked, received: pi.amount_received })
+    await alertAdmins({
+      title: 'Stržena jiná částka, než byla zablokovaná',
+      preview: `${orderName(order)} · zablokováno ${blocked / 100} Kč, strženo ${pi.amount_received / 100} Kč (Stripe Dashboard).`,
+      url: `/dashboard/objednavky/${order.id}`,
+      actorId: order.provider_id,
+    })
+  }
+
+  // AUTOREF-005: poskytovatel strhl platbu ve Stripe až po uplynutí lhůty k potvrzení → Rezervační smlouva
+  // nevznikla, rezervace propadá a celá částka se automaticky vrací (provize se nevrací – nese ji poskytovatel).
+  const deadline = toDate(order.confirm_deadline_at)
+  if (event === 'external_capture' && deadline && capturedAt.getTime() > deadline.getTime()) {
+    const r = await applyTransition(db, order, 'confirmation_expired', { type: 'stripe' }, {
+      extra: { confirmed_at: capturedAt.toISOString() },
+      payload: { payment_intent: pi.id, capture_after_deadline: true },
+    })
+    if (!r.ok) return
+    await recordCapture(db, order, accountId, pi, capturedAt)
+    await runAutoRefund(db, order, 'capture_after_deadline', 'system')
+    const nazev = orderName(order)
+    await notify({
+      userId: order.customer_id,
+      type: 'status_change',
+      orderId: order.id,
+      actorId: order.provider_id,
+      title: 'Rezervace nevznikla – peníze se vrací',
+      preview: `${nazev} · poskytovatel platbu strhl až po lhůtě k potvrzení. Celá částka se vám automaticky vrací.`,
+    })
+    await notify({
+      userId: order.provider_id,
+      type: 'status_change',
+      orderId: order.id,
+      actorId: order.customer_id,
+      title: 'Platba stržena po lhůtě – vrací se zákazníkovi',
+      preview: `${nazev} · lhůta k potvrzení už uplynula, rezervace nevznikla. Částka se zákazníkovi vrací z vašeho účtu, provize ani poplatek Stripe se nevracejí.`,
+    })
+    await alertAdmins({
+      title: 'Stržení platby po lhůtě (AUTOREF-005)',
+      preview: `${nazev} · automatické vrácení zahájeno.`,
+      url: `/dashboard/objednavky/${order.id}`,
+      actorId: order.provider_id,
+    })
+    return
+  }
+
   if (event) {
     const r = await applyTransition(db, order, event, { type: event === 'external_capture' ? 'stripe' : 'system' }, {
       extra: { confirmed_at: capturedAt.toISOString() },
@@ -796,6 +847,8 @@ export async function handleCaptured(db: Db, accountId: string, pi: Stripe.Payme
     })
     if (!r.ok) return
     await recordCapture(db, order, accountId, pi, capturedAt)
+    // Potvrzení e-mailem na trvalém nosiči (VOP 8.3) – i při potvrzení ve Stripe a automatickém potvrzení
+    await sendBookingConfirmedEmail(db, order)
     const nazev = orderName(order)
     await notify({
       userId: order.customer_id,

@@ -822,3 +822,82 @@ export function refundFailedEmail(data: {
     `),
   }
 }
+
+/**
+ * Potvrzení Rezervace → ZÁKAZNÍKOVI (VOP čl. 8.3 – trvalý nosič). Posílá se po úspěšném stržení platby,
+ * ať rezervaci potvrdil poskytovatel v aplikaci, ve Stripe, nebo se potvrdila sama (termín od poskytovatele).
+ */
+export function bookingConfirmedEmail(data: {
+  provider: { displayName: string; legalName?: string | null; ico?: string | null; phone?: string | null; email?: string | null }
+  serviceTitle: string
+  termText: string | null
+  placeText: string | null
+  paymentLabel: string
+  amountText: string
+  paymentMeaning: string
+  cancellationRules: string[]
+  withdrawalText: string | null
+  orderUrl: string
+}): { subject: string; html: string } {
+  return {
+    subject: `Rezervace potvrzena: ${data.serviceTitle}`,
+    html: emailWrapper(`
+      ${heading('Rezervace je potvrzená', 'Poskytovatel rezervaci potvrdil a platba byla stržena. Tím vznikla Rezervační smlouva mezi vámi a poskytovatelem. Tento e-mail si uschovejte.')}
+
+      ${providerIdentityBlock(data.provider)}
+
+      ${detailBox([
+        ['Služba', data.serviceTitle],
+        ['Termín', data.termText],
+        ['Místo', data.placeText],
+        [data.paymentLabel, data.amountText],
+      ])}
+
+      <p style="margin:0 0 14px;color:${C.slate};font-size:14px;line-height:1.6;">${data.paymentMeaning}</p>
+
+      <p style="margin:0 0 6px;color:${C.ink};font-size:14px;font-weight:700;">Zrušení a vrácení peněz</p>
+      <ul style="margin:0 0 16px;padding-left:18px;color:${C.slate};font-size:13px;line-height:1.6;">
+        ${data.cancellationRules.map((r) => `<li style="margin:0 0 4px;">${r}</li>`).join('')}
+      </ul>
+
+      ${data.withdrawalText ? noteBox(data.withdrawalText, 'info') : ''}
+
+      <p style="margin:0 0 4px;color:${C.muted};font-size:12px;line-height:1.6;">
+        Platba šla přímo poskytovateli přes Stripe, Propojo peníze nedrží. Smlouvu o samotné službě uzavíráte
+        přímo s poskytovatelem, Propojo není její stranou.
+      </p>
+
+      ${button('Zobrazit rezervaci', data.orderUrl)}
+    `),
+  }
+}
+
+/** Poskytovatel nemůže dodržet původní termín a navrhuje nový → ZÁKAZNÍKOVI */
+export function rescheduleProposedEmail(data: {
+  serviceTitle: string
+  originalText: string | null
+  proposedText: string
+  expiresText: string
+  amountText: string | null
+  note?: string | null
+  orderUrl: string
+}): { subject: string; html: string } {
+  return {
+    subject: `Poskytovatel nemůže dodržet termín: ${data.serviceTitle}`,
+    html: emailWrapper(`
+      ${heading('Poskytovatel nemůže dodržet původní termín', 'Navrhuje vám nový termín. Rozhodnutí je na vás.')}
+
+      ${detailBox([
+        ['Služba', data.serviceTitle],
+        ['Původní termín', data.originalText],
+        ['Nový návrh', data.proposedText],
+        ['Odpovězte do', data.expiresText],
+        ['Zpráva', data.note],
+      ])}
+
+      ${noteBox(`Když nový termín přijmete, rezervace pokračuje. Když ho odmítnete nebo do ${data.expiresText} nezareagujete, rezervace se zruší a ${data.amountText ? `celá zaplacená částka ${data.amountText}` : 'celá zaplacená částka'} se vám automaticky vrátí.`, 'warn')}
+
+      ${button('Odpovědět', data.orderUrl)}
+    `),
+  }
+}

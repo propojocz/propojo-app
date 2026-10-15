@@ -10,7 +10,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { stripe } from '@/lib/stripe'
 import { policySnapshot } from '@/lib/booking/policy'
-import { RECAP_DOCUMENT_VERSION } from '@/lib/booking/texts'
+import { RECAP_DOCUMENT_VERSION, serviceNeedsEarlyRequest } from '@/lib/booking/texts'
 import { bookingBufferMs } from '@/lib/booking/rules'
 import {
   adminDb,
@@ -88,7 +88,8 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
   if (!recapRows || recapRows.length === 0) {
     return { success: false, error: 'Před platbou prosím projděte shrnutí objednávky a potvrďte ho.' }
   }
-  if (item.offer_kind === 'B') {
+  // Výjezd vždy, služba jen s termínem do 14 dní (žádost o provedení před uplynutím lhůty)
+  if (item.offer_kind === 'B' || (item.offer_kind === 'A' && serviceNeedsEarlyRequest(order.scheduled_at))) {
     const { data: consentRows } = await db
       .from('booking_consents')
       .select('id')
@@ -98,7 +99,7 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
       .eq('document_version', RECAP_DOCUMENT_VERSION)
       .limit(1)
     if (!consentRows || consentRows.length === 0) {
-      return { success: false, error: 'Před platbou prosím ve shrnutí potvrďte žádost o provedení výjezdu.' }
+      return { success: false, error: item.offer_kind === 'B' ? 'Před platbou prosím ve shrnutí potvrďte žádost o provedení výjezdu.' : 'Před platbou prosím ve shrnutí potvrďte žádost o provedení služby.' }
     }
   }
 

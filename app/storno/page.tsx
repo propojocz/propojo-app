@@ -90,7 +90,7 @@ export default function StornoPage() {
           <H2>4. Odstoupení od smlouvy</H2>
           <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-600">
             <li>Od potvrzené rezervace <strong>služby</strong> nebo <strong>výjezdu</strong> můžete odstoupit bez udání důvodu do 14 dnů od jejího potvrzení – odkazem „Odstoupit od smlouvy“ v detailu objednávky. Potvrzení s datem a časem vám pošleme e-mailem. Odstoupením rezervace končí.</li>
-            <li>U <strong>výjezdu</strong> jste ve shrnutí požádali o provedení před uplynutím lhůty – po provedení výjezdu právo odstoupit zaniká.</li>
+            <li>U <strong>výjezdu</strong> a u <strong>služby s termínem do 14 dní</strong> jste ve shrnutí požádali o provedení před uplynutím lhůty – po provedení (skončení termínu) právo odstoupit zaniká.</li>
             <li>U <strong>výrobku na míru</strong> právo odstoupit ze zákona nevzniká.</li>
             <li>Po odstoupení vám zaplacenou částku vrací poskytovatel, nejpozději do 14 dnů. Rušíte-li ještě včas (bod 2), je jednodušší rezervaci zrušit – peníze se pak vrátí automaticky.</li>
           </ul>

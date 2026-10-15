@@ -266,6 +266,13 @@ export default function BookingWizard({
                     {recap.chargeKc.toLocaleString('cs-CZ')} Kč
                   </span>
                 </div>
+                {recap.restOnSite && (
+                  <p className="mt-0.5 text-sm text-slate-700">
+                    <strong>{recap.chargeKc.toLocaleString('cs-CZ')} Kč teď</strong>, zbytek{' '}
+                    <strong>{recap.restOnSite.restKc.toLocaleString('cs-CZ')} Kč</strong> zaplatíte poskytovateli na místě
+                    <span className="text-slate-500"> (cena služby {recap.restOnSite.totalKc.toLocaleString('cs-CZ')} Kč podle ceníku)</span>
+                  </p>
+                )}
                 {recap.originalChargeKc != null && (
                   <p className="mt-0.5 text-xs text-slate-600">
                     Cenu upravil poskytovatel{recap.priceNote ? <> – {recap.priceNote}</> : null}.

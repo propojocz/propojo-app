@@ -18,6 +18,7 @@ import { alertAdmins } from './alerts'
 import { loadBookingOrder, logOrderEvent, type BookingOrder, type Db } from './payments'
 import {
   decideAutoRefund,
+  disputeBlocksRefund,
   fromStripeRefundStatus,
   isAutoRefundTrigger,
   isRefundInFlight,
@@ -145,12 +146,15 @@ async function submitToStripe(db: Db, order: BookingOrder, rowId: string, trigge
   }
 }
 
-/** Kolik už je skutečně vráceno – přímo ze Stripe (webhook o ručním refundu mohl ještě nedorazit) */
-async function refundedOnStripe(order: BookingOrder): Promise<number | null> {
+/**
+ * Skutečně stržená a už vrácená částka přímo ze Stripe (webhook o ručním refundu mohl ještě nedorazit;
+ * při částečném stržení ve Stripe Dashboardu je stržená částka menší než zablokovaná).
+ */
+async function chargeOnStripe(order: BookingOrder): Promise<{ captured: number; refunded: number } | null> {
   if (!order.stripe_account_id || !order.stripe_charge_id) return null
   try {
     const charge = await stripe.charges.retrieve(order.stripe_charge_id, undefined, { stripeAccount: order.stripe_account_id })
-    return charge.amount_refunded ?? 0
+    return { captured: charge.amount_captured ?? 0, refunded: charge.amount_refunded ?? 0 }
   } catch {
     return null
   }
@@ -176,12 +180,13 @@ export async function runAutoRefund(
   const f = fresh as { charge_halere: number | null; refunded_halere: number | null; stripe_dispute_status: string | null; confirmed_at: string | null } | null
 
   const rows = await refundsOf(db, order.id)
+  const onStripe = await chargeOnStripe(order)
   const decision = decideAutoRefund(
     trigger,
     {
       captured: !!(f?.confirmed_at ?? order.confirmed_at),
-      chargeHalere: Number(f?.charge_halere ?? order.charge_halere ?? 0),
-      refundedHalere: (await refundedOnStripe(order)) ?? Number(f?.refunded_halere ?? 0),
+      chargeHalere: onStripe?.captured || Number(f?.charge_halere ?? order.charge_halere ?? 0),
+      refundedHalere: onStripe?.refunded ?? Number(f?.refunded_halere ?? 0),
       refundInFlight: rows.some((r) => isRefundInFlight(r.status)),
       disputeStatus: f?.stripe_dispute_status ?? null,
     },
@@ -339,4 +344,81 @@ async function notifySkipped(order: BookingOrder, reason: 'disputed' | 'not_cove
       console.error('[refunds] notifikace:', err)
     }
   }
+}
+
+// ─── Vrácení peněz poskytovatelem (tlačítko „Vrátit peníze zákazníkovi“) ─────────
+// Není to automatický refund z katalogu: poskytovatel ho zadává sám, na vlastní pokyn (např. po odstoupení
+// zákazníka, VOP 9.4). Propojo jen předá jeho pokyn Stripe na jeho účtu. Provize se nevrací.
+
+/** Kolik ještě jde vrátit (haléře): stržená částka − už vráceno − právě probíhající vrácení */
+export async function refundableHalere(db: Db, order: BookingOrder): Promise<number> {
+  if (!order.confirmed_at) return 0
+  const onStripe = await chargeOnStripe(order)
+  const charged = onStripe?.captured || Number(order.charge_halere ?? 0)
+  const refunded = onStripe?.refunded ?? Number(order.refunded_halere ?? 0)
+  const inFlight = (await refundsOf(db, order.id))
+    .filter((r) => isRefundInFlight(r.status))
+    .reduce((s, r) => s + r.amount_halere, 0)
+  return Math.max(0, charged - refunded - inFlight)
+}
+
+export async function runProviderRefund(
+  db: Db,
+  order: BookingOrder,
+  amountHalere: number,
+): Promise<{ ok: true; status: RefundStatus | 'queued' } | { ok: false; error: string }> {
+  if (!Number.isInteger(amountHalere) || amountHalere <= 0) return { ok: false, error: 'Zadejte částku k vrácení.' }
+  const { data: d } = await db.from('orders').select('stripe_dispute_status').eq('id', order.id).maybeSingle()
+  if (disputeBlocksRefund((d as { stripe_dispute_status: string | null } | null)?.stripe_dispute_status ?? null)) {
+    return { ok: false, error: 'K platbě běží reklamace u banky (chargeback), vrácení teď nejde.' }
+  }
+  const max = await refundableHalere(db, order)
+  if (max <= 0) return { ok: false, error: 'Z této platby už není co vracet.' }
+  if (amountHalere > max) return { ok: false, error: `Vrátit jde nejvýš ${kc(max)}.` }
+
+  const { data: row, error } = await db
+    .from('order_refunds')
+    .insert({
+      order_id: order.id,
+      stripe_account_id: order.stripe_account_id,
+      amount_halere: amountHalere,
+      status: 'requested',
+      refund_trigger: 'provider_manual',
+      initiated_by: 'provider',
+    })
+    .select('id')
+    .single()
+  if (error || !row) {
+    console.error('[refunds] ruční vrácení:', error?.message)
+    return { ok: false, error: 'Vrácení se nepodařilo uložit. Zkuste to prosím znovu.' }
+  }
+  const rowId = (row as { id: string }).id
+  await logOrderEvent(db, order.id, 'refund_triggered', { type: 'provider', id: order.provider_id }, {
+    trigger: 'provider_manual', amount_halere: amountHalere, order_refund_id: rowId,
+  })
+  const res = await submitToStripe(db, order, rowId, 'provider_manual', amountHalere)
+  if (res.kind === 'queued') return { ok: true, status: 'queued' }
+  if (res.kind === 'already_refunded') return { ok: false, error: 'Platba už je vrácená.' }
+  if (res.kind === 'rejected') return { ok: false, error: 'Stripe vrácení odmítl. Zkontrolujte prosím zůstatek na svém Stripe účtu.' }
+  if (res.changed && res.status === 'succeeded') await notifyRefundSucceeded(order, amountHalere)
+  return { ok: true, status: res.status }
+}
+
+/** Co poskytovatele stojí zrušení: provize Propoja + poplatek Stripe za původní platbu (oba se nevracejí) */
+export async function cancellationCostHalere(order: BookingOrder): Promise<{ commission: number; stripeFee: number | null } | null> {
+  if (!order.confirmed_at) return null
+  const commission = Number(order.application_fee_halere ?? 0)
+  let stripeFee: number | null = null
+  if (order.stripe_account_id && order.stripe_charge_id) {
+    try {
+      const charge = await stripe.charges.retrieve(order.stripe_charge_id, { expand: ['balance_transaction'] }, { stripeAccount: order.stripe_account_id })
+      const bt = charge.balance_transaction as { fee_details?: Array<{ type: string; amount: number }> } | string | null
+      if (bt && typeof bt === 'object' && bt.fee_details) {
+        stripeFee = bt.fee_details.filter((f) => f.type === 'stripe_fee').reduce((s, f) => s + f.amount, 0)
+      }
+    } catch {
+      stripeFee = null
+    }
+  }
+  return { commission, stripeFee }
 }

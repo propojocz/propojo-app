@@ -161,6 +161,15 @@ Popsat hlavní parametry v pořadí významu a proč jsou důležité:
 
 ---
 
+### A18. Odstoupení u služby a zrušení po zaplacení (15. 10. 2026) – LEGAL_REVIEW_NEEDED
+- **Služba s termínem do 14 dní (+ 48 h lhůty k potvrzení, protože lhůta pro odstoupení běží od potvrzení):** zákazník ve shrnutí povinně zaškrtne žádost o provedení před uplynutím lhůty pro odstoupení (§ 1837 písm. a OZ): „Chci, aby služba proběhla v tomto termínu, i když je to dřív než za 14 dní. Beru na vědomí, že provedením služby právo odstoupit zaniká.“ Ukládá se do `booking_consents` stejně jako u Výjezdu. Po skončení termínu funkce „Odstoupit od smlouvy“ zmizí. Služba s termínem za víc než 14 dní: jen poučení (lhůta skončí dřív, než služba proběhne). VOP 4.1 u služby dnes počítá jen s poučením – sladit čl. 9.
+- **Odstoupení v aplikaci** (čl. 9.1): samostatný odkaz vedle „Zrušit rezervaci“, 14 dní od potvrzení; potvrzení e-mailem s datem a časem. Odstoupením rezervace v aplikaci končí (termín se uvolní), peníze automaticky nehýbe – vrací je Poskytovatel (čl. 9.4), v aplikaci tlačítkem „Vrátit peníze zákazníkovi“ (refund z jeho Stripe účtu na jeho vlastní pokyn).
+- **Zrušení zaplacené rezervace:** Poskytovatel do začátku termínu → plný refund (AUTOREF-001); Zákazník v hranicích §8 → plný refund (AUTOREF-004); za hranicí automaticky nic. Selže-li refund, oznámení oběma stranám a adminovi; povinnost vrátit zůstává Poskytovateli.
+- **„Původní termín nemohu dodržet“:** Poskytovatel navrhne nový termín; Zákazník přijme (rezervace pokračuje), nebo odmítne / nezareaguje do dřívějšího z 24 h a začátku původního termínu → zrušení a plný refund (AUTOREF-002). Připomínka v polovině lhůty, u lhůty kratší než 4 h hodinu před koncem.
+- **Stržení ve Stripe po lhůtě k potvrzení:** Rezervační smlouva nevznikla → plný refund (AUTOREF-005), provize se nevrací. Stržení jiné částky, než byla zablokovaná, se zaznamená a admin dostane upozornění.
+- **Potvrzení Rezervace e-mailem (čl. 8.3):** po každém úspěšném stržení (v aplikaci, ve Stripe, automatické potvrzení) – identita Poskytovatele (jméno, IČO, telefon, e-mail), služba, termín, místo, částka a její význam, pravidla zrušení, poučení o odstoupení.
+- **Odpojení Stripe účtu Poskytovatelem:** nové rezervace zablokované, zákazníci s otevřenou zaplacenou rezervací dostanou upozornění, že automatický refund už nejde (nárok u Poskytovatele, případně reklamace u banky).
+
 ## B. Technická pravidla Platformy (návrh obsahu přílohy)
 
 | Parametr | Hodnota |

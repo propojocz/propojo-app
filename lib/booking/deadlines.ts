@@ -7,7 +7,8 @@
 //  2) připomínka poskytovateli před koncem lhůty (jednou, evidováno v order_events);
 //  3) opuštěné zámky přímé rezervace a záchrana rozpracovaných plateb (dřív jen 1× denně);
 //  4) automatické refundy, které Stripe nepřijal – nový pokus, po 24 h oznámení o selhání (vrstva 4);
-//  5) potvrzení odstoupení od smlouvy, které se nepodařilo odeslat e-mailem.
+//  5) potvrzení odstoupení od smlouvy, které se nepodařilo odeslat e-mailem;
+//  6) „nemohu dodržet termín“: připomínka zákazníkovi a po expiraci zrušení s refundem (AUTOREF-002).
 //
 // Každý krok běží zvlášť – chyba v jednom nesmí zastavit ostatní.
 
@@ -24,6 +25,7 @@ import {
 } from './payments'
 import { retryQueuedRefunds } from './refunds'
 import { retryWithdrawalConfirmations } from './cancellation'
+import { tickReschedules } from './reschedule'
 
 const HOUR = 3_600_000
 
@@ -141,7 +143,7 @@ export async function remindUnconfirmedBookings(db: Db, now = new Date()): Promi
 
 /** Celý pětiminutový běh. */
 export async function runBookingTick(db: Db) {
-  const [propadle, pripominky, zamky, platby, refundy, odstoupeni] = await Promise.allSettled([
+  const [propadle, pripominky, zamky, platby, refundy, odstoupeni, terminy] = await Promise.allSettled([
     expireUnconfirmedBookings(db),
     remindUnconfirmedBookings(db),
     // Opuštěné zámky přímé rezervace (zákazník neprošel shrnutím) – nic není předautorizováno.
@@ -150,6 +152,7 @@ export async function runBookingTick(db: Db) {
     rescueBookings(db),
     retryQueuedRefunds(db),
     retryWithdrawalConfirmations(db),
+    tickReschedules(db),
   ])
   const val = <T,>(r: PromiseSettledResult<T>) => (r.status === 'fulfilled' ? r.value : { chyba: String(r.reason) })
   return {
@@ -159,5 +162,6 @@ export async function runBookingTick(db: Db) {
     platby: val(platby),
     refundy: val(refundy),
     odstoupeni: val(odstoupeni),
+    terminy: val(terminy),
   }
 }

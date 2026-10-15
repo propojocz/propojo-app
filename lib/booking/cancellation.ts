@@ -79,10 +79,19 @@ export async function withdrawalInfo(db: Db, order: BookingOrder, now = new Date
   if (!confirmedAt || order.booking_state !== 'confirmed') return { available: false, reason: 'not_confirmed' }
   const until = new Date(confirmedAt.getTime() + WITHDRAWAL_DAYS * 24 * 3600_000)
   if (now.getTime() > until.getTime()) return { available: false, reason: 'expired' }
-  // Výjezd: zákazník ve shrnutí požádal o provedení před uplynutím lhůty → po skončení okna příjezdu
-  // (výjezd proběhl) právo zaniká (§ 1837 OZ). Když poskytovatel nepřijel, slouží hlášení nedostavení.
+  // Zákazník ve shrnutí požádal o provedení před uplynutím lhůty (výjezd vždy, služba s termínem do 14 dní)
+  // → po skončení termínu (služba / výjezd proběhly) právo zaniká (§ 1837 písm. a OZ).
+  // Když poskytovatel nepřišel, slouží hlášení nedostavení.
   const end = toDate(order.scheduled_end)
-  if (order.offer_kind === 'B' && end && now.getTime() >= end.getTime()) return { available: false, reason: 'expired' }
+  if (end && now.getTime() >= end.getTime()) {
+    const { data: req } = await db
+      .from('booking_consents')
+      .select('id')
+      .eq('order_id', order.id)
+      .eq('kind', 'customer_early_performance_request')
+      .limit(1)
+    if (order.offer_kind === 'B' || (req ?? []).length > 0) return { available: false, reason: 'expired' }
+  }
   return { available: true, until }
 }
 

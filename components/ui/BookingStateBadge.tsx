@@ -70,6 +70,12 @@ function texty(
         ? { tone: 'off', title: 'Rezervaci jste odmítli', text: 'Zákazníkovi se uvolnila blokace na kartě, nic nebylo strženo.' }
         : { tone: 'off', title: 'Rezervace nebyla potvrzena', text: 'Poskytovatel rezervaci nepotvrdil. Nic nebylo strženo, blokace na kartě se uvolnila. Banka ji může ještě pár dní ukazovat jako čekající platbu.' }
     case 'expired':
+      // AUTOREF-005: platba stržena ve Stripe až po lhůtě k potvrzení → rezervace nevznikla, vrací se celá částka
+      if (f.captured) {
+        return isProvider
+          ? { tone: 'warn', title: 'Platba stržena po lhůtě – rezervace nevznikla', text: 'Lhůta k potvrzení už uplynula, proto se zákazníkovi z vašeho Stripe účtu vrací celá částka. Provize ani poplatek Stripe se nevracejí. Stav vrácení vidíte níže.' }
+          : { tone: 'off', title: 'Rezervace nevznikla', text: 'Poskytovatel platbu strhl až po lhůtě k potvrzení. Vrací se vám celá částka – stav vidíte níže.' }
+      }
       return isProvider
         ? { tone: 'off', title: 'Rezervace propadla', text: 'Nepotvrdili jste ji včas. Zákazníkovi se uvolnila blokace na kartě, termín je znovu volný.' }
         : { tone: 'off', title: 'Rezervace nebyla včas potvrzena', text: 'Nic nebylo strženo, blokace na kartě se uvolnila. Banka ji může ještě pár dní ukazovat jako čekající platbu.' }
@@ -94,6 +100,12 @@ function texty(
         return isProvider
           ? { tone: 'off', title: 'Rezervaci jste zrušili', text: 'Zákazníkovi se z vašeho Stripe účtu vrací celá zaplacená částka. Stav vrácení vidíte níže.' }
           : { tone: 'off', title: 'Poskytovatel rezervaci zrušil', text: 'Vrací se vám celá zaplacená částka. Stav vrácení vidíte níže.' }
+      }
+      if (f.cancelReason === 'reschedule_rejected' || f.cancelReason === 'reschedule_expired') {
+        const why = f.cancelReason === 'reschedule_rejected' ? 'odmítl' : 'včas nepřijal'
+        return isProvider
+          ? { tone: 'off', title: 'Rezervace zrušena – nový termín nepřijat', text: `Původní termín jste nemohli dodržet a zákazník nový ${why}. Vrací se mu celá částka, stav vidíte níže.` }
+          : { tone: 'off', title: 'Rezervace zrušena', text: `Poskytovatel nemohl dodržet původní termín a nový jste ${f.cancelReason === 'reschedule_rejected' ? 'odmítli' : 'včas nepřijali'}. Vrací se vám celá částka – stav vidíte níže.` }
       }
       if (f.cancelReason === 'customer_cancelled') {
         return isProvider
