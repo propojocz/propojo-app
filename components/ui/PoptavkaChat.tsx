@@ -17,10 +17,10 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   Send, Loader2, ArrowLeft, MapPin, CalendarClock, Tag, Lock, Paperclip, X, FileText,
-  Coins, CheckCircle2, MessagesSquare, CalendarDays, Wallet, ClipboardList,
+  Coins, CheckCircle2, MessagesSquare, CalendarDays, ClipboardList,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { sendConversationMessage, sendPriceEstimate, proposeTermInChat, selectProviderWithTerm, sendCustomerPreference, endNegotiation, resumeNegotiation, requestResume, setRequestAddressInChat, type EndReason } from '@/lib/actions/conversation-chat'
+import { sendConversationMessage, sendPriceEstimate, proposeTermInChat, selectProviderWithTerm, sendCustomerPreference, endNegotiation, resumeNegotiation, requestResume, setRequestAddressInChat, pollThreadMessages, type EndReason } from '@/lib/actions/conversation-chat'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
 import { rozpocetText } from '@/lib/format'
 import ChatThread from '@/components/ui/ChatThread'
@@ -55,7 +55,7 @@ export default function PoptavkaChat({
   conversationId, requestId, responseId,
   isProvider, readOnly, orderId, canSelect, hasServiceForOrder, offerText = null, offerKind = null,
   otherName, distanceKm = null, draftOrderId = null, place = null, customerAddress = null, declinedBy = null, request, threads, initialMessages, myUserId, senderNames,
-  offerEditor = null, isPrivate = false, defaultTermMinutes = null,
+  offerEditor = null, isPrivate = false, defaultTermMinutes = null, counterpart = null, placeEditor = null, cityKnown = true,
 }: {
   conversationId: string
   requestId: string
@@ -91,9 +91,40 @@ export default function PoptavkaChat({
   isPrivate?: boolean
   /** Délka navrhovaného termínu z vybrané položky ceníku (min) */
   defaultTermMinutes?: number | null
+  /** Obec zákazníka je opravdu jeho (u soukromé poptávky až z adresy / profilu) */
+  cityKnown?: boolean
+  /** Poskytovatel: „Změnit místo“ (U zákazníka / U mě) u řádku Místo konání */
+  placeEditor?: React.ReactNode
+  /** Soukromý dotaz: s kým jednám – zákazník vidí poskytovatele (jméno, profese, obec, o mně), poskytovatel zákazníka */
+  counterpart?: { name: string; subtitle: string | null; city: string | null; about: string | null; profileUrl: string | null } | null
 }) {
   const router = useRouter()
   const [messages, setMessages] = useState<any[]>(initialMessages)
+  const messagesRef = useRef<any[]>(initialMessages)
+  messagesRef.current = messages
+
+  // Nové zprávy bez obnovení stránky: každých 8 s (jen když je karta vidět) se doptá na novější zprávy.
+  useEffect(() => {
+    let stopped = false
+    const tick = async () => {
+      if (stopped || document.hidden) return
+      const last = messagesRef.current[messagesRef.current.length - 1]
+      try {
+        const fresh = await pollThreadMessages({ conversationId }, last?.created_at ?? null)
+        if (stopped || !fresh.length) return
+        const known = new Set(messagesRef.current.map((m: any) => m.id))
+        const added = fresh.filter((m: any) => !known.has(m.id))
+        if (!added.length) return
+        setMessages((prev: any[]) => [...prev, ...added.filter((m: any) => !prev.some((p: any) => p.id === m.id))])
+        // Od druhé strany → obnovit i box „Co je domluveno“ (nabídka, termíny ze serveru)
+        if (added.some((m: any) => m.sender_id !== myUserId)) router.refresh()
+      } catch { /* další pokus za chvíli */ }
+    }
+    const timer = setInterval(tick, 8000)
+    const onVisible = () => { if (!document.hidden) void tick() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { stopped = true; clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [chatImage, setChatImage] = useState<string | null>(null)
@@ -117,6 +148,8 @@ export default function PoptavkaChat({
   // Přesná adresa zákazníka (jen jeho pohled)
   const [myAddress, setMyAddress] = useState<string | null>(customerAddress)
   const [addrEdit, setAddrEdit] = useState(false)
+  // Adresa provozovny: mapa až na kliknutí „Ukázat na mapě“ (po zaplacení je v objednávce rovnou s mapou)
+  const [showMap, setShowMap] = useState(false)
   const [addrDraft, setAddrDraft] = useState<{ text: string; lat: number | null; lng: number | null } | null>(null)
   const [addrBusy, setAddrBusy] = useState(false)
   const [estFrom, setEstFrom] = useState('')
@@ -400,14 +433,32 @@ export default function PoptavkaChat({
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">{isPrivate ? 'Soukromý dotaz' : 'Poptávka'}</p>
-                <h2 className="mt-1 text-lg font-black text-slate-900">{request.heading}</h2>
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">{isPrivate ? (isProvider ? 'Soukromý dotaz od zákazníka' : 'Soukromý dotaz pro') : 'Poptávka'}</p>
+                <h2 className="mt-1 text-lg font-black text-slate-900">{isPrivate && counterpart ? counterpart.name : request.heading}</h2>
+                {isPrivate && counterpart?.subtitle && <p className="text-sm font-semibold text-slate-600">{counterpart.subtitle}</p>}
               </div>
-              <span className="shrink-0 rounded-full bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
-                {isProvider ? 'Jednáte se zákazníkem' : `Nabídku posílá: ${otherName}`}
-              </span>
+              {!isPrivate && (
+                <span className="shrink-0 rounded-full bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+                  {isProvider ? 'Jednáte se zákazníkem' : `Nabídku posílá: ${otherName}`}
+                </span>
+              )}
+              {isPrivate && counterpart?.profileUrl && (
+                <Link href={counterpart.profileUrl} className="shrink-0 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">
+                  Profil
+                </Link>
+              )}
             </div>
 
+            {isPrivate && counterpart ? (
+              <>
+                {counterpart.city && (
+                  <p className="mt-2 inline-flex items-center gap-1.5 text-sm text-slate-600"><MapPin className="h-4 w-4 text-slate-400" /> {counterpart.city}</p>
+                )}
+                {counterpart.about && (
+                  <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm leading-relaxed text-slate-600">{counterpart.about}</p>
+                )}
+              </>
+            ) : (
             <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-sm text-slate-600">
               {request.category && (
                 <span className="inline-flex items-center gap-1.5"><Tag className="h-4 w-4 text-slate-400" /> {request.category}</span>
@@ -417,8 +468,9 @@ export default function PoptavkaChat({
                 <span className="inline-flex items-center gap-1.5"><CalendarClock className="h-4 w-4 text-slate-400" /> {request.preferredDate}</span>
               )}
             </div>
+            )}
 
-            {request.description && (
+            {request.description && !isPrivate && (
               <p className="mt-3 whitespace-pre-wrap border-t border-slate-100 pt-3 text-sm leading-relaxed text-slate-700">
                 {request.description}
               </p>
@@ -448,9 +500,11 @@ export default function PoptavkaChat({
               </div>
             )}
 
-            <Link href={`/poptavky/${requestId}`} className="mt-3 inline-block text-sm font-semibold text-emerald-700 hover:underline">
-              Zobrazit detail poptávky
-            </Link>
+            {!isPrivate && (
+              <Link href={`/poptavky/${requestId}`} className="mt-3 inline-block text-sm font-semibold text-emerald-700 hover:underline">
+                Zobrazit detail poptávky
+              </Link>
+            )}
           </div>
 
           {/* 2) Chat */}
@@ -473,10 +527,16 @@ export default function PoptavkaChat({
                 {place?.atProvider ? (
                   <dd className="text-slate-900">
                     <span className="font-semibold">U poskytovatele</span>{place.address ? `: ${place.address}` : ''}
-                    {place.pref === 'u_zakaznika' && (
+                    {place.lat != null && place.lng != null && (
+                      <button type="button" onClick={() => setShowMap((v) => !v)} className="ml-2 text-xs font-semibold text-emerald-700 underline hover:text-emerald-800">
+                        {showMap ? 'Skrýt mapu' : 'Ukázat na mapě'}
+                      </button>
+                    )}
+                    {isProvider && placeEditor && <span className="ml-2 inline-block align-middle">{placeEditor}</span>}
+                    {place.pref === 'u_zakaznika' && !isPrivate && (
                       <span className="block text-xs text-amber-700">{isProvider ? 'Zákazník by to raději měl u sebe.' : 'Chtěli jste to u sebe – domluvte se, nebo zvolte jiného poskytovatele.'}</span>
                     )}
-                    {place.lat != null && place.lng != null && (
+                    {showMap && place.lat != null && place.lng != null && (
                       <div className="mt-2 max-w-md overflow-hidden rounded-lg">
                         <ServiceMap lat={place.lat} lng={place.lng} label={place.address ?? 'Místo konání'} />
                       </div>
@@ -484,14 +544,16 @@ export default function PoptavkaChat({
                   </dd>
                 ) : (
                   <dd className="text-slate-900">
-                    <span className="font-semibold">{isProvider ? 'U zákazníka' : 'U vás'}</span>: {!isProvider && myAddress ? myAddress : request.city}
-                    {distanceKm != null && <span className="text-slate-500"> · ≈ {distanceKm} km {isProvider ? 'od vás' : 'od poskytovatele'}</span>}
-                    {place?.pref === 'u_poskytovatele' && (
+                    <span className="font-semibold">{isProvider ? 'U zákazníka' : 'U vás'}</span>
+                    {!isProvider && myAddress ? `: ${myAddress}` : (!isPrivate || cityKnown) ? `: ${request.city}` : ''}
+                    {distanceKm != null && (!isPrivate || cityKnown) && <span className="text-slate-500"> · ≈ {distanceKm} km {isProvider ? 'od vás' : 'od poskytovatele'}</span>}
+                    {isProvider && placeEditor && <span className="ml-2 inline-block align-middle">{placeEditor}</span>}
+                    {place?.pref === 'u_poskytovatele' && !isPrivate && (
                       <span className="block text-xs text-amber-700">{isProvider ? 'Zákazník by raději přišel k vám.' : 'Chtěli jste přijít k poskytovateli – tahle nabídka je u vás.'}</span>
                     )}
                     {isProvider ? (
                       <span className="block text-xs text-slate-500">
-                        Přesnou adresu zákazník zadá před platbou, uvidíte ji po potvrzení rezervace (u termínu od vás hned po zaplacení).
+                        {isPrivate ? 'Adresu zákazník doplní před platbou, ' : 'Přesnou adresu zákazník zadá před platbou, '}uvidíte ji po potvrzení rezervace (u termínu od vás hned po zaplacení).
                       </span>
                     ) : myAddress ? (
                       <span className="block text-xs text-slate-500">
@@ -502,7 +564,7 @@ export default function PoptavkaChat({
                       </span>
                     ) : (
                       <span className="mt-1 block rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
-                        Doplňte přesnou adresu, ať poskytovatel ví, kam má přijet. Uvidí ji až po zaplacení.{' '}
+                        Doplňte vaši adresu – poskytovatel ji dostane, jakmile zaplatíte.{' '}
                         {!orderId && !readOnly && (
                           <button type="button" onClick={() => setAddrEdit(true)} className="font-bold underline">Doplnit adresu</button>
                         )}
@@ -511,7 +573,7 @@ export default function PoptavkaChat({
                     {addrEdit && !isProvider && (
                       <div className="mt-2 max-w-md">
                         <AddressInput
-                          defaultValue={myAddress ?? `${request.city}, `}
+                          defaultValue={myAddress ?? (isPrivate ? '' : `${request.city}, `)}
                           placeholder="Ulice a číslo – vyberte ze seznamu…"
                           onPick={(a) => setAddrDraft({ text: a.address, lat: a.lat, lng: a.lng })}
                           onFreeText={(t) => setAddrDraft({ text: t, lat: null, lng: null })}
@@ -537,19 +599,28 @@ export default function PoptavkaChat({
                 <dt className="text-slate-500">Odhad ceny</dt>
                 <dd className={lastEstimateMsg ? 'text-slate-900' : 'text-slate-400'}>
                   {lastEstimateMsg ? String(lastEstimateMsg.content).replace(/^Předběžný odhad ceny:\s*/, '') : 'zatím neposlán'}
+                  {isProvider && !readOnly && !declinedBy && (
+                    <button type="button" onClick={toggleEstimate} className="ml-2 text-xs font-semibold text-emerald-700 underline hover:text-emerald-800">{lastEstimate ? 'Upravit' : 'Poslat odhad'}</button>
+                  )}
                   {overBudget && (
                     <span className="mt-0.5 block text-xs font-semibold text-amber-700">
                       {isProvider ? 'Odhad je nad rozpočtem zákazníka – domluvte se ještě před rezervací.' : 'Odhad je nad vaším rozpočtem – domluvte se ještě před rezervací.'}
                     </span>
                   )}
                 </dd>
-                <dt className="text-slate-500">Rozpočet zákazníka</dt>
+                <dt className="text-slate-500">{isProvider ? 'Rozpočet zákazníka' : 'Váš rozpočet'}</dt>
                 <dd className={budgetShown ? 'text-slate-900' : 'text-slate-400'}>
-                  {budgetShown ?? 'neuveden'}
+                  {budgetShown ?? (isProvider ? 'neuveden' : 'nepovinné')}
+                  {!isProvider && !readOnly && !declinedBy && (
+                    <button type="button" onClick={() => togglePref('budget')} className="ml-2 text-xs font-semibold text-emerald-700 underline hover:text-emerald-800">{budgetShown ? 'Změnit' : 'Doplnit'}</button>
+                  )}
                 </dd>
                 <dt className="text-slate-500">Kdy se hodí</dt>
                 <dd className={lastTimeMsg ? 'text-slate-900' : 'text-slate-400'}>
                   {lastTimeMsg ? String(lastTimeMsg.content).replace(/^Hodí se mi:\s*/, '').replace(/\.$/, '') : request.preferredDate ?? 'neuvedeno'}
+                  {!isProvider && !readOnly && !declinedBy && (
+                    <button type="button" onClick={() => togglePref('time')} className="ml-2 text-xs font-semibold text-emerald-700 underline hover:text-emerald-800">{lastTimeMsg ? 'Změnit' : 'Doplnit'}</button>
+                  )}
                 </dd>
                 {lastAvailMsg && (
                   <>
@@ -559,8 +630,13 @@ export default function PoptavkaChat({
                 )}
                 <dt className="text-slate-500">Navržené termíny</dt>
                 <dd>
+                  {isProvider && !readOnly && !declinedBy && (
+                    offerKind
+                      ? <button type="button" onClick={() => { setTermOpen((v) => !v); setEstimateOpen(false) }} className="mb-1 inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800 transition hover:bg-amber-100"><CalendarDays className="h-3.5 w-3.5" /> Navrhnout termín</button>
+                      : <span className="mb-1 block text-xs text-amber-700">Termín navrhnete, až doplníte nabídku.</span>
+                  )}
                   {termProposals.length === 0 ? (
-                    <span className="text-slate-400">{isProvider ? 'zatím žádný – navrhněte termín' : 'zatím žádný – poskytovatel ho navrhne'}</span>
+                    <span className="block text-slate-400">{isProvider ? 'zatím žádný' : 'zatím žádný – jakmile poskytovatel navrhne termín, objeví se tu tlačítko Rezervovat a zaplatit'}</span>
                   ) : canSelect ? (
                     <div className="space-y-1.5">
                       {termProposals.map((m) => (
@@ -582,6 +658,135 @@ export default function PoptavkaChat({
                   )}
                 </dd>
               </dl>
+              {/* Formuláře domluvy přímo v boxu (15. 10. 2026) – pod boxem už jen chat */}
+              {!declinedBy && (
+                <div className="mt-3 space-y-2 empty:hidden">
+                  {/* Composer zákazníka: kdy se to hodí / rozpočet */}
+                  {prefOpen && !isProvider && !readOnly && (
+                    <div className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50/50 p-3">
+                      {prefOpen === 'time' ? (
+                        <>
+                          <p className="mb-2 text-xs font-semibold text-slate-600">Kdy se vám to hodí</p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <input type="date" value={prefFrom} onChange={(e) => setPrefFrom(e.target.value)}
+                              className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" aria-label="Od" />
+                            <span className="text-slate-400">–</span>
+                            <input type="date" value={prefTo} min={prefFrom || undefined} onChange={(e) => setPrefTo(e.target.value)}
+                              className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" aria-label="Do (nepovinné)" />
+                            <select value={prefPart} onChange={(e) => setPrefPart(e.target.value as typeof prefPart)}
+                              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-600 outline-none focus:border-emerald-400">
+                              <option value="kdykoli">kdykoli</option>
+                              <option value="rano">ráno (8–12)</option>
+                              <option value="odpoledne">odpoledne (12–17)</option>
+                              <option value="vecer">večer (17–20)</option>
+                            </select>
+                          </div>
+                          <input value={prefNote} onChange={(e) => setPrefNote(e.target.value)} maxLength={200}
+                            placeholder="Poznámka (nepovinné), např. ne ve středu"
+                            className="mt-2 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" />
+                        </>
+                      ) : (
+                        <>
+                          <p className="mb-2 text-xs font-semibold text-slate-600">Rozpočet na zakázku (nezávazný)</p>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <input type="number" min={1} value={budFrom} onChange={(e) => setBudFrom(e.target.value)} placeholder="od (nepovinné)"
+                              className="w-32 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" />
+                            <span className="text-slate-400">–</span>
+                            <input type="number" min={1} value={budTo} onChange={(e) => setBudTo(e.target.value)} placeholder="do"
+                              className="w-28 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" />
+                            <span className="text-sm text-slate-500">Kč</span>
+                          </div>
+                        </>
+                      )}
+                      <button
+                        onClick={handlePref}
+                        disabled={prefBusy || (prefOpen === 'time' ? !prefFrom : !budTo)}
+                        className="mt-2 inline-flex items-center gap-1 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50"
+                      >
+                        {prefBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Poslat
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Composer návrhu termínu (jen poskytovatel) */}
+                  {termOpen && isProvider && !readOnly && offerKind && (
+                    <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+                      <p className="mb-2 text-xs font-semibold text-slate-600">
+                        Navržený termín je pro vás závazný: zákazník ho může rovnou potvrdit zaplacením a tím vznikne rezervace.
+                        {' '}Když adresa zákazníka sedí s obcí poptávky, potvrdí se automaticky – jinak ji potvrdíte vy.
+                      </p>
+                      <div className="flex flex-wrap items-end gap-2">
+                        <input type="date" value={termDate} onChange={(e) => setTermDate(e.target.value)}
+                          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-amber-400" />
+                        <input type="time" step={300} value={termClock} onChange={(e) => setTermClock(e.target.value)}
+                          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-amber-400" />
+                        {offerKind === 'B' ? (
+                          <select value={termMinutes} onChange={(e) => setTermMinutes(Number(e.target.value))}
+                            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-amber-400">
+                            {BOOKING_POLICY.arrivalWindow.optionsMinutes.map((m) => (
+                              <option key={m} value={m}>přijedu v rozmezí {m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60} min`}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <label className="flex items-center gap-1.5 text-sm text-slate-600">
+                            <input type="number" min={5} max={720} step={5} value={termMinutes} onChange={(e) => setTermMinutes(Number(e.target.value))}
+                              className="w-20 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-amber-400" />
+                            min
+                          </label>
+                        )}
+                        <button
+                          onClick={handleProposeTerm}
+                          disabled={termBusy || !termDate || !termClock}
+                          className="inline-flex items-center gap-1 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-amber-600 disabled:opacity-50"
+                        >
+                          {termBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Poslat návrh
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Composer odhadu ceny (jen poskytovatel) */}
+                  {estimateOpen && isProvider && !readOnly && (
+                    <div className="mb-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <p className="mb-2 text-xs font-semibold text-slate-600">
+                        Nezávazný odhad ceny{lastEstimate ? ' – předvyplněný posledním odhadem, potvrďte nebo upravte' : ''}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number" min={0} value={estFrom} onChange={(e) => setEstFrom(e.target.value)}
+                            placeholder="od" className="w-24 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400"
+                          />
+                          <span className="text-slate-400">–</span>
+                          <input
+                            type="number" min={0} value={estTo} onChange={(e) => setEstTo(e.target.value)}
+                            placeholder="do (nepovinné)" className="w-32 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400"
+                          />
+                          <span className="text-sm text-slate-500">Kč</span>
+                        </div>
+                        <select
+                          value={estMaterial ?? ''}
+                          onChange={(e) => setEstMaterial(e.target.value === 'with' ? 'with' : e.target.value === 'without' ? 'without' : null)}
+                          className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-600 outline-none focus:border-emerald-400"
+                          aria-label="Materiál"
+                        >
+                          <option value="">materiál neuvádět</option>
+                          <option value="with">včetně materiálu</option>
+                          <option value="without">bez materiálu</option>
+                        </select>
+                        <button
+                          onClick={handleEstimate}
+                          disabled={estBusy || !estFrom}
+                          className="inline-flex items-center gap-1 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50"
+                        >
+                          {estBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Coins className="h-3.5 w-3.5" />} Odeslat odhad
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                </div>
+              )}
               <p className="mt-3 border-t border-slate-200 pt-2.5 text-xs leading-relaxed text-slate-500">
                 {isProvider
                   ? `Zákazník vybere termín, vyplní adresu a zaplatí – tím vznikne rezervace. Přesnou adresu a kontakt uvidíte po potvrzení rezervace.${payPart ? ` Přes Propojo zákazník platí jen ${payPart.charAt(0).toLowerCase()}${payPart.slice(1)}; odhad i rozpočet jsou nezávazné a cenu zakázky si domluvíte spolu.` : ''}`
@@ -628,130 +833,6 @@ export default function PoptavkaChat({
             )
           ) : (
             <div className="border-t border-slate-100 p-3">
-              {/* Composer zákazníka: kdy se to hodí / rozpočet */}
-              {prefOpen && !isProvider && !readOnly && (
-                <div className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50/50 p-3">
-                  {prefOpen === 'time' ? (
-                    <>
-                      <p className="mb-2 text-xs font-semibold text-slate-600">Kdy se vám to hodí</p>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <input type="date" value={prefFrom} onChange={(e) => setPrefFrom(e.target.value)}
-                          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" aria-label="Od" />
-                        <span className="text-slate-400">–</span>
-                        <input type="date" value={prefTo} min={prefFrom || undefined} onChange={(e) => setPrefTo(e.target.value)}
-                          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" aria-label="Do (nepovinné)" />
-                        <select value={prefPart} onChange={(e) => setPrefPart(e.target.value as typeof prefPart)}
-                          className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-600 outline-none focus:border-emerald-400">
-                          <option value="kdykoli">kdykoli</option>
-                          <option value="rano">ráno (8–12)</option>
-                          <option value="odpoledne">odpoledne (12–17)</option>
-                          <option value="vecer">večer (17–20)</option>
-                        </select>
-                      </div>
-                      <input value={prefNote} onChange={(e) => setPrefNote(e.target.value)} maxLength={200}
-                        placeholder="Poznámka (nepovinné), např. ne ve středu"
-                        className="mt-2 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" />
-                    </>
-                  ) : (
-                    <>
-                      <p className="mb-2 text-xs font-semibold text-slate-600">Rozpočet na zakázku (nezávazný)</p>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <input type="number" min={1} value={budFrom} onChange={(e) => setBudFrom(e.target.value)} placeholder="od (nepovinné)"
-                          className="w-32 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" />
-                        <span className="text-slate-400">–</span>
-                        <input type="number" min={1} value={budTo} onChange={(e) => setBudTo(e.target.value)} placeholder="do"
-                          className="w-28 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400" />
-                        <span className="text-sm text-slate-500">Kč</span>
-                      </div>
-                    </>
-                  )}
-                  <button
-                    onClick={handlePref}
-                    disabled={prefBusy || (prefOpen === 'time' ? !prefFrom : !budTo)}
-                    className="mt-2 inline-flex items-center gap-1 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50"
-                  >
-                    {prefBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Poslat
-                  </button>
-                </div>
-              )}
-
-              {/* Composer návrhu termínu (jen poskytovatel) */}
-              {termOpen && isProvider && !readOnly && offerKind && (
-                <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
-                  <p className="mb-2 text-xs font-semibold text-slate-600">
-                    Navržený termín je pro vás závazný: zákazník ho může rovnou potvrdit zaplacením a tím vznikne rezervace.
-                    {' '}Když adresa zákazníka sedí s obcí poptávky, potvrdí se automaticky – jinak ji potvrdíte vy.
-                  </p>
-                  <div className="flex flex-wrap items-end gap-2">
-                    <input type="date" value={termDate} onChange={(e) => setTermDate(e.target.value)}
-                      className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-amber-400" />
-                    <input type="time" step={300} value={termClock} onChange={(e) => setTermClock(e.target.value)}
-                      className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-amber-400" />
-                    {offerKind === 'B' ? (
-                      <select value={termMinutes} onChange={(e) => setTermMinutes(Number(e.target.value))}
-                        className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-amber-400">
-                        {BOOKING_POLICY.arrivalWindow.optionsMinutes.map((m) => (
-                          <option key={m} value={m}>přijedu v rozmezí {m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60} min`}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <label className="flex items-center gap-1.5 text-sm text-slate-600">
-                        <input type="number" min={5} max={720} step={5} value={termMinutes} onChange={(e) => setTermMinutes(Number(e.target.value))}
-                          className="w-20 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-amber-400" />
-                        min
-                      </label>
-                    )}
-                    <button
-                      onClick={handleProposeTerm}
-                      disabled={termBusy || !termDate || !termClock}
-                      className="inline-flex items-center gap-1 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-amber-600 disabled:opacity-50"
-                    >
-                      {termBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Poslat návrh
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Composer odhadu ceny (jen poskytovatel) */}
-              {estimateOpen && isProvider && !readOnly && (
-                <div className="mb-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="mb-2 text-xs font-semibold text-slate-600">
-                    Nezávazný odhad ceny{lastEstimate ? ' – předvyplněný posledním odhadem, potvrďte nebo upravte' : ''}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="number" min={0} value={estFrom} onChange={(e) => setEstFrom(e.target.value)}
-                        placeholder="od" className="w-24 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400"
-                      />
-                      <span className="text-slate-400">–</span>
-                      <input
-                        type="number" min={0} value={estTo} onChange={(e) => setEstTo(e.target.value)}
-                        placeholder="do (nepovinné)" className="w-32 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400"
-                      />
-                      <span className="text-sm text-slate-500">Kč</span>
-                    </div>
-                    <select
-                      value={estMaterial ?? ''}
-                      onChange={(e) => setEstMaterial(e.target.value === 'with' ? 'with' : e.target.value === 'without' ? 'without' : null)}
-                      className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-600 outline-none focus:border-emerald-400"
-                      aria-label="Materiál"
-                    >
-                      <option value="">materiál neuvádět</option>
-                      <option value="with">včetně materiálu</option>
-                      <option value="without">bez materiálu</option>
-                    </select>
-                    <button
-                      onClick={handleEstimate}
-                      disabled={estBusy || !estFrom}
-                      className="inline-flex items-center gap-1 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50"
-                    >
-                      {estBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Coins className="h-3.5 w-3.5" />} Odeslat odhad
-                    </button>
-                  </div>
-                </div>
-              )}
-
               {/* Nemám zájem → chat dál otevřený, jen bez termínů a rezervace */}
               {!orderId && declinedBy && (
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -775,41 +856,9 @@ export default function PoptavkaChat({
                   )}
                 </div>
               )}
-              {/* Nástroje domluvy – přímo nad polem pro zprávu */}
+              {/* Pod boxem už jen chat (zprávy, fotky, PDF); domluva se vyplňuje v boxu nahoře */}
               {!orderId && !declinedBy && (
                 <div className="mb-2 flex flex-wrap gap-1.5">
-                  {isProvider && offerKind && (
-                    <button
-                      onClick={() => { setTermOpen((v) => !v); setEstimateOpen(false) }}
-                      className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100"
-                    >
-                      <CalendarDays className="h-3.5 w-3.5" /> Navrhnout termín
-                    </button>
-                  )}
-                  {isProvider && (
-                    <button
-                      onClick={toggleEstimate}
-                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
-                    >
-                      <Coins className="h-3.5 w-3.5" /> {lastEstimate ? 'Upravit odhad ceny' : 'Odhad ceny'}
-                    </button>
-                  )}
-                  {!isProvider && (
-                    <>
-                      <button
-                        onClick={() => togglePref('time')}
-                        className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-100"
-                      >
-                        <CalendarDays className="h-3.5 w-3.5" /> Kdy se mi to hodí
-                      </button>
-                      <button
-                        onClick={() => togglePref('budget')}
-                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
-                      >
-                        <Wallet className="h-3.5 w-3.5" /> Rozpočet
-                      </button>
-                    </>
-                  )}
                   <button
                     onClick={() => { setEndOpen(true); setError(null) }}
                     className="ml-auto inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-400 transition hover:bg-red-50 hover:text-red-600"

@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
+import { usePathname, useRouter } from 'next/navigation'
 import { Bell, MessageSquare, RefreshCw, AlertTriangle } from 'lucide-react'
 import { markAllNotificationsRead } from '@/lib/actions/notifications'
 
@@ -31,6 +32,8 @@ function timeAgo(iso: string): string {
 }
 
 export default function NotificationBadge() {
+  const pathname = usePathname()
+  const router = useRouter()
   const [count, setCount] = useState(0)
   const [items, setItems] = useState<NotifItem[]>([])
   const [open, setOpen] = useState(false)
@@ -137,7 +140,7 @@ export default function NotificationBadge() {
 
                 const href = notifHref(n)
                 return href ? (
-                  <Link key={n.id} href={href} onClick={() => setOpen(false)} className="block border-b border-slate-50 last:border-0">
+                  <Link key={n.id} href={href} onClick={() => { setOpen(false); if (href.split('?')[0] === pathname) router.refresh() }} className="block border-b border-slate-50 last:border-0">
                     {inner}
                   </Link>
                 ) : (

@@ -17,6 +17,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { createNotification } from './notifications'
 import { customerPreferenceMessage } from '@/lib/chat-preference'
+import { obecFromAddress } from '@/lib/obec-from-address'
 import { itemPriceKc } from '@/lib/booking/commission'
 
 function getAdminClient() {
@@ -128,18 +129,19 @@ export async function startPrivateRequest(input: PrivateRequestInput): Promise<V
     }
   }
 
-  // Obec poptávky: zadaná zákazníkem (služba u něj), jinak obec karty. Musí mít polohu.
-  let city = (input.city?.trim() || svc.city || '').trim()
+  // Obec poptávky = obec ZÁKAZNÍKA: zadaná v okně objednávky, jinak z jeho profilu. Obec karty (poskytovatele)
+  // jen jako poslední záchrana – poskytovatel ji pak nevidí jako „U zákazníka“ (zákazník doplní adresu v chatu).
+  const { data: prof } = await admin.from('profiles').select('city').eq('id', user.id).maybeSingle()
+  const profileObec = obecFromAddress((prof as { city: string | null } | null)?.city ?? null) ?? ((prof as { city: string | null } | null)?.city?.trim() || null)
+  const wanted = input.city?.trim() || profileObec
+  let city = (svc.city || '').trim()
   let cityLat = svc.city_lat
   let cityLng = svc.city_lng
-  if (input.city?.trim()) {
-    const { data: obec } = await admin.from('obce').select('obec, latitude, longitude').ilike('obec', input.city.trim()).limit(1).maybeSingle()
+  if (wanted) {
+    const { data: obec } = await admin.from('obce').select('obec, latitude, longitude').ilike('obec', wanted).limit(1).maybeSingle()
     const o = obec as { obec: string; latitude: number; longitude: number } | null
     if (o) { city = o.obec; cityLat = o.latitude; cityLng = o.longitude }
-  }
-  if (!city) {
-    const { data: prof } = await admin.from('profiles').select('city').eq('id', user.id).maybeSingle()
-    city = String((prof as { city: string | null } | null)?.city ?? '').trim()
+    else if (input.city?.trim()) { city = input.city.trim(); cityLat = null; cityLng = null }
   }
   if (!city) return { success: false, error: 'Zadejte prosím obec, kde se má služba provést.' }
 

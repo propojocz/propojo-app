@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import { restOnSiteKc } from '@/lib/booking/texts'
+import { pollThreadMessages } from '@/lib/actions/conversation-chat'
 import { useRouter } from 'next/navigation'
 import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2, CreditCard, ShieldCheck, Clock, XCircle, Flag, AlertTriangle, ImagePlus, X, RotateCcw, Package } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -192,6 +193,30 @@ export default function OrderDetailClient({
 }) {
   const router = useRouter()
   const [messages, setMessages] = useState<MessageRow[]>(initialMessages)
+  const messagesRef = useRef<any[]>(initialMessages)
+  messagesRef.current = messages
+
+  // Nové zprávy bez obnovení stránky: každých 8 s (jen když je karta vidět) se doptá na novější zprávy.
+  useEffect(() => {
+    let stopped = false
+    const tick = async () => {
+      if (stopped || document.hidden) return
+      const last = messagesRef.current[messagesRef.current.length - 1]
+      try {
+        const fresh = await pollThreadMessages({ orderId: order.id }, last?.created_at ?? null)
+        if (stopped || !fresh.length) return
+        const known = new Set(messagesRef.current.map((m: any) => m.id))
+        const added = fresh.filter((m: any) => !known.has(m.id))
+        if (!added.length) return
+        setMessages((prev: any[]) => [...prev, ...added.filter((m: any) => !prev.some((p: any) => p.id === m.id))])
+        
+      } catch { /* další pokus za chvíli */ }
+    }
+    const timer = setInterval(tick, 8000)
+    const onVisible = () => { if (!document.hidden) void tick() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { stopped = true; clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [chatImage, setChatImage] = useState<string | null>(null)

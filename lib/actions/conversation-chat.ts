@@ -20,6 +20,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { customerPreferenceMessage, type CustomerPreference } from '@/lib/chat-preference'
+import { obecFromAddress } from '@/lib/obec-from-address'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { createNotification } from './notifications'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
@@ -477,8 +478,18 @@ export async function setRequestAddressInChat(
   if (!text || !/\d/.test(text) || address.lat == null || address.lng == null) {
     return { success: false, error: 'Vyberte prosím přesnou adresu ze seznamu (ulice a číslo).' }
   }
+  // Soukromá poptávka vznikla z karty – obec zákazníka se pozná až z jeho adresy (poskytovatel ji vidí, ulici ne)
+  const { data: rq } = await admin.from('requests').select('target_provider_id').eq('id', conv.requestId).maybeSingle() as { data: { target_provider_id: string | null } | null }
+  let cityCols: Record<string, unknown> = {}
+  const obec = rq?.target_provider_id ? obecFromAddress(text) : null
+  if (obec) {
+    const { data: o } = await admin.from('obce').select('obec, latitude, longitude').ilike('obec', obec).limit(1).maybeSingle() as { data: { obec: string; latitude: number; longitude: number } | null }
+    cityCols = o
+      ? { city: o.obec, city_lat: o.latitude, city_lng: o.longitude }
+      : { city: obec, city_lat: Math.round(address.lat * 100) / 100, city_lng: Math.round(address.lng * 100) / 100 }
+  }
   await (admin.from('requests') as any)
-    .update({ address: text, address_lat: address.lat, address_lng: address.lng, updated_at: new Date().toISOString() })
+    .update({ address: text, address_lat: address.lat, address_lng: address.lng, ...cityCols, updated_at: new Date().toISOString() })
     .eq('id', conv.requestId)
     .eq('customer_id', user.id)
   // Rozpracovaná objednávka (vybraný termín, nezaplaceno) – ať ji shrnutí rovnou předvyplní
@@ -749,4 +760,37 @@ export async function sendCustomerPreference(conversationId: string, pref: Custo
     console.error('[sendCustomerPreference] notifikace', err)
   }
   return { success: true, id: data.id, message: data }
+}
+
+// ── Nové zprávy bez obnovení stránky (16. 10. 2026) ──────────
+// Chat jednání i chat objednávky se každých pár sekund zeptá na zprávy novější než poslední,
+// kterou má. Jen účastník (zákazník / poskytovatel); u jednání i zprávy navázané objednávky.
+export async function pollThreadMessages(
+  target: { orderId?: string | null; conversationId?: string | null },
+  afterIso: string | null,
+): Promise<any[]> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+  const admin = getAdminClient()
+
+  let orderId: string | null = target.orderId ?? null
+  let conversationId: string | null = null
+  if (target.conversationId) {
+    const conv = await loadConversation(admin, target.conversationId)
+    if (!conv || (user.id !== conv.providerId && user.id !== conv.customerId)) return []
+    conversationId = target.conversationId
+    orderId = orderId ?? conv.orderId
+  } else if (orderId) {
+    const { data: o } = await admin.from('orders').select('customer_id, provider_id').eq('id', orderId).maybeSingle() as { data: { customer_id: string; provider_id: string } | null }
+    if (!o || (o.customer_id !== user.id && o.provider_id !== user.id)) return []
+  } else {
+    return []
+  }
+
+  const filter = [conversationId ? `conversation_id.eq.${conversationId}` : null, orderId ? `order_id.eq.${orderId}` : null].filter(Boolean).join(',')
+  let q = admin.from('messages').select('*').or(filter).order('created_at', { ascending: true }).limit(50)
+  if (afterIso) q = q.gt('created_at', afterIso)
+  const { data } = await q
+  return (data as any[]) ?? []
 }

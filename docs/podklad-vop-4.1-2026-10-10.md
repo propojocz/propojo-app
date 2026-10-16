@@ -122,7 +122,7 @@ Popsat hlavní parametry v pořadí významu a proč jsou důležité:
 - Stačí krátký odstavec v Podmínkách pro poskytovatele a v Zásadách (kdo stav spolupráce vidí).
 
 ### A14. Zastaralé texty na webu
-- Ceník, FAQ, registrace a stránka Storno podmínky dnes popisují předplatné, 0 % provize a staré storno úrovně. Přepíší se podle nových podmínek.
+- Ceník, FAQ a registrace dnes popisují předplatné a 0 % provize – přepíší se spolu s odstraněním předplatného. Stránka Storno je od 15. 10. 2026 přepsaná na „Zrušení rezervace a vrácení peněz“ podle modelu v2 (bez storno úrovní).
 - Advokátka u bodu 5 doporučuje odstranit zbytky storno úrovní z webu i rozhraní.
 
 ### A15. Rozhodnutí z 10. 10. 2026 (uzavřené, LOCKED FOR MVP)
@@ -193,7 +193,7 @@ Popsat hlavní parametry v pořadí významu a proč jsou důležité:
 | Čekání při „Zákazník nezastižen“ | 15 min po validním check-inu + aspoň jeden pokus o kontakt |
 | Lhůta pro Závaznou nabídku (Model C) | údaj Nabídky, výchozí 5 pracovních dní, max. 10, končí přiměřenou dobu před termínem zhotovení |
 | „Nabídku jsem neobdržel“ (Model C, A se Závaznou nabídkou) | hlásit až po marném uplynutí lhůty; reakce Poskytovatele 72 h od odeslání výzvy; připomínka před koncem |
-| Poptávka | aktivní 14 dní, max. 5 aktivně jednajících Poskytovatelů |
+| Poptávka | veřejná aktivní 14 dní (Matej zvažuje 30), max. 5 aktivně jednajících Poskytovatelů; soukromý dotaz (jen jeden Poskytovatel) aktivní 30 dní |
 | Automatický refund – zadání | bez zbytečného odkladu po události (systém kontroluje každých 5 min) |
 
 ---

@@ -12,6 +12,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import PoptavkaChat, { type ThreadItem } from '@/components/ui/PoptavkaChat'
 import InterestAction, { type PickerCard } from '@/components/ui/InterestAction'
+import { obecFromAddress } from '@/lib/obec-from-address'
 import { offerSummary } from '@/lib/booking/texts'
 import { markThreadRead } from '@/lib/actions/inbox'
 import { haversineKm } from '@/lib/geo'
@@ -104,9 +105,14 @@ export default async function JednaniPage({
   // Jména do bublin.
   const ids = [providerId, customerId].filter(Boolean) as string[]
   const { data: profs } = await admin
-    .from('profiles').select('id, full_name').in('id', ids) as { data: Array<{ id: string; full_name: string | null }> | null }
+    .from('profiles').select('id, full_name, display_name, company_name').in('id', ids) as { data: Array<{ id: string; full_name: string | null; display_name: string | null; company_name: string | null }> | null }
   const senderNames: Record<string, string> = {}
-  for (const p of profs ?? []) senderNames[p.id] = p.full_name ?? 'Uživatel'
+  // Poskytovatel všude stejně jako ve Zprávách a na kartě: zobrazované jméno → firma → celé jméno
+  for (const p of profs ?? []) {
+    senderNames[p.id] = p.id === providerId
+      ? (p.display_name || p.company_name || p.full_name || 'Poskytovatel')
+      : (p.full_name || p.display_name || 'Uživatel')
+  }
   const otherName = isProvider
     ? (customerId ? (senderNames[customerId] ?? 'Zákazník') : 'Zákazník')
     : (senderNames[providerId] ?? 'Poskytovatel')
@@ -153,8 +159,8 @@ export default async function JednaniPage({
     const provIds = Array.from(new Set(rows.map((r) => r.provider_id)))
     const provNames = new Map<string, string>()
     if (provIds.length) {
-      const { data: pp } = await admin.from('profiles').select('id, full_name').in('id', provIds) as { data: Array<{ id: string; full_name: string | null }> | null }
-      for (const p of pp ?? []) provNames.set(p.id, p.full_name ?? 'Poskytovatel')
+      const { data: pp } = await admin.from('profiles').select('id, full_name, display_name, company_name').in('id', provIds) as { data: Array<{ id: string; full_name: string | null; display_name: string | null; company_name: string | null }> | null }
+      for (const p of pp ?? []) provNames.set(p.id, p.display_name || p.company_name || p.full_name || 'Poskytovatel')
     }
     const convMap = await conversationsByResponse(admin, rows.map((r) => r.id))
     threads = rows.map((r) => {
@@ -220,6 +226,7 @@ export default async function JednaniPage({
 
   // Poskytovatel: doplnění / úprava nabídky přímo v chatu (u soukromé poptávky hlavně – nikde jinde ji nevidí)
   let offerEditor: React.ReactNode = null
+  let placeEditor: React.ReactNode = null
   if (isProvider && !conv.order_id && conv.status === 'open' && (rr.status === 'interested' || rr.status === 'negotiating') && req.status === 'open') {
     const { data: prof } = await admin.from('profiles').select('city').eq('id', user.id).maybeSingle() as { data: { city: string | null } | null }
     const { data: cards } = await admin
@@ -231,6 +238,18 @@ export default async function JednaniPage({
       id: c.id, title: c.title ?? 'Nabídka', category: c.category, subcategoryId: c.subcategory_id,
       locationType: c.location_type, address: c.address ? { text: c.address, lat: c.address_lat, lng: c.address_lng } : null,
     }))
+    const currentOffer = hasOffer ? {
+      kind: rr.offer_kind as 'A' | 'B', chargeKc: Number(rr.charge_halere) / 100, deductible: rr.quote_fee_deductible === true,
+      place: ((rr as any).place === 'u_poskytovatele' ? 'u_poskytovatele' : 'u_zakaznika') as 'u_poskytovatele' | 'u_zakaznika',
+      placeAddress: (rr as any).place_address ? { text: (rr as any).place_address, lat: (rr as any).place_lat ?? null, lng: (rr as any).place_lng ?? null } : null,
+    } : null
+    const editorProps = {
+      requestId, category: req.category, subcategoryId: req.subcategory_id, isFull: false, initialMyStatus: rr.status,
+      initialConversationId: conversationId, myCards, isLoggedIn: true, isProvider: true, myCity: prof?.city ?? null,
+      placePref: req.target_provider_id ? null : req.place_pref, initialCardId: rr.service_id ?? req.target_service_id ?? null, initialOffer: currentOffer,
+    }
+    // Místo konání se mění v nabídce (U zákazníka / U mě + adresa) – odkaz přímo u řádku „Místo konání“
+    placeEditor = <InterestAction chatMode chatLabel="Změnit místo" {...editorProps} />
     offerEditor = (
       <InterestAction
         chatMode
@@ -246,14 +265,52 @@ export default async function JednaniPage({
         myCity={prof?.city ?? null}
         placePref={req.place_pref}
         initialCardId={rr.service_id ?? req.target_service_id ?? null}
-        initialOffer={hasOffer ? { kind: rr.offer_kind as 'A' | 'B', chargeKc: Number(rr.charge_halere) / 100, deductible: rr.quote_fee_deductible === true } : null}
+        initialOffer={currentOffer}
       />
     )
   }
 
+  // Soukromý dotaz: hlavička „s kým jednám“ místo oboru poptávky
+  let counterpart: { name: string; subtitle: string | null; city: string | null; about: string | null; profileUrl: string | null } | null = null
+  if (req.target_provider_id) {
+    const cardId = req.target_service_id ?? rr.service_id
+    const { data: card } = cardId
+      ? await admin.from('services').select('title, city').eq('id', cardId).maybeSingle() as { data: { title: string | null; city: string | null } | null }
+      : { data: null }
+    if (isCustomer) {
+      const { data: pp } = await admin.from('profiles').select('bio, city').eq('id', providerId).maybeSingle() as { data: { bio: string | null; city: string | null } | null }
+      counterpart = {
+        name: otherName,
+        subtitle: card?.title ?? null,
+        city: card?.city ?? pp?.city ?? null,
+        about: pp?.bio ?? null,
+        profileUrl: `/profil/${providerId}`,
+      }
+    } else {
+      counterpart = {
+        name: otherName,
+        subtitle: card?.title ? `Píše ke kartě „${card.title}“` : null,
+        city: null,
+        about: null,
+        profileUrl: null,
+      }
+    }
+  }
+
+  // Soukromá poptávka: je obec zákazníka opravdu jeho (adresa v chatu / obec z profilu), nebo jen záchrana z karty?
+  let cityKnown = !req.target_provider_id || !!req.address
+  if (!cityKnown && customerId) {
+    const { data: cp } = await admin.from('profiles').select('city').eq('id', customerId).maybeSingle() as { data: { city: string | null } | null }
+    const own = obecFromAddress(cp?.city ?? null) ?? cp?.city?.trim() ?? null
+    cityKnown = !!own && own.toLowerCase() === String(req.city ?? '').toLowerCase()
+  }
+
   return (
     <PoptavkaChat
+      cityKnown={cityKnown}
+      counterpart={counterpart}
       offerEditor={offerEditor}
+      placeEditor={placeEditor}
       isPrivate={!!req.target_provider_id}
       defaultTermMinutes={itemMinutes}
       conversationId={conversationId}

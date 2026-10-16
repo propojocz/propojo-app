@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Loader2, MessageCircle, X } from 'lucide-react'
@@ -23,6 +23,7 @@ function kdy(iso: string): string {
 
 export default function InboxButton() {
   const pathname = usePathname()
+  const router = useRouter()
   const [open, setOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [threads, setThreads] = useState<InboxThread[] | null>(null)
@@ -102,7 +103,8 @@ export default function InboxButton() {
                     <Link
                       key={t.key}
                       href={t.href}
-                      onClick={() => setOpen(false)}
+                      // Odkaz na právě otevřenou stránku by nic neudělal → obnovit (nové zprávy)
+                      onClick={() => { setOpen(false); if (t.href.split('?')[0] === pathname) router.refresh() }}
                       className={`block rounded-2xl border px-4 py-3 transition hover:border-emerald-200 hover:bg-white ${
                         t.unread > 0 ? 'border-emerald-200 bg-white shadow-sm' : 'border-transparent'
                       }`}

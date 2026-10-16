@@ -61,7 +61,7 @@ export default function InterestAction({
   requestId, category, subcategoryId, isFull,
   initialMyStatus = null, initialConversationId = null,
   myCards, isLoggedIn, isProvider = true, myCity = null, placePref = null, block = false, onReacted,
-  chatMode = false, initialCardId = null, initialOffer = null,
+  chatMode = false, initialCardId = null, initialOffer = null, chatLabel = null,
 }: {
   requestId: string
   category: string | null
@@ -84,7 +84,9 @@ export default function InterestAction({
   /** Předvybraná karta (soukromá poptávka z karty) */
   initialCardId?: string | null
   /** Dosavadní nabídka – předvyplní formulář */
-  initialOffer?: { kind: 'A' | 'B'; chargeKc: number; deductible: boolean } | null
+  initialOffer?: { kind: 'A' | 'B'; chargeKc: number; deductible: boolean; place?: Place | null; placeAddress?: { text: string; lat: number | null; lng: number | null } | null } | null
+  /** Text tlačítka v chatu (výchozí „Doplnit / Upravit nabídku“), např. „Změnit místo“ */
+  chatLabel?: string | null
 }) {
   const router = useRouter()
   const [myStatus, setMyStatus] = useState<string | null>(initialMyStatus)
@@ -110,8 +112,18 @@ export default function InterestAction({
     if (res.conversationId) {
       if (offer.estimateFrom) await sendPriceEstimate(res.conversationId, offer.estimateFrom, offer.estimateTo, offer.estimateMaterial)
       if (offer.availFrom) await sendProviderAvailability(res.conversationId, offer.availFrom, offer.availTo)
-      for (const url of offer.photos.slice(0, MAX_OFFER_PHOTOS)) await sendConversationMessage(res.conversationId, 'Podobná práce', url)
+      // Úprava už odeslané nabídky → krátká zpráva, ať to druhá strana vidí (a obnoví se jí box „Co je domluveno“)
+      if (editingOffer) {
+        const what = `${offer.offerKind === 'B' ? 'Cena výjezdu' : 'Rezervační poplatek'} ${offer.chargeKc.toLocaleString('cs-CZ')} Kč`
+        const where = offer.place === 'u_poskytovatele' ? `u mě${offer.placeAddress?.text ? ` (${offer.placeAddress.text})` : ''}` : 'u vás'
+        await sendConversationMessage(res.conversationId, `✏️ Upravil(a) jsem nabídku: ${what}, místo: ${where}.`)
+      }
+      // Nejdřív komentář, pak fotky s jasným popiskem (ve Zprávách se jinak ukazovalo jen „Podobná práce“)
       if (offer.message.trim()) await sendConversationMessage(res.conversationId, offer.message.trim())
+      const shots = offer.photos.slice(0, MAX_OFFER_PHOTOS)
+      for (const [i, url] of shots.entries()) {
+        await sendConversationMessage(res.conversationId, shots.length > 1 ? `📷 Ukázka mé podobné práce (${i + 1}/${shots.length})` : '📷 Ukázka mé podobné práce', url)
+      }
     }
     setBusy(false)
     setPickerOpen(false)
@@ -176,7 +188,7 @@ export default function InterestAction({
               ? 'text-xs font-semibold text-emerald-700 underline hover:text-emerald-800'
               : 'inline-flex items-center gap-1 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-amber-600'}
           >
-            {initialOffer ? 'Upravit nabídku' : 'Doplnit nabídku'}
+            {chatLabel ?? (initialOffer ? 'Upravit nabídku' : 'Doplnit nabídku')}
           </button>
         )}
         {error && <p className="mt-1.5 text-xs text-red-600">{error}</p>}
@@ -248,7 +260,7 @@ function OfferPicker({
   onSubmit: (cardId: string | null, offer: OfferInput) => Promise<string | null>
   onClose: () => void
   initialCardId?: string | null
-  initialOffer?: { kind: 'A' | 'B'; chargeKc: number; deductible: boolean } | null
+  initialOffer?: { kind: 'A' | 'B'; chargeKc: number; deductible: boolean; place?: Place | null; placeAddress?: { text: string; lat: number | null; lng: number | null } | null } | null
 }) {
   // NO_CARD = obecná nabídka bez karty; null = ještě nevybráno
   const [cardId, setCardId] = useState<string | null>(
@@ -279,9 +291,30 @@ function OfferPicker({
     ? { id: NO_CARD, title: 'Bez karty – obecná nabídka', category: null, subcategoryId: null }
     : cards.find((c) => c.id === cardId) ?? null
 
-  // Při výběru karty předvyplnit místo a adresu provozovny
+  // Adresa provozovny, kterou už známe (vybraná karta, jinak kterákoli karta s adresou) – „U mě“ ji předvyplní
+  const knownPlace = (cards.find((x) => x.id === cardId)?.address) ?? cards.find((x) => x.address?.text)?.address ?? null
+  const choosePlace = (v: Place) => {
+    setPlace(v)
+    setErr(null)
+    if (v === 'u_poskytovatele') {
+      if (!placeAddr?.text && knownPlace) { setPlaceAddr(knownPlace); setPlaceKey((k) => k + 1) }
+      // Výjezd a nacenění znamená přijet k zákazníkovi – u vás dává smysl jen služba
+      if (kind === 'B') setKind('A')
+    }
+  }
+
+  // Při výběru karty předvyplnit místo a adresu provozovny (při úpravě nabídky poprvé z dosavadní nabídky)
+  const [firstPlaceInit, setFirstPlaceInit] = useState(true)
   useEffect(() => {
     if (!cardId) return
+    if (firstPlaceInit && initialOffer?.place) {
+      setFirstPlaceInit(false)
+      setPlace(initialOffer.place)
+      setPlaceAddr(initialOffer.place === 'u_poskytovatele' ? (initialOffer.placeAddress ?? knownPlace) : null)
+      setPlaceKey((k) => k + 1)
+      return
+    }
+    setFirstPlaceInit(false)
     const c = cards.find((x) => x.id === cardId)
     if (c?.locationType === 'u_poskytovatele') { setPlace('u_poskytovatele'); setPlaceAddr(c.address ?? null) }
     else if (c) { setPlace('u_zakaznika'); setPlaceAddr(null) }
@@ -421,7 +454,7 @@ function OfferPicker({
                   <button
                     key={v}
                     type="button"
-                    onClick={() => { setPlace(v); setErr(null) }}
+                    onClick={() => choosePlace(v)}
                     className={`rounded-xl border-2 px-3 py-2.5 text-left transition ${place === v ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 hover:bg-slate-50'}`}
                   >
                     <b className="block text-[13px] text-slate-900">{title}</b>
@@ -453,7 +486,12 @@ function OfferPicker({
               <p className="mb-1.5 text-xs font-semibold text-slate-600">Co zákazníkovi nabízíte *</p>
               <div className="grid grid-cols-2 gap-2">
                 {kindBtn('A', 'Službu', 'rezervace termínu, poplatek se odečte z ceny')}
-                {kindBtn('B', 'Výjezd a nacenění', 'přijedete, prohlédnete a naceníte')}
+                {place === 'u_poskytovatele' ? (
+                  <div className="rounded-xl border-2 border-dashed border-slate-200 px-3 py-2.5 text-left opacity-60">
+                    <b className="block text-[13px] text-slate-500">Výjezd a nacenění</b>
+                    <span className="block text-[11px] leading-snug text-slate-400">jen u zákazníka – u vás nabídněte službu</span>
+                  </div>
+                ) : kindBtn('B', 'Výjezd a nacenění', 'přijedete, prohlédnete a naceníte')}
               </div>
             </div>
 

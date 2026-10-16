@@ -103,8 +103,15 @@ export async function getInbox(): Promise<{ threads: InboxThread[]; unread: numb
   const responses = [...(myResp ?? []), ...custResp]
   if (responses.length) {
     const reqIds = Array.from(new Set(responses.map((r) => r.request_id)))
-    const { data: reqs } = await db.from('requests').select('id, category, customer_id').in('id', reqIds) as { data: Array<{ id: string; category: string | null; customer_id: string }> | null }
+    const { data: reqs } = await db.from('requests').select('id, category, customer_id, target_service_id').in('id', reqIds) as { data: Array<{ id: string; category: string | null; customer_id: string; target_service_id: string | null }> | null }
     const reqById = new Map((reqs ?? []).map((r) => [r.id, r]))
+    // Soukromý dotaz: předmět = název karty, ke které zákazník píše
+    const cardIds = Array.from(new Set((reqs ?? []).map((r) => r.target_service_id).filter(Boolean))) as string[]
+    const cardTitle = new Map<string, string>()
+    if (cardIds.length) {
+      const { data: cards } = await db.from('services').select('id, title').in('id', cardIds) as { data: Array<{ id: string; title: string | null }> | null }
+      for (const c of cards ?? []) cardTitle.set(c.id, c.title ?? 'karta')
+    }
     const { data: convs } = await db
       .from('conversations')
       .select('id, request_response_id, order_id')
@@ -133,7 +140,7 @@ export async function getInbox(): Promise<{ threads: InboxThread[]; unread: numb
         key: `c-${c.id}`,
         href: `/poptavky/${req.id}/jednani/${c.id}`,
         counterpart: other,
-        subject: `Poptávka: ${req.category ?? 'bez oboru'}`,
+        subject: req.target_service_id ? `Dotaz: ${cardTitle.get(req.target_service_id) ?? 'karta'}` : `Poptávka: ${req.category ?? 'bez oboru'}`,
         kind: 'request',
         lastText: last.content,
         lastAt: last.created_at,
