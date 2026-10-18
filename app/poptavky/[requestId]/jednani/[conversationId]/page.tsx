@@ -60,7 +60,7 @@ export default async function JednaniPage({
 
   const { data: req } = await admin
     .from('requests')
-    .select('id, customer_id, category, subcategory_id, city, city_lat, city_lng, description, preferred_date, photos, status, budget_from_kc, budget_to_kc, place_pref, address, inspiration_photos, target_provider_id, target_service_id')
+    .select('id, customer_id, category, subcategory_id, city, city_lat, city_lng, description, preferred_date, photos, status, budget_from_kc, budget_to_kc, place_pref, address, address_lat, address_lng, inspiration_photos, target_provider_id, target_service_id')
     .eq('id', requestId)
     .maybeSingle() as { data: {
       id: string; customer_id: string | null; category: string | null; city: string
@@ -70,6 +70,7 @@ export default async function JednaniPage({
       description: string; preferred_date: string | null; photos: string[] | null; status: string
       inspiration_photos: string[] | null
       subcategory_id: string | null; target_provider_id: string | null; target_service_id: string | null
+      address_lat: number | null; address_lng: number | null
     } | null }
   if (!req) notFound()
 
@@ -200,7 +201,11 @@ export default async function JednaniPage({
 
   // Vzdálenost obce poptávky od místa, odkud poskytovatel vyjíždí (karta, jinak obec z profilu)
   let distanceKm: number | null = null
-  if (req.city_lat != null && req.city_lng != null) {
+  // Cíl: přesná adresa zákazníka, když ji doplnil (poskytovatel z ní vidí jen km, ne ulici), jinak obec poptávky
+  const target = req.address_lat != null && req.address_lng != null
+    ? { lat: Number(req.address_lat), lng: Number(req.address_lng) }
+    : req.city_lat != null && req.city_lng != null ? { lat: Number(req.city_lat), lng: Number(req.city_lng) } : null
+  if (target) {
     let base: { lat: number; lng: number } | null = null
     if (rr.service_id) {
       const { data: card } = await admin.from('services').select('city, city_lat, city_lng').eq('id', rr.service_id).maybeSingle() as { data: { city: string | null; city_lat: number | null; city_lng: number | null } | null }
@@ -214,7 +219,7 @@ export default async function JednaniPage({
         if (o) base = { lat: o.latitude, lng: o.longitude }
       }
     }
-    if (base) distanceKm = Math.round(haversineKm(base.lat, base.lng, Number(req.city_lat), Number(req.city_lng)))
+    if (base) distanceKm = Math.round(haversineKm(base.lat, base.lng, target.lat, target.lng))
   }
 
   // Vybraná položka ceníku (soukromá poptávka z „Nejdřív se domluvit“) → délka navrhovaného termínu

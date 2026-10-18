@@ -9,6 +9,7 @@ export function obecFromAddress(text: string | null | undefined): string | null 
     .filter((p) => p && !/^(česko|czechia|česká republika|czech republic)$/i.test(p))
   if (parts.length === 0) return null
   // „Ulice číslo, Obec“ → obec; jen jedna část bez čísla domu → to je obec
-  if (parts.length === 1) return /\d/.test(parts[0]) ? null : parts[0]
-  return parts[parts.length - 1]
+  const last = parts.length === 1 ? (/\d/.test(parts[0]) ? null : parts[0]) : parts[parts.length - 1]
+  // Část obce z našeptávače („Valašské Meziříčí - Hrachovec“) → obec („Valašské Meziříčí“)
+  return last ? last.split(/\s+[-–]\s+/)[0].trim() : null
 }
