@@ -1,7 +1,7 @@
 'use server'
 // lib/actions/calendar.ts
-// Kalendář poskytovatele K1 + K2 (19. 10. 2026, docs/plan-kalendar.md): načte se celý týden (Po–Ne)
-// s vybraným dnem – Den z něj ukazuje jeden den jako časovou osu, Týden všech sedm.
+// Kalendář poskytovatele K1–K4 (19. 10. 2026, docs/plan-kalendar.md): načte se celý týden (Po–Ne)
+// s vybraným dnem (Den, Týden, Přehled), nebo celé týdny pokrývající měsíc (Měsíc, 35–42 dní).
 //
 // Co se ukazuje: rezervace (model v2 podle booking_state, starý model podle status / deposit_status),
 // pauza / přesun za rezervací (pauza za službou + rezerva na přejezd u výjezdu – přesuny počítá
@@ -60,7 +60,8 @@ export type CalendarDay = {
   /** Vybraný den */
   date: string
   today: string
-  /** Po–Ne týdne s vybraným dnem */
+  /** 'week' = Po–Ne týdne s vybraným dnem, 'month' = celé týdny pokrývající měsíc vybraného dne */
+  range: 'week' | 'month'
   days: CalDayData[]
   places: CalPlace[]
   /** Má aspoň jedna karta otevírací dobu? (jinak mezery jen mezi rezervacemi) */
@@ -113,7 +114,7 @@ function subtract(ranges: Range[], busy: Range[]): Range[] {
   return free
 }
 
-export async function getCalendarDay(dateStr?: string): Promise<CalendarDay | null> {
+export async function getCalendarDay(dateStr?: string, range: 'week' | 'month' = 'week'): Promise<CalendarDay | null> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
@@ -124,10 +125,23 @@ export async function getCalendarDay(dateStr?: string): Promise<CalendarDay | nu
     ? dateStr
     : today
 
-  const weekStart = shiftDate(date, 1 - denVTydnuPraha(isoZPrazskehoCasu(date, '12:00')))
-  const weekDates = Array.from({ length: 7 }, (_, i) => shiftDate(weekStart, i))
+  // Rozsah: týden s vybraným dnem, nebo od pondělí před 1. dnem měsíce do neděle po posledním
+  const mondayOf = (d: string) => shiftDate(d, 1 - denVTydnuPraha(isoZPrazskehoCasu(d, '12:00')))
+  let weekStart: string
+  let dayCount = 7
+  if (range === 'month') {
+    const first = `${date.slice(0, 7)}-01`
+    const [yy, mm] = date.split('-').map(Number)
+    const last = shiftDate(`${mm === 12 ? yy + 1 : yy}-${String(mm === 12 ? 1 : mm + 1).padStart(2, '0')}-01`, -1)
+    weekStart = mondayOf(first)
+    const lastSunday = shiftDate(mondayOf(last), 6)
+    dayCount = Math.round((new Date(`${lastSunday}T12:00:00Z`).getTime() - new Date(`${weekStart}T12:00:00Z`).getTime()) / 86_400_000) + 1
+  } else {
+    weekStart = mondayOf(date)
+  }
+  const weekDates = Array.from({ length: dayCount }, (_, i) => shiftDate(weekStart, i))
   const weekFromIso = isoZPrazskehoCasu(weekStart, '00:00')
-  const weekToIso = isoZPrazskehoCasu(shiftDate(weekStart, 7), '00:00')
+  const weekToIso = isoZPrazskehoCasu(shiftDate(weekStart, dayCount), '00:00')
 
   // ── Karty a otevírací doba ─────────────────────────────────
   const { data: svcRows } = await db
@@ -356,5 +370,5 @@ export async function getCalendarDay(dateStr?: string): Promise<CalendarDay | nu
     return { date: d, items, gaps: gapsForDay(d, startMs, endMs, items, takenSlots.filter(overlaps)) }
   })
 
-  return { date, today, days, places, hasHours: cardsWithHours.size > 0 }
+  return { date, today, range, days, places, hasHours: cardsWithHours.size > 0 }
 }

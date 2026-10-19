@@ -1,5 +1,6 @@
 // app/dashboard/kalendar/page.tsx
-// Kalendář poskytovatele – K1 den, K2 týden (19. 10. 2026, docs/plan-kalendar.md). ?den=YYYY-MM-DD, ?pohled=tyden, ?misto=…
+// Kalendář poskytovatele jako Apple Kalendář – Den / Týden / Měsíc (K1–K4, 19. 10. 2026, docs/plan-kalendar.md).
+// ?den=YYYY-MM-DD, ?pohled=tyden|mesic, ?misto=…
 // Data skládá lib/actions/calendar.ts, zobrazení a formuláře KalendarClient.
 // Volné termíny dopředu se dál spravují v Termínech (/dashboard/terminy), odkaz je v kalendáři.
 
@@ -22,8 +23,9 @@ export default async function KalendarPage({ searchParams }: { searchParams: { d
     .single() as { data: { is_provider: boolean } | null }
   if (profile?.is_provider !== true) redirect('/dashboard')
 
-  const data = await getCalendarDay(searchParams?.den)
+  const view = searchParams?.pohled === 'tyden' ? 'tyden' : searchParams?.pohled === 'mesic' ? 'mesic' : 'den'
+  const data = await getCalendarDay(searchParams?.den, view === 'mesic' ? 'month' : 'week')
   if (!data) redirect('/dashboard')
 
-  return <KalendarClient data={data} view={searchParams?.pohled === 'tyden' ? 'tyden' : 'den'} initialPlace={searchParams?.misto ?? 'all'} />
+  return <KalendarClient data={data} view={view} initialPlace={searchParams?.misto ?? 'all'} />
 }

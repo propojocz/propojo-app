@@ -5,19 +5,20 @@
 
 import type { CalBooking, CalGap, CalItem, CalPlace } from '@/lib/actions/calendar'
 import type { QuickSlotInitial } from '@/components/ui/QuickSlotForm'
-import { cas } from '@/lib/format'
+import { cas, isoZPrazskehoCasu, minutyOdPulnociPraha } from '@/lib/format'
 
-export type PlaceStyle = { dot: string; border: string; chip: string }
+/** dot = tečka / proužek, border = levý okraj, chip = filtr, tint = podklad bloku v mřížce, ink = text bloku */
+export type PlaceStyle = { dot: string; border: string; chip: string; tint: string; ink: string }
 
 const PALETTE: PlaceStyle[] = [
-  { dot: 'bg-sky-400', border: 'border-l-sky-400', chip: 'border-sky-300 bg-sky-50 text-sky-800' },
-  { dot: 'bg-violet-400', border: 'border-l-violet-400', chip: 'border-violet-300 bg-violet-50 text-violet-800' },
-  { dot: 'bg-teal-400', border: 'border-l-teal-400', chip: 'border-teal-300 bg-teal-50 text-teal-800' },
-  { dot: 'bg-rose-400', border: 'border-l-rose-400', chip: 'border-rose-300 bg-rose-50 text-rose-800' },
-  { dot: 'bg-lime-500', border: 'border-l-lime-500', chip: 'border-lime-300 bg-lime-50 text-lime-800' },
+  { dot: 'bg-sky-400', border: 'border-l-sky-400', chip: 'border-sky-300 bg-sky-50 text-sky-800', tint: 'bg-sky-50', ink: 'text-sky-900' },
+  { dot: 'bg-violet-400', border: 'border-l-violet-400', chip: 'border-violet-300 bg-violet-50 text-violet-800', tint: 'bg-violet-50', ink: 'text-violet-900' },
+  { dot: 'bg-teal-400', border: 'border-l-teal-400', chip: 'border-teal-300 bg-teal-50 text-teal-800', tint: 'bg-teal-50', ink: 'text-teal-900' },
+  { dot: 'bg-rose-400', border: 'border-l-rose-400', chip: 'border-rose-300 bg-rose-50 text-rose-800', tint: 'bg-rose-50', ink: 'text-rose-900' },
+  { dot: 'bg-lime-500', border: 'border-l-lime-500', chip: 'border-lime-300 bg-lime-50 text-lime-800', tint: 'bg-lime-50', ink: 'text-lime-900' },
 ]
-export const VYJEZDY_STYLE: PlaceStyle = { dot: 'bg-indigo-400', border: 'border-l-indigo-400', chip: 'border-indigo-300 bg-indigo-50 text-indigo-800' }
-export const NEUTRAL_STYLE: PlaceStyle = { dot: 'bg-slate-300', border: 'border-l-slate-300', chip: 'border-slate-300 bg-slate-50 text-slate-700' }
+export const VYJEZDY_STYLE: PlaceStyle = { dot: 'bg-indigo-400', border: 'border-l-indigo-400', chip: 'border-indigo-300 bg-indigo-50 text-indigo-800', tint: 'bg-indigo-50', ink: 'text-indigo-900' }
+export const NEUTRAL_STYLE: PlaceStyle = { dot: 'bg-slate-300', border: 'border-l-slate-300', chip: 'border-slate-300 bg-slate-50 text-slate-700', tint: 'bg-slate-50', ink: 'text-slate-800' }
 
 export const WEEKDAYS = ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne']
 
@@ -96,4 +97,18 @@ export function quickFromGap(date: string, g: CalGap): QuickSlotInitial {
   const startMs = Math.max(new Date(g.start).getTime(), soonest)
   const from = startMs < new Date(g.end).getTime() ? cas(new Date(startMs)) : cas(g.start)
   return { date, from, to: timeField(g.end), cardIds: g.cardIds }
+}
+
+/** Minuty od pražské půlnoci daného dne (0–1440); co začíná dřív nebo končí později, se ořízne na den */
+export function dayMinute(date: string, iso: string): number {
+  const ms = new Date(iso).getTime()
+  if (ms <= new Date(isoZPrazskehoCasu(date, '00:00')).getTime()) return 0
+  if (ms >= new Date(isoZPrazskehoCasu(shiftDate(date, 1), '00:00')).getTime()) return 24 * 60
+  return minutyOdPulnociPraha(iso)
+}
+
+/** Minuty → 'HH:MM' */
+export function hhmm(min: number): string {
+  const m = Math.max(0, Math.min(23 * 60 + 55, min))
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
 }

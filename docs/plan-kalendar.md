@@ -50,6 +50,6 @@ volné termíny `availability_slots`, bleskový termín `QuickSlotForm`, stránk
 **K2 – Týden + ukázkový den** (HOTOVO 19. 10. 2026, nasazeno, commit 4f406f2; ukázka jen při prázdném týdnu): počítač 7 sloupců s bloky, mobil seznam po dnech; klik → den. Prázdný kalendář ukáže zašedlou ukázku.
 **K3 – Přehled** (POSTAVENO 19. 10. 2026, build prošel, čeká na test a nasazení; „Zaplaceno přes Propojo“ místo „výdělek“, staré dlaždice pryč) (`/dashboard` pro poskytovatele): dnes (rezervace, čeká na potvrzení, největší volno + ⚡), tento týden,
   zaplaceno přes Propojo tento měsíc, poslední hodnocení.
-**K4 – Měsíc**: mřížka s počtem rezervací a volna u dne, klik → den.
+**K4 – Měsíc + Den a Týden jako Apple Kalendář** (POSTAVENO 19. 10. 2026, build prošel, čeká na test a nasazení; mřížka hodin v Dni a Týdnu na počítači, Týden na mobilu seznam): mřížka s počtem rezervací a volna u dne, klik → den.
 
 Každá fáze zvlášť: build → test → commit. Pobočky (Provider OS) se do filtru „Místo“ doplní později.
