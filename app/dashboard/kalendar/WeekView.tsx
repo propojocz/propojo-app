@@ -7,12 +7,12 @@ import Link from 'next/link'
 import { ChevronRight } from 'lucide-react'
 import type { CalBooking, CalDayData } from '@/lib/actions/calendar'
 import { cas } from '@/lib/format'
-import { WEEKDAYS, bookingsText, durationText, filterItems, type PlaceStyle } from './shared'
+import { WEEKDAYS, bookingsText, durationText, filterItems, gapsOf, type PlaceSel, type PlaceStyle } from './shared'
 
-export default function WeekView({ days, today, place, styleOf, dayHref }: {
+export default function WeekView({ days, today, sel, styleOf, dayHref }: {
   days: CalDayData[]
   today: string
-  place: string
+  sel: PlaceSel
   styleOf: (key: string) => PlaceStyle
   dayHref: (date: string) => string
 }) {
@@ -21,10 +21,10 @@ export default function WeekView({ days, today, place, styleOf, dayHref }: {
       {/* Mobil: seznam po dnech */}
       <ul className="space-y-2 md:hidden">
         {days.map((d, i) => {
-          const items = filterItems(d.items, place)
+          const items = filterItems(d.items, sel)
           const bookings = items.filter((x): x is CalBooking => x.type === 'booking')
           const notes = items.filter((x) => x.type === 'block' && x.kind === 'note').length
-          const free = (d.gaps[place] ?? []).reduce((s, g) => s + g.minutes, 0)
+          const free = gapsOf(d, sel).reduce((s, g) => s + g.minutes, 0)
           const isT = d.date === today
           const shown = items.slice(0, 4)
           return (
@@ -40,7 +40,7 @@ export default function WeekView({ days, today, place, styleOf, dayHref }: {
                 <div className="min-w-0 flex-1">
                   <p className="text-xs text-slate-500">
                     {bookingsText(bookings.length)}
-                    {notes > 0 && <> · {notes === 1 ? '1 poznámka' : `${notes} poznámky`}</>}
+                    {notes > 0 && <> · {notes === 1 ? '1 vlastní termín' : notes < 5 ? `${notes} vlastní termíny` : `${notes} vlastních termínů`}</>}
                     {free > 0 && <> · <span className="font-semibold text-emerald-700">volno {durationText(free)}</span></>}
                   </p>
                   {shown.length > 0 && (
@@ -54,10 +54,10 @@ export default function WeekView({ days, today, place, styleOf, dayHref }: {
                               <span className="truncate">{it.customer} · {it.title}</span>
                             </>
                           ) : it.type === 'slot' ? (
-                            <span className="truncate text-emerald-700">vypsáno volno do {cas(it.end)}</span>
+                            <span className="truncate text-orange-700">⚡ volný termín do {cas(it.end)}</span>
                           ) : (
                             <span className={`truncate ${it.kind === 'note' ? 'text-amber-800' : 'text-slate-500'}`}>
-                              {it.kind === 'note' ? '📝 ' : ''}{it.text || (it.kind === 'note' ? 'Poznámka' : 'Blokováno')}
+                              {it.kind === 'note' ? '📝 ' : ''}{it.text || (it.kind === 'note' ? 'Vlastní termín' : 'Blokováno')}
                             </span>
                           )}
                         </li>

@@ -4,15 +4,15 @@
 // Instagram Story, obrázek příspěvku, QR kód, odkaz (15. 10. 2026; dřív jen nativní sdílení / schránka).
 
 import { useState } from 'react'
-import { Share2 } from 'lucide-react'
+import { ArrowUpRight, Share2 } from 'lucide-react'
 import ShareSheet from '@/components/ui/ShareSheet'
 
 interface Props {
   slotId: string
   /** Popis termínu (dřív text do sdílení; text teď skládá ShareSheet z údajů termínu) */
   label?: string
-  /** 'button' = plné tlačítko, 'compact' = malé vedle termínu v seznamu, 'icon' = jen ikona */
-  variant?: 'button' | 'compact' | 'icon'
+  /** 'button' = plné tlačítko, 'compact' = malé vedle termínu v seznamu, 'icon' = jen ikona, 'slot' = oranžové v kartě volného termínu (Kalendář) */
+  variant?: 'button' | 'compact' | 'icon' | 'slot'
 }
 
 export default function ShareSlotButton({ slotId, variant = 'button' }: Props) {
@@ -30,6 +30,22 @@ export default function ShareSlotButton({ slotId, variant = 'button' }: Props) {
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-emerald-300 hover:text-emerald-700"
         >
           <Share2 className="h-4 w-4" />
+        </button>
+        {sheet}
+      </>
+    )
+  }
+
+  if (variant === 'slot') {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          title="Sdílet termín"
+          className="flex w-full items-center justify-center gap-1 rounded-lg bg-orange-100 px-2 py-1 text-[11px] font-bold text-orange-700 transition hover:bg-orange-200"
+        >
+          Sdílet <ArrowUpRight className="h-3.5 w-3.5" />
         </button>
         {sheet}
       </>

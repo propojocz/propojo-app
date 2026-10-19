@@ -17,8 +17,11 @@ import { createClient } from '@/lib/supabase/server'
 import { adminDb } from '@/lib/booking/payments'
 import { isoZPrazskehoCasu, minutyOdPulnociPraha, casNaMinuty, denVTydnuPraha } from '@/lib/format'
 import { providerSeesCustomerContact } from '@/lib/booking/state'
+import { normalizeText } from '@/lib/search'
 
-const MIN_GAP_MIN = 30
+// Volno jen na celé a půl hodiny a aspoň hodinu (Matej 19. 10.: ne náhodné minuty, jen pár nabídek)
+const MIN_GAP_MIN = 60
+const GAP_STEP_MIN = 30
 const FALLBACK_DURATION_MIN = 60
 // Stavy v2, které v kalendáři drží čas
 const SHOWN_STATES = ['pending_payment', 'awaiting_confirmation', 'capture_in_progress', 'confirmed', 'no_show_reported']
@@ -54,6 +57,8 @@ export type CalDayData = {
   items: CalItem[]
   /** Mezery podle filtru: 'all' a klíč každého místa */
   gaps: Record<string, CalGap[]>
+  /** Otevírací doba dne podle filtru (minuty od půlnoci); prázdné = zavřeno / bez otevírací doby */
+  open: Record<string, { from: number; to: number }[]>
 }
 
 export type CalendarDay = {
@@ -304,7 +309,7 @@ export async function getCalendarDay(dateStr?: string, range: 'week' | 'month' =
   }))
 
   // ── Mezery jednoho dne pro každý filtr místa ──────────────
-  const gapsForDay = (d: string, dayStartMs: number, dayEndMs: number, items: CalItem[], taken: { start: string; end: string }[]): Record<string, CalGap[]> => {
+  const gapsForDay = (d: string, dayStartMs: number, dayEndMs: number, items: CalItem[], taken: { start: string; end: string }[]): { gaps: Record<string, CalGap[]>; open: Record<string, Range[]> } => {
     const dayEndIso = new Date(dayEndMs).toISOString()
     const weekday = denVTydnuPraha(isoZPrazskehoCasu(d, '12:00'))
     const dayHours = new Map<string, Range[]>()
@@ -336,6 +341,11 @@ export async function getCalendarDay(dateStr?: string, range: 'week' | 'month' =
       }
       open = open.map((r) => ({ from: Math.max(r.from, lowerBound), to: r.to })).filter((r) => r.to > r.from)
       return subtract(open, busy)
+        // začátek nahoru, konec dolů na :00 / :30 (půlnoc zůstává)
+        .map((g) => ({
+          from: Math.ceil(g.from / GAP_STEP_MIN) * GAP_STEP_MIN,
+          to: g.to >= 24 * 60 ? 24 * 60 : Math.floor(g.to / GAP_STEP_MIN) * GAP_STEP_MIN,
+        }))
         .filter((g) => g.to - g.from >= MIN_GAP_MIN)
         .map((g) => ({
           start: isoZPrazskehoCasu(d, hhmm(g.from)),
@@ -348,11 +358,19 @@ export async function getCalendarDay(dateStr?: string, range: 'week' | 'month' =
         }))
     }
 
-    const out: Record<string, CalGap[]> = { all: gapsFor(active.map((s) => s.id)) }
+    // Otevírací doba pro šedé vyznačení času mimo provoz v mřížce
+    const openFor = (cardIds: string[]): Range[] =>
+      mergeRanges(cardIds.filter((id) => cardsWithHours.has(id)).flatMap((id) => dayHours.get(id) ?? []))
+
+    const allIds = active.map((s) => s.id)
+    const gaps: Record<string, CalGap[]> = { all: gapsFor(allIds) }
+    const open: Record<string, Range[]> = { all: openFor(allIds) }
     for (const p of places) {
-      out[p.key] = gapsFor(active.filter((s) => (cardPlaces.get(s.id) ?? []).includes(p.key)).map((s) => s.id))
+      const ids = active.filter((s) => (cardPlaces.get(s.id) ?? []).includes(p.key)).map((s) => s.id)
+      gaps[p.key] = gapsFor(ids)
+      open[p.key] = openFor(ids)
     }
-    return out
+    return { gaps, open }
   }
 
   // ── Jednotlivé dny ────────────────────────────────────────
@@ -367,8 +385,90 @@ export async function getCalendarDay(dateStr?: string, range: 'week' | 'month' =
       ...slots.filter(overlaps),
       ...blocks.filter(overlaps),
     ].sort((a, b) => a.start.localeCompare(b.start))
-    return { date: d, items, gaps: gapsForDay(d, startMs, endMs, items, takenSlots.filter(overlaps)) }
+    return { date: d, items, ...gapsForDay(d, startMs, endMs, items, takenSlots.filter(overlaps)) }
   })
 
   return { date, today, range, days, places, hasHours: cardsWithHours.size > 0 }
+}
+
+// ─── Hledání v kalendáři (19. 10. 2026, Matej: „najít konkrétního člověka“) ─────────────
+// Rezervace podle jména zákazníka nebo služby a vlastní termíny podle textu – za poslední rok a dopředu,
+// bez ohledu na diakritiku a velikost písmen. Nejdřív nadcházející (od nejbližší), pak proběhlé (od nejnovější).
+
+export type CalSearchHit = {
+  kind: 'booking' | 'note'
+  id: string
+  start: string
+  end: string
+  /** Jméno zákazníka / text vlastního termínu */
+  name: string
+  /** Služba (u rezervace) */
+  detail: string | null
+  placeKey: string | null
+}
+
+export async function searchCalendar(query: string): Promise<CalSearchHit[]> {
+  const words = normalizeText(query.trim()).split(/\s+/).filter(Boolean)
+  if (words.join('').length < 2) return []
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+  const db = adminDb() as any
+  const fromIso = new Date(Date.now() - 365 * 86_400_000).toISOString()
+  const matches = (text: string) => { const t = normalizeText(text); return words.every((w) => t.includes(w)) }
+
+  const [{ data: orderRows }, { data: blockRows }] = await Promise.all([
+    db.from('orders')
+      .select('id, customer_id, booking_state, offer_kind, scheduled_at, scheduled_end, service_location, provider_place_address, service_items(name, duration_minutes), services(title, location_type, address, city)')
+      .eq('provider_id', user.id)
+      .neq('status', 'zruseno')
+      .not('scheduled_at', 'is', null)
+      .gte('scheduled_at', fromIso)
+      .order('scheduled_at', { ascending: false })
+      .limit(1000),
+    db.from('provider_blocks')
+      .select('*')
+      .eq('provider_id', user.id)
+      .gte('starts_at', fromIso)
+      .limit(1000),
+  ])
+
+  // Jen rezervace, které v kalendáři drží čas (bez rozpracovaných plateb), a starý model
+  const orders = ((orderRows ?? []) as any[]).filter((o) =>
+    o.booking_state ? SHOWN_STATES.includes(o.booking_state) && o.booking_state !== 'pending_payment' : !o.offer_kind)
+  const ids = Array.from(new Set(orders.map((o) => o.customer_id).filter(Boolean)))
+  const nameOf = new Map<string, string>()
+  if (ids.length > 0) {
+    const { data: profs } = await db.from('profiles').select('id, full_name').in('id', ids)
+    for (const p of (profs ?? []) as any[]) nameOf.set(p.id, p.full_name || 'Zákazník')
+  }
+
+  const hits: CalSearchHit[] = []
+  for (const o of orders) {
+    const name = nameOf.get(o.customer_id) ?? 'Zákazník'
+    const title = o.service_items?.name || o.services?.title || 'Rezervace'
+    if (!matches(`${name} ${title}`)) continue
+    const startMs = new Date(o.scheduled_at).getTime()
+    const dur = Number(o.service_items?.duration_minutes ?? 0)
+    const atCustomer = o.service_location ? o.service_location === 'u_zakaznika' : o.services?.location_type !== 'u_poskytovatele'
+    const where = (o.provider_place_address || o.services?.address || o.services?.city || '').trim()
+    hits.push({
+      kind: 'booking',
+      id: o.id,
+      start: new Date(startMs).toISOString(),
+      end: o.scheduled_end ? new Date(o.scheduled_end).toISOString() : new Date(startMs + (dur > 0 ? dur : FALLBACK_DURATION_MIN) * 60_000).toISOString(),
+      name,
+      detail: title,
+      placeKey: atCustomer ? 'vyjezdy' : where ? placeKey(where) : null,
+    })
+  }
+  for (const b of (blockRows ?? []) as any[]) {
+    if (b.kind !== 'note' || !b.reason || !matches(b.reason)) continue
+    hits.push({ kind: 'note', id: b.id, start: new Date(b.starts_at).toISOString(), end: new Date(b.ends_at).toISOString(), name: b.reason, detail: null, placeKey: null })
+  }
+
+  const now = Date.now()
+  const upcoming = hits.filter((h) => new Date(h.end).getTime() >= now).sort((a, b) => a.start.localeCompare(b.start))
+  const past = hits.filter((h) => new Date(h.end).getTime() < now).sort((a, b) => b.start.localeCompare(a.start))
+  return [...upcoming, ...past].slice(0, 20)
 }

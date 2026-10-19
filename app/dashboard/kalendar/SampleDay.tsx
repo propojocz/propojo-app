@@ -59,7 +59,7 @@ export default function SampleDay() {
           <div className="flex flex-1 items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5">
             <StickyNote className="mt-0.5 h-4 w-4 text-amber-500" />
             <div>
-              <p className="text-sm font-bold text-amber-900">Poznámka <span className="ml-1 text-[11px] font-semibold text-amber-700">· mimo Propojo</span></p>
+              <p className="text-sm font-bold text-amber-900">Vlastní termín <span className="ml-1 text-[11px] font-semibold text-amber-700">· mimo Propojo</span></p>
               <p className="text-sm text-slate-800">Paní Dvořáková – volala, přijde osobně</p>
             </div>
           </div>

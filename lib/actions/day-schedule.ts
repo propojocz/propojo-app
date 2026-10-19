@@ -276,7 +276,7 @@ export async function blockTime(values: {
 
   const isNote = values.kind === 'note'
   const text = values.reason?.trim() || null
-  if (isNote && !text) return { success: false, error: 'Napište, co je v poznámce (např. jméno a služba).' }
+  if (isNote && !text) return { success: false, error: 'Napište do poznámky, kdo a co (např. jméno a služba).' }
 
   // Nedovolíme zablokovat čas, kde už je ZAPLACENÁ rezervace — tu blokace
   // nepřepíše, musela by se výslovně zrušit (a vrátit platba). Starý model podle
@@ -294,7 +294,7 @@ export async function blockTime(values: {
     return {
       success: false,
       error: isNote
-        ? 'V tomhle čase máte rezervaci přes Propojo — poznámku dejte do jiného času.'
+        ? 'V tomhle čase máte rezervaci přes Propojo — termín dejte do jiného času.'
         : 'V tomhle čase máte zaplacenou rezervaci — tu blokací přepsat nelze. Nejdřív ji zrušte.',
     }
   }
@@ -310,7 +310,7 @@ export async function blockTime(values: {
   })
   if (error) {
     console.error('[blockTime]', error)
-    return { success: false, error: isNote ? 'Poznámku se nepodařilo uložit. Proběhlo SQL kalendar-k1.sql?' : 'Blokaci se nepodařilo uložit.' }
+    return { success: false, error: isNote ? 'Termín se nepodařilo uložit. Proběhlo SQL kalendar-k1.sql?' : 'Blokaci se nepodařilo uložit.' }
   }
 
   // Volná okna uvnitř blokace nemají co dělat v nabídce — zákazník by si

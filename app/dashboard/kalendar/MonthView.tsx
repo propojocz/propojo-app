@@ -10,32 +10,33 @@ import Link from 'next/link'
 import { ChevronRight } from 'lucide-react'
 import type { CalBooking, CalDayData, CalItem } from '@/lib/actions/calendar'
 import { cas, denDlouze } from '@/lib/format'
-import { WEEKDAYS, bookingsText, durationText, filterItems, noon, type PlaceStyle } from './shared'
+import { WEEKDAYS, bookingsText, durationText, filterItems, gapsOf, noon, type PlaceSel, type PlaceStyle } from './shared'
 
 function itemText(it: CalItem): string {
   if (it.type === 'booking') return it.customer
-  if (it.type === 'slot') return 'vypsané volno'
-  return it.text || (it.kind === 'note' ? 'Poznámka' : 'Blokováno')
+  if (it.type === 'slot') return '⚡ volný termín'
+  return it.text || (it.kind === 'note' ? 'Vlastní termín' : 'Blokováno')
 }
 
-export default function MonthView({ days, month, selectedInit, today, place, styleOf, dayHref }: {
+export default function MonthView({ days, month, selectedInit, today, sel: places, styleOf, dayHref }: {
   days: CalDayData[]
   /** 'YYYY-MM' zobrazeného měsíce */
   month: string
   selectedInit: string
   today: string
-  place: string
+  /** Vybraná místa (prázdné = všechna) */
+  sel: PlaceSel
   styleOf: (key: string) => PlaceStyle
   dayHref: (date: string) => string
 }) {
   const [selected, setSelected] = useState(selectedInit.startsWith(month) ? selectedInit : `${month}-01`)
   const sel = days.find((d) => d.date === selected) ?? days[0]
-  const selItems = filterItems(sel.items, place)
-  const selFree = (sel.gaps[place] ?? []).reduce((s, g) => s + g.minutes, 0)
+  const selItems = filterItems(sel.items, places)
+  const selFree = gapsOf(sel, places).reduce((s, g) => s + g.minutes, 0)
 
   const dot = (it: CalItem) =>
     it.type === 'booking' ? styleOf(it.placeKey).dot
-      : it.type === 'slot' ? 'bg-emerald-400'
+      : it.type === 'slot' ? 'bg-orange-400'
       : it.kind === 'note' ? 'bg-amber-400' : 'bg-slate-300'
 
   return (
@@ -51,8 +52,8 @@ export default function MonthView({ days, month, selectedInit, today, place, sty
           {days.map((d, i) => {
             const inMonth = d.date.startsWith(month)
             const isT = d.date === today
-            const items = filterItems(d.items, place)
-            const free = (d.gaps[place] ?? []).reduce((s, g) => s + g.minutes, 0)
+            const items = filterItems(d.items, places)
+            const free = gapsOf(d, places).reduce((s, g) => s + g.minutes, 0)
             const shown = items.slice(0, 3)
             return (
               <Link key={d.date} href={dayHref(d.date)}
@@ -94,7 +95,7 @@ export default function MonthView({ days, month, selectedInit, today, place, sty
               const inMonth = d.date.startsWith(month)
               const isT = d.date === today
               const isSel = d.date === selected
-              const items = filterItems(d.items, place)
+              const items = filterItems(d.items, places)
               const dots = Array.from(new Set(items.map(dot))).slice(0, 3)
               return (
                 <button key={d.date} type="button" onClick={() => setSelected(d.date)}
