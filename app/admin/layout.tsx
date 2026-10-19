@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Link from 'next/link'
-import { Inbox, Users, AlertTriangle, ShieldCheck, Flag, FolderTree } from 'lucide-react'
+import { Inbox, Users, AlertTriangle, ShieldCheck, Flag, FolderTree, Image as ImageIcon } from 'lucide-react'
 
 export const metadata = { title: 'Admin | Propojo' }
 
@@ -39,6 +39,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     { href: '/admin/spory', label: 'Spory', icon: 'AlertTriangle', ready: true, badge: disputeCount ?? 0 },
     { href: '/admin/recenze', label: 'Recenze', icon: 'Flag', ready: true, badge: reportedCount ?? 0 },
     { href: '/admin/kategorie', label: 'Kategorie', icon: 'FolderTree', ready: true, badge: 0 },
+    { href: '/admin/obrazky', label: 'Obrázky', icon: 'Image', ready: true, badge: 0 },
   ]
 
   return (
@@ -70,6 +71,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                     {item.icon === 'AlertTriangle' && <AlertTriangle className="h-4 w-4 shrink-0 text-slate-400" />}
                     {item.icon === 'Flag' && <Flag className="h-4 w-4 shrink-0 text-slate-400" />}
                     {item.icon === 'FolderTree' && <FolderTree className="h-4 w-4 shrink-0 text-slate-400" />}
+                    {item.icon === 'Image' && <ImageIcon className="h-4 w-4 shrink-0 text-slate-400" />}
                     {item.label}
                     {item.badge > 0 && (
                       <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
@@ -113,6 +115,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                     {item.icon === 'AlertTriangle' && <AlertTriangle className="h-4 w-4 shrink-0 text-slate-400" />}
                     {item.icon === 'Flag' && <Flag className="h-4 w-4 shrink-0 text-slate-400" />}
                     {item.icon === 'FolderTree' && <FolderTree className="h-4 w-4 shrink-0 text-slate-400" />}
+                    {item.icon === 'Image' && <ImageIcon className="h-4 w-4 shrink-0 text-slate-400" />}
                     {item.label}
                     {item.badge > 0 && (
                       <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">

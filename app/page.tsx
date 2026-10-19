@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import ServiceCard from "@/components/ui/ServiceCard";
 import ProviderInvite from "@/components/ui/ProviderInvite";
 import HeroParallaxDots from "@/components/ui/HeroParallaxDots";
-import { Search, CalendarCheck, Handshake, ShieldCheck, CreditCard, CalendarClock } from "lucide-react";
+import HowItWorks from "@/components/ui/HowItWorks";
+import { Search, ShieldCheck, CreditCard, CalendarClock } from "lucide-react";
 
 export default function Home() {
   const router = useRouter();
@@ -165,12 +166,6 @@ export default function Home() {
         .hero-assure { display:inline-flex; align-items:center; gap:8px; margin-top:18px; font-size:13.5px; font-weight:600; color:var(--gray-600); position:relative; z-index:1; }
         .hero-assure svg { flex-shrink:0; }
 
-        /* TRUST */
-        .trust { display:flex; justify-content:center; border-top:1px solid var(--gray-100); border-bottom:1px solid var(--gray-100); }
-        .trust-stat { flex:1; max-width:300px; text-align:center; padding:30px 24px; }
-        .trust-stat + .trust-stat { border-left:1px solid var(--gray-100); }
-        .trust-stat .num { font-family:'Poppins',sans-serif; font-size:32px; font-weight:600; color:var(--ink); }
-        .trust-stat .label { font-size:13px; color:var(--gray-400); font-weight:600; margin-top:2px; }
 
         /* SECTIONS */
         .home-section { padding:84px 48px; max-width:1120px; margin:0 auto; }
@@ -195,22 +190,6 @@ export default function Home() {
         .cat:hover img { transform:scale(1.07); }
 
         /* JAK TO FUNGUJE */
-        .how-wrap { background:var(--gray-100); }
-        .steps { display:grid; grid-template-columns:repeat(3,1fr); gap:26px; position:relative; }
-        .thread { position:absolute; top:31px; left:16%; right:16%; height:2px; z-index:0;
-          background:repeating-linear-gradient(90deg, var(--gray-400) 0 6px, transparent 6px 14px); opacity:.5; }
-        .step { text-align:center; padding:0 18px; position:relative; z-index:1; }
-        .step-dot { width:62px; height:62px; border-radius:50%; display:flex; align-items:center; justify-content:center;
-          margin:0 auto 18px; font-size:24px; border:4px solid var(--gray-100); background:#fff; }
-        .step.s-green .step-dot { background:var(--green-soft); }
-        .step.s-blue .step-dot { background:var(--blue-soft); }
-        .step.s-orange .step-dot { background:var(--orange-soft); }
-        .step .who { font-size:12px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; margin-bottom:6px; }
-        .step.s-green .who { color:var(--green-dark); }
-        .step.s-blue .who { color:var(--blue-dark); }
-        .step.s-orange .who { color:var(--orange-dark); }
-        .step h3 { font-size:19px; font-weight:600; margin-bottom:8px; color:var(--ink); }
-        .step p { color:var(--gray-600); font-size:14.5px; line-height:1.6; }
 
         /* KARTY */
         .pcards { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
@@ -275,15 +254,8 @@ export default function Home() {
           .hero-search { flex-direction:column; }
           .hs-divider { display:none; }
           .hs-btn { width:100%; }
-          /* TRUST — tři statistiky vedle sebe i na mobilu, menší čísla */
-          .trust-stat { padding:20px 8px; }
-          .trust-stat + .trust-stat { border-left:1px solid var(--gray-100); border-top:none; }
-          .trust-stat .num { font-size:20px; }
-          .trust-stat .label { font-size:10.5px; line-height:1.3; }
           .home-section { padding:56px 20px; }
           .cats { grid-template-columns:repeat(2,1fr); }
-          .steps { grid-template-columns:1fr; gap:36px; }
-          .thread { display:none; }
           .pcards { grid-template-columns:1fr; }
           .real-cards { grid-template-columns:1fr; }
           .why { grid-template-columns:1fr; }
@@ -353,16 +325,12 @@ export default function Home() {
 
           <div className="hero-assure">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.4"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
-            Když řemeslník nedorazí, zálohu vám vrátíme. Celou.
+            Platíte jen rezervační poplatek, zbytek až poskytovateli.
           </div>
         </section>
 
-        {/* TRUST */}
-        <div className="trust">
-          <div className="trust-stat"><div className="num">100 %</div><div className="label">každé IČO ověřené v ARES</div></div>
-          <div className="trust-stat"><div className="num">0 Kč</div><div className="label">přirážky k ceně řemeslníka</div></div>
-          <div className="trust-stat"><div className="num">30 s</div><div className="label">rezervace termínu — bez telefonování</div></div>
-        </div>
+        {/* JAK TO FUNGUJE – podle mockupu Mateje (19. 10. 2026), místo pásu s čísly; obrázek nahrává admin */}
+        <HowItWorks />
 
         {/* KATEGORIE */}
         <section className="home-section">
@@ -382,38 +350,6 @@ export default function Home() {
             <Link className="cat" href="/marketplace?q=Zahrada"><img src="/kategorie/zahrada.jpg" alt="Zahrada" /><span className="name">Zahrada</span></Link>
           </div>
         </section>
-
-        {/* JAK TO FUNGUJE */}
-        <div className="how-wrap" id="jak">
-          <section className="home-section">
-            <div className="sec-head reveal">
-              <span className="eyebrow">Jak to funguje</span>
-              <h2>Tři kroky. Žádné telefonování.</h2>
-              <p>Každý krok má svou barvu — vy, Propojo a řemeslník. Jako v našem logu.</p>
-            </div>
-            <div className="steps reveal">
-              <div className="thread"></div>
-              <div className="step s-green">
-                <div className="step-dot"><Search size={24} strokeWidth={2} color="#059669" /></div>
-                <div className="who">Vy</div>
-                <h3>Najdete a porovnáte</h3>
-                <p>Hledáte podle služby a města. Porovnáte ceny, recenze a volné termíny ověřených živnostníků.</p>
-              </div>
-              <div className="step s-blue">
-                <div className="step-dot"><CalendarCheck size={24} strokeWidth={2} color="#2563eb" /></div>
-                <div className="who">Propojo</div>
-                <h3>Rezervujete se zálohou</h3>
-                <p>Kliknete na volný termín a zaplatíte zálohu přes zabezpečenou platební bránu. Celá se počítá do konečné ceny.</p>
-              </div>
-              <div className="step s-orange">
-                <div className="step-dot"><Handshake size={24} strokeWidth={2} color="#d97706" /></div>
-                <div className="who">Řemeslník</div>
-                <h3>Přijde a hotovo</h3>
-                <p>Dorazí podle domluvy. Kdyby ne, vrátíme vám zálohu do poslední koruny. Bez dohadování.</p>
-              </div>
-            </div>
-          </section>
-        </div>
 
         {/* ŽIVNOSTNÍCI — skutečné karty z databáze, žádná vymyšlená data */}
         {!featuredLoading && featured.length >= 3 && (
