@@ -278,7 +278,7 @@ export default function PoptavkaChat({
     setAddrBusy(true)
     const res = await setRequestAddressInChat(conversationId, addrDraft)
     setAddrBusy(false)
-    if (res.success) { setMyAddress(addrDraft.text); setAddrEdit(false) } else setError(res.error)
+    if (res.success) { setMyAddress(addrDraft.text); setAddrEdit(false); router.refresh() } else setError(res.error)
   }
 
   // Jen ten, kdo zájem zrušil, ho může obnovit
@@ -622,9 +622,9 @@ export default function PoptavkaChat({
                     <button type="button" onClick={() => togglePref('time')} className="ml-2 text-xs font-semibold text-emerald-700 underline hover:text-emerald-800">{lastTimeMsg ? 'Změnit' : 'Doplnit'}</button>
                   )}
                 </dd>
-                {lastAvailMsg && (
+                {lastAvailMsg && termProposals.length === 0 && (
                   <>
-                    <dt className="text-slate-500">Poskytovatel může</dt>
+                    <dt className="text-slate-500">Poskytovatel může (orientačně)</dt>
                     <dd className="text-slate-900">{String(lastAvailMsg.content).replace(/^Mohu:\s*/, '').replace(/\.\.$/, '.')}</dd>
                   </>
                 )}
@@ -711,27 +711,36 @@ export default function PoptavkaChat({
                   {/* Composer návrhu termínu (jen poskytovatel) */}
                   {termOpen && isProvider && !readOnly && offerKind && (
                     <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
-                      <p className="mb-2 text-xs font-semibold text-slate-600">
-                        Navržený termín je pro vás závazný: zákazník ho může rovnou potvrdit zaplacením a tím vznikne rezervace.
-                        {' '}Když adresa zákazníka sedí s obcí poptávky, potvrdí se automaticky – jinak ji potvrdíte vy.
-                      </p>
+                      <p className="mb-2 text-xs font-bold text-slate-700">Navrhnout termín</p>
                       <div className="flex flex-wrap items-end gap-2">
-                        <input type="date" value={termDate} onChange={(e) => setTermDate(e.target.value)}
-                          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-amber-400" />
-                        <input type="time" step={300} value={termClock} onChange={(e) => setTermClock(e.target.value)}
-                          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-amber-400" />
+                        <label className="block text-[11px] font-semibold text-slate-500">
+                          Den
+                          <input type="date" value={termDate} onChange={(e) => setTermDate(e.target.value)}
+                            className="mt-0.5 block rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-900 outline-none focus:border-amber-400" />
+                        </label>
+                        <label className="block text-[11px] font-semibold text-slate-500">
+                          {offerKind === 'B' ? 'Příjezd od' : 'Začátek'}
+                          <input type="time" step={300} value={termClock} onChange={(e) => setTermClock(e.target.value)}
+                            className="mt-0.5 block rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-900 outline-none focus:border-amber-400" />
+                        </label>
                         {offerKind === 'B' ? (
+                          <label className="block text-[11px] font-semibold text-slate-500">
+                          Okno příjezdu
                           <select value={termMinutes} onChange={(e) => setTermMinutes(Number(e.target.value))}
-                            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-amber-400">
+                            className="mt-0.5 block rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-900 outline-none focus:border-amber-400">
                             {BOOKING_POLICY.arrivalWindow.optionsMinutes.map((m) => (
                               <option key={m} value={m}>přijedu v rozmezí {m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60} min`}</option>
                             ))}
                           </select>
+                          </label>
                         ) : (
-                          <label className="flex items-center gap-1.5 text-sm text-slate-600">
-                            <input type="number" min={5} max={720} step={5} value={termMinutes} onChange={(e) => setTermMinutes(Number(e.target.value))}
-                              className="w-20 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm outline-none focus:border-amber-400" />
-                            min
+                          <label className="block text-[11px] font-semibold text-slate-500">
+                            Délka služby
+                            <span className="mt-0.5 flex items-center gap-1.5">
+                              <input type="number" min={5} max={720} step={5} value={termMinutes} onChange={(e) => setTermMinutes(Number(e.target.value))}
+                                className="w-20 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-900 outline-none focus:border-amber-400" />
+                              <span className="text-sm font-normal text-slate-600">min</span>
+                            </span>
                           </label>
                         )}
                         <button
@@ -742,6 +751,10 @@ export default function PoptavkaChat({
                           {termBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Poslat návrh
                         </button>
                       </div>
+                      <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+                        Navržený termín je pro vás závazný – zákazník ho může rovnou zaplatit a tím vznikne rezervace.
+                        Když adresa zákazníka sedí s obcí poptávky, potvrdí se automaticky, jinak ji potvrdíte vy.
+                      </p>
                     </div>
                   )}
 

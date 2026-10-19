@@ -423,21 +423,6 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
         />
       )}
 
-      {afterPayment && (
-        <BookingAfterPayment
-          orderId={order.id}
-          isProvider={isProvider}
-          amountKc={Number((order as any).charge_halere ?? 0) / 100}
-          offerKind={(order as any).offer_kind ?? null}
-          providerCanCancel={afterPayment.providerCanCancel}
-          customerCancel={afterPayment.customerCancel}
-          withdrawal={afterPayment.withdrawal}
-          refunds={afterPayment.refunds}
-          reschedule={afterPayment.reschedule}
-          providerRefundMaxKc={afterPayment.providerRefundMaxKc}
-          cancelCost={afterPayment.cancelCost}
-        />
-      )}
 
       {canReview && <ReviewForm orderId={order.id} />}
 
@@ -497,6 +482,23 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
         platbaStav={searchParams.platba ?? null}
         withdrawn={afterPayment?.withdrawal?.mode === 'done'}
       />
+
+      {/* Zrušení, odstoupení a vrácení peněz – pod detailem objednávky a chatem */}
+      {afterPayment && (
+        <BookingAfterPayment
+          orderId={order.id}
+          isProvider={isProvider}
+          amountKc={Number((order as any).charge_halere ?? 0) / 100}
+          offerKind={(order as any).offer_kind ?? null}
+          providerCanCancel={afterPayment.providerCanCancel}
+          customerCancel={afterPayment.customerCancel}
+          withdrawal={afterPayment.withdrawal}
+          refunds={afterPayment.refunds}
+          reschedule={afterPayment.reschedule}
+          providerRefundMaxKc={afterPayment.providerRefundMaxKc}
+          cancelCost={afterPayment.cancelCost}
+        />
+      )}
     </div>
   )
 }

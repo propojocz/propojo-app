@@ -492,6 +492,14 @@ export async function setRequestAddressInChat(
     .update({ address: text, address_lat: address.lat, address_lng: address.lng, ...cityCols, updated_at: new Date().toISOString() })
     .eq('id', conv.requestId)
     .eq('customer_id', user.id)
+  // Krátká zpráva do chatu – poskytovatel se to dozví hned (vidí jen obec, ulici až po zaplacení)
+  const obecText = (cityCols.city as string | undefined) ?? obecFromAddress(text)
+  await (admin.from('messages') as any).insert({
+    conversation_id: conversationId, order_id: null, sender_id: user.id,
+    content: `📍 Doplnil(a) jsem adresu${obecText ? ` – obec ${obecText}` : ''}. Přesnou adresu uvidíte po zaplacení.`,
+  })
+  await (admin.from('request_responses') as any).update({ last_message_at: new Date().toISOString() }).eq('id', conv.responseId)
+
   // Rozpracovaná objednávka (vybraný termín, nezaplaceno) – ať ji shrnutí rovnou předvyplní
   const draftId = (await draftOrdersBy(admin as any, 'response_id', [conv.responseId])).get(conv.responseId) ?? null
   if (draftId) {
