@@ -1,17 +1,17 @@
 // app/dashboard/terminy/page.tsx
 // Správa termínů poskytovatele.
 //
-// Nahoře DENNÍ PANEL — kdo dnes (nebo ve vybraný den) přijde a v kolik, plus
-// blokace času. Pod ním správa VOLNÝCH OKEN (last-minute), která tu byla i dřív.
+// Správa VOLNÝCH OKEN (termíny dopředu, last-minute). Denní přehled – kdo přijde a v kolik,
+// blokace a poznámky – je od K1 (19. 10. 2026) v Kalendáři (/dashboard/kalendar), tady jen odkaz.
 //
 // Karty se do výběru oken nabízejí podle CENÍKU: musí mít aspoň jeden zveřejněný
 // úkon s pevnou cenou (model A). Legacy services.payment_model se neřeší.
 
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { CalendarDays, ChevronRight } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import TerminyClient from './TerminyClient'
-import DaySchedulePanel from '@/components/ui/DaySchedulePanel'
-import { getDaySchedule } from '@/lib/actions/day-schedule'
 
 export const metadata = { title: 'Moje termíny | Propojo' }
 
@@ -27,9 +27,6 @@ export default async function TerminyPage({ searchParams }: { searchParams: { se
     .single() as { data: { is_provider: boolean } | null }
 
   if (profile?.is_provider !== true) redirect('/dashboard')
-
-  // Denní panel — rozvrh pro vybraný den (?den=YYYY-MM-DD), jinak dnešek.
-  const schedule = await getDaySchedule(searchParams?.den)
 
   // Moje aktivní karty
   const { data: myServices } = await supabase
@@ -103,7 +100,19 @@ export default async function TerminyPage({ searchParams }: { searchParams: { se
 
   return (
     <div className="space-y-6">
-      <DaySchedulePanel date={schedule.date} entries={schedule.entries} />
+      <Link
+        href={searchParams?.den ? `/dashboard/kalendar?den=${encodeURIComponent(searchParams.den)}` : '/dashboard/kalendar'}
+        className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 transition hover:border-emerald-300"
+      >
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-emerald-600 shadow-sm">
+          <CalendarDays className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="font-black text-slate-900">Kalendář</p>
+          <p className="text-sm text-slate-600">Kdo dnes přijde a v kolik, volná místa, blokace a poznámky.</p>
+        </div>
+        <ChevronRight className="h-5 w-5 shrink-0 text-emerald-600" />
+      </Link>
       <TerminyClient services={services} slots={slots ?? []} preselectedServiceId={searchParams?.service} />
     </div>
   )

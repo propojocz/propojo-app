@@ -4,6 +4,7 @@
 // a u každé karty, které služby z ceníku v termínu nabízíte (13. 10. 2026; služby delší než okno
 // se nedají vybrat). Stejná serverová akce jako stránka Termíny (createSlot), včetně otázky
 // „mimo otevírací dobu“. Termíny dopředu se dál vypisují v Moje nabídky / Termíny.
+// Z Kalendáře (K1) se otevírá s předvyplněným dnem, časem a kartami volné mezery (initial).
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -33,19 +34,28 @@ const fmt = (iso: string) =>
 const fmtTime = (iso: string) =>
   new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
 
+export type QuickSlotInitial = { date?: string; from?: string; to?: string; cardIds?: string[] }
+
 export default function QuickSlotForm({
   cards,
   onClose,
+  initial,
 }: {
   cards: QuickSlotCard[]
   onClose: () => void
+  /** Předvyplnění (volná mezera v Kalendáři) */
+  initial?: QuickSlotInitial
 }) {
   const router = useRouter()
-  const [date, setDate] = useState(localDate(0))
-  const [from, setFrom] = useState(() => defaultWindow().from)
-  const [to, setTo] = useState(() => defaultWindow().to)
-  // Jedna karta = rovnou vybraná
-  const [checked, setChecked] = useState<string[]>(cards.length === 1 ? [cards[0].id] : [])
+  const [date, setDate] = useState(initial?.date ?? localDate(0))
+  const [from, setFrom] = useState(() => initial?.from ?? defaultWindow().from)
+  const [to, setTo] = useState(() => initial?.to ?? defaultWindow().to)
+  // Předvyplněné karty, jinak jedna karta = rovnou vybraná
+  const [checked, setChecked] = useState<string[]>(() => {
+    const pre = (initial?.cardIds ?? []).filter((id) => cards.some((c) => c.id === id))
+    if (pre.length > 0) return pre
+    return cards.length === 1 ? [cards[0].id] : []
+  })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [askOutside, setAskOutside] = useState(false)

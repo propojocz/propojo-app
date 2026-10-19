@@ -77,7 +77,7 @@ export default function MobileNav({
       title: 'Moje podnikání',
       items: [
         { href: '/dashboard/nabidky', label: 'Moje nabídky', icon: Package },
-        { href: '/dashboard/terminy', label: 'Termíny', icon: CalendarDays },
+        { href: '/dashboard/kalendar', label: 'Kalendář', icon: CalendarDays },
         { href: '/dashboard/recenze', label: 'Moje recenze', icon: Star, badge: unansweredReviews },
         { href: '/dashboard/znacka', label: 'Značka', icon: Building2 },
         { href: '/dashboard/qr', label: 'QR kód', icon: QrCode },
@@ -92,7 +92,9 @@ export default function MobileNav({
       ],
     },
   ] : []
-  const isActive = (href: string) => (href === '/dashboard' ? pathname === href : pathname === href || pathname.startsWith(href + '/'))
+  const isActive = (href: string) => (href === '/dashboard' ? pathname === href : pathname === href || pathname.startsWith(href + '/')
+    // Termíny (volné termíny dopředu) jsou podstránkou Kalendáře
+    || (href === '/dashboard/kalendar' && pathname.startsWith('/dashboard/terminy')))
 
   const totalBadge = unansweredReviews + todoCount + (isAdmin ? disputeCount : 0) + (payoutsWarn ? 1 : 0)
 

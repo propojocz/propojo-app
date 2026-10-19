@@ -5,6 +5,9 @@
 //
 // Panel se vykresluje přes portál do <body>: horní lišta má rozmazané pozadí (backdrop-filter),
 // a uvnitř ní by se „fixed“ panel ořízl na výšku lišty.
+//
+// Kalendář K1 (19. 10. 2026): poskytovatele vede ikona v liště na stránku Kalendář (href);
+// panel se pak otevírá odkazem v Kalendáři (variant 'text') – kvůli rezervacím, kam jde sám jako zákazník.
 
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -39,7 +42,12 @@ function time(iso: string): string {
   return new Intl.DateTimeFormat('cs-CZ', { timeZone: TZ, hour: '2-digit', minute: '2-digit' }).format(new Date(iso))
 }
 
-export default function UpcomingDrawer() {
+export default function UpcomingDrawer({ href, variant = 'icon' }: {
+  /** Místo panelu odkaz (poskytovatel → /dashboard/kalendar) */
+  href?: string
+  /** 'icon' = ikona v liště, 'text' = textový odkaz (Kalendář) */
+  variant?: 'icon' | 'text'
+} = {}) {
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState<UpcomingBooking[] | null>(null)
   const [mounted, setMounted] = useState(false)
@@ -192,6 +200,30 @@ export default function UpcomingDrawer() {
       )}
     </AnimatePresence>
   )
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="flex h-9 w-9 items-center justify-center rounded-full sm:h-10 sm:w-10 text-slate-600 transition hover:bg-slate-100"
+        aria-label="Kalendář"
+        title="Kalendář"
+      >
+        <CalendarDays className="h-5 w-5" />
+      </Link>
+    )
+  }
+
+  if (variant === 'text') {
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)} className="text-xs font-semibold text-slate-500 underline hover:text-slate-700">
+          Vše nadcházející (i kam jdete vy jako zákazník)
+        </button>
+        {mounted && createPortal(panel, document.body)}
+      </>
+    )
+  }
 
   return (
     <>

@@ -36,7 +36,7 @@ příchodu), blokace `provider_blocks` + `blockTime`, otevírací doba karet `se
 `service_items.buffer_minutes`, rezerva na přejezd u karet „u zákazníka“ `services.travel_buffer_minutes`,
 volné termíny `availability_slots`, bleskový termín `QuickSlotForm`, stránka Termíny (`/dashboard/terminy`).
 
-**K1 – Kalendář: den** (`/dashboard/kalendar`, nová stránka; v menu ☰ „Termíny“ → „Kalendář“)
+**K1 – Kalendář: den** (POSTAVENO 19. 10. 2026, čeká na SQL `kalendar-k1.sql` a test; Matej 19. 10.: poznámka blokuje čas, ikona kalendáře → Kalendář, volné termíny dál v Termínech s odkazem. Přepínač Den / Týden přijde s K2) (`/dashboard/kalendar`, nová stránka; v menu ☰ „Termíny“ → „Kalendář“)
 - Hlavička: dny v týdnu, Dnes, ‹ ›, přepínač Den / Týden; tlačítko „+“ (Bleskový termín / Poznámka / Blokovat čas).
 - Filtr „Místo“: Všechna / každé vaše místo (adresa karet „u poskytovatele“) / Výjezdy (u zákazníka); legenda míst s barvou.
 - Časová osa dne: rezervace (čas, iniciály, jméno, služba, místo, stav: Čeká na potvrzení / Potvrzeno / Probíhá /

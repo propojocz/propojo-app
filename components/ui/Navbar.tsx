@@ -150,7 +150,7 @@ export default async function Navbar() {
             </Link>
             {user && isProvider && <QuickSlotButton />}
             {user && <InboxButton />}
-            {user && <UpcomingDrawer />}
+            {user && <UpcomingDrawer href={isProvider ? '/dashboard/kalendar' : undefined} />}
             {user && <NotificationBadge />}
             <MobileNav
               user={user ? { id: user.id, email: user.email } : null}

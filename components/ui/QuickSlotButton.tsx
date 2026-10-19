@@ -8,10 +8,10 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, X, Zap } from 'lucide-react'
 import { getQuickSlotCards, type QuickSlotCard } from '@/lib/actions/slots'
-import QuickSlotForm from '@/components/ui/QuickSlotForm'
+import QuickSlotForm, { type QuickSlotInitial } from '@/components/ui/QuickSlotForm'
 
-export default function QuickSlotButton() {
-  const [open, setOpen] = useState(false)
+/** Okno bleskového termínu – z horní lišty i z Kalendáře (s předvyplněnou mezerou). */
+export function QuickSlotModal({ open, onClose, initial }: { open: boolean; onClose: () => void; initial?: QuickSlotInitial }) {
   const [mounted, setMounted] = useState(false)
   const [cards, setCards] = useState<QuickSlotCard[] | null>(null)
 
@@ -25,11 +25,12 @@ export default function QuickSlotButton() {
     return () => { cancelled = true }
   }, [open])
 
-  const modal = open ? (
-    <div className="fixed inset-0 z-[100] flex items-start justify-center bg-slate-900/30 px-4 pt-4 sm:pt-16" onClick={() => setOpen(false)}>
+  if (!open || !mounted) return null
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-start justify-center bg-slate-900/30 px-4 pt-4 sm:pt-16" onClick={onClose}>
       <div className="w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
         <div className="mb-2 flex justify-end">
-          <button type="button" onClick={() => setOpen(false)} className="rounded-full bg-white p-1.5 text-slate-500 shadow" aria-label="Zavřít">
+          <button type="button" onClick={onClose} className="rounded-full bg-white p-1.5 text-slate-500 shadow" aria-label="Zavřít">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -39,12 +40,17 @@ export default function QuickSlotButton() {
           </div>
         ) : (
           <div className="rounded-2xl shadow-xl">
-            <QuickSlotForm cards={cards} onClose={() => setOpen(false)} />
+            <QuickSlotForm cards={cards} onClose={onClose} initial={initial} />
           </div>
         )}
       </div>
-    </div>
-  ) : null
+    </div>,
+    document.body,
+  )
+}
+
+export default function QuickSlotButton() {
+  const [open, setOpen] = useState(false)
 
   return (
     <>
@@ -57,7 +63,7 @@ export default function QuickSlotButton() {
       >
         <Zap className="h-5 w-5 fill-orange-400" />
       </button>
-      {mounted && modal && createPortal(modal, document.body)}
+      <QuickSlotModal open={open} onClose={() => setOpen(false)} />
     </>
   )
 }

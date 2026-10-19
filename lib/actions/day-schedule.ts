@@ -247,13 +247,18 @@ export async function setAttendance(orderId: string, value: Attendance, customFe
   return { success: true }
 }
 
-/** Zablokovat čas — dovolená, doktor, zákazník z ulice. */
+/**
+ * Zablokovat čas — dovolená, doktor, zákazník z ulice.
+ * kind 'note' = poznámka v kalendáři („ruční rezervace“, K1): text v reason, čas blokuje stejně
+ * jako blokace. Bez platby a bez Rezervační smlouvy. Sloupec kind z docs/sql/kalendar-k1.sql.
+ */
 export async function blockTime(values: {
   date: string   // 'YYYY-MM-DD'
   from: string   // 'HH:MM'
   to: string     // 'HH:MM'
   reason?: string
   service_id?: string | null   // null = všechny karty
+  kind?: 'block' | 'note'
 }): Promise<Result> {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -269,19 +274,29 @@ export async function blockTime(values: {
 
   const admin = getAdminClient()
 
+  const isNote = values.kind === 'note'
+  const text = values.reason?.trim() || null
+  if (isNote && !text) return { success: false, error: 'Napište, co je v poznámce (např. jméno a služba).' }
+
   // Nedovolíme zablokovat čas, kde už je ZAPLACENÁ rezervace — tu blokace
-  // nepřepíše, musela by se výslovně zrušit (a vrátit záloha).
+  // nepřepíše, musela by se výslovně zrušit (a vrátit platba). Starý model podle
+  // deposit_status, model v2 podle booking_state (předautorizováno / potvrzeno).
   const { data: clash } = await admin
     .from('orders')
-    .select('id, deposit_status')
+    .select('id')
     .eq('provider_id', user.id)
     .neq('status', 'zruseno')
-    .eq('deposit_status', 'paid')
+    .or('deposit_status.eq.paid,booking_state.in.(awaiting_confirmation,capture_in_progress,confirmed)')
     .lt('scheduled_at', endIso)
     .gt('scheduled_end', startIso) as { data: any[] | null }
 
   if ((clash ?? []).length > 0) {
-    return { success: false, error: 'V tomhle čase máte zaplacenou rezervaci — tu blokací přepsat nelze. Nejdřív ji zrušte.' }
+    return {
+      success: false,
+      error: isNote
+        ? 'V tomhle čase máte rezervaci přes Propojo — poznámku dejte do jiného času.'
+        : 'V tomhle čase máte zaplacenou rezervaci — tu blokací přepsat nelze. Nejdřív ji zrušte.',
+    }
   }
 
   const { error } = await (admin.from('provider_blocks') as any).insert({
@@ -289,11 +304,13 @@ export async function blockTime(values: {
     service_id: values.service_id ?? null,
     starts_at: startIso,
     ends_at: endIso,
-    reason: values.reason?.trim() || null,
+    reason: text ? text.slice(0, isNote ? 200 : 60) : null,
+    // Blokace kind neposílá (výchozí 'block') – funguje i před spuštěním SQL kalendar-k1
+    ...(isNote ? { kind: 'note' } : {}),
   })
   if (error) {
     console.error('[blockTime]', error)
-    return { success: false, error: 'Blokaci se nepodařilo uložit.' }
+    return { success: false, error: isNote ? 'Poznámku se nepodařilo uložit. Proběhlo SQL kalendar-k1.sql?' : 'Blokaci se nepodařilo uložit.' }
   }
 
   // Volná okna uvnitř blokace nemají co dělat v nabídce — zákazník by si
@@ -319,6 +336,7 @@ export async function blockTime(values: {
   }
 
   revalidatePath('/dashboard/terminy')
+  revalidatePath('/dashboard/kalendar')
   return { success: true }
 }
 
@@ -337,5 +355,6 @@ export async function unblockTime(blockId: string): Promise<Result> {
 
   await admin.from('provider_blocks').delete().eq('id', blockId)
   revalidatePath('/dashboard/terminy')
+  revalidatePath('/dashboard/kalendar')
   return { success: true }
 }

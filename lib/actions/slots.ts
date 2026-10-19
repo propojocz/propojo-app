@@ -120,10 +120,11 @@ async function kryjeSeSBlokaci(
 ): Promise<string | null> {
   const { data: bloky } = await admin
     .from('provider_blocks')
-    .select('starts_at, ends_at, reason, service_id')
+    // select('*') – sloupec kind (poznámka) existuje až po SQL kalendar-k1
+    .select('*')
     .eq('provider_id', providerId)
     .lt('starts_at', endIso)
-    .gt('ends_at', startIso) as { data: { starts_at: string; ends_at: string; reason: string | null; service_id: string | null }[] | null }
+    .gt('ends_at', startIso) as { data: { starts_at: string; ends_at: string; reason: string | null; service_id: string | null; kind?: string | null }[] | null }
 
   const platne = (bloky ?? []).filter(
     (b) => b.service_id == null || serviceIds.includes(b.service_id)
@@ -132,9 +133,10 @@ async function kryjeSeSBlokaci(
 
   const b = platne[0]
   const kdy = `${cas(b.starts_at)}–${cas(b.ends_at)}`
+  const co = b.kind === 'note' ? 'poznámku' : 'blokaci'
   return b.reason
-    ? `V tomhle čase máte blokaci ${kdy} (${b.reason}).`
-    : `V tomhle čase máte blokaci ${kdy}.`
+    ? `V tomhle čase máte ${co} ${kdy} (${b.reason}).`
+    : `V tomhle čase máte ${co} ${kdy}.`
 }
 
 // ── Přidat volné okno ─────────────────────────────────────────
@@ -250,7 +252,7 @@ export async function createSlot(values: {
   }
 
   const chybaBloku = await kryjeSeSBlokaci(admin, user.id, ids, starts.toISOString(), ends.toISOString())
-  if (chybaBloku) return { success: false, error: `${chybaBloku} Nejdřív ji zrušte v Termínech.` }
+  if (chybaBloku) return { success: false, error: `${chybaBloku} Nejdřív ji smažte v Kalendáři.` }
 
   // Vytvoř okno
   const { data: slot, error } = await (admin.from('availability_slots') as any)
