@@ -1,6 +1,7 @@
 'use server'
 // lib/actions/calendar.ts
-// Kalendář poskytovatele K1 (19. 10. 2026, docs/plan-kalendar.md): jeden den jako časová osa.
+// Kalendář poskytovatele K1 + K2 (19. 10. 2026, docs/plan-kalendar.md): načte se celý týden (Po–Ne)
+// s vybraným dnem – Den z něj ukazuje jeden den jako časovou osu, Týden všech sedm.
 //
 // Co se ukazuje: rezervace (model v2 podle booking_state, starý model podle status / deposit_status),
 // pauza / přesun za rezervací (pauza za službou + rezerva na přejezd u výjezdu – přesuny počítá
@@ -48,15 +49,20 @@ export type CalItem = CalBooking | CalSlot | CalBlock
 
 export type CalGap = { start: string; end: string; minutes: number; cardIds: string[] }
 
-export type CalendarDay = {
+export type CalDayData = {
   date: string
-  today: string
-  /** Po–Ne týdne s vybraným dnem a počtem rezervací */
-  week: { date: string; count: number }[]
-  places: CalPlace[]
   items: CalItem[]
   /** Mezery podle filtru: 'all' a klíč každého místa */
   gaps: Record<string, CalGap[]>
+}
+
+export type CalendarDay = {
+  /** Vybraný den */
+  date: string
+  today: string
+  /** Po–Ne týdne s vybraným dnem */
+  days: CalDayData[]
+  places: CalPlace[]
   /** Má aspoň jedna karta otevírací dobu? (jinak mezery jen mezi rezervacemi) */
   hasHours: boolean
 }
@@ -118,22 +124,17 @@ export async function getCalendarDay(dateStr?: string): Promise<CalendarDay | nu
     ? dateStr
     : today
 
-  const weekday = denVTydnuPraha(isoZPrazskehoCasu(date, '12:00'))
-  const weekStart = shiftDate(date, 1 - weekday)
+  const weekStart = shiftDate(date, 1 - denVTydnuPraha(isoZPrazskehoCasu(date, '12:00')))
+  const weekDates = Array.from({ length: 7 }, (_, i) => shiftDate(weekStart, i))
   const weekFromIso = isoZPrazskehoCasu(weekStart, '00:00')
   const weekToIso = isoZPrazskehoCasu(shiftDate(weekStart, 7), '00:00')
-  const dayStartIso = isoZPrazskehoCasu(date, '00:00')
-  const dayEndIso = isoZPrazskehoCasu(shiftDate(date, 1), '00:00')
-  const dayStartMs = new Date(dayStartIso).getTime()
-  const dayEndMs = new Date(dayEndIso).getTime()
 
   // ── Karty a otevírací doba ─────────────────────────────────
   const { data: svcRows } = await db
     .from('services')
     .select('id, title, is_active, location_type, address, city, travel_buffer_minutes')
     .eq('provider_id', user.id)
-  const services = (svcRows ?? []) as any[]
-  const active = services.filter((s) => s.is_active === true)
+  const active = ((svcRows ?? []) as any[]).filter((s) => s.is_active === true)
 
   const places: CalPlace[] = []
   const addPlace = (key: string, label: string, kind: CalPlace['kind']) => {
@@ -158,15 +159,8 @@ export async function getCalendarDay(dateStr?: string): Promise<CalendarDay | nu
     : { data: [] }
   const hours = (hourRows ?? []) as { service_id: string; weekday: number; starts_at: string; ends_at: string }[]
   const cardsWithHours = new Set(hours.map((h) => h.service_id))
-  const dayHours = new Map<string, Range[]>()
-  for (const h of hours) {
-    if (Number(h.weekday) !== weekday) continue
-    const list = dayHours.get(h.service_id) ?? []
-    list.push({ from: casNaMinuty(h.starts_at), to: casNaMinuty(h.ends_at) })
-    dayHours.set(h.service_id, list)
-  }
 
-  // ── Rezervace v týdnu (počty u dnů) a ve vybraném dni ──────
+  // ── Rezervace v týdnu ─────────────────────────────────────
   const { data: orderRows } = await db
     .from('orders')
     .select('id, customer_id, status, booking_state, offer_kind, scheduled_at, scheduled_end, deposit_status, hold_expires_at, authorized_at, service_location, location_address, location_city, provider_place_address, service_items(name, duration_minutes, buffer_minutes), services(title, location_type, address, city, travel_buffer_minutes)')
@@ -197,26 +191,15 @@ export async function getCalendarDay(dateStr?: string): Promise<CalendarDay | nu
     orders = orders.filter((o) => !drafts.has(o.id))
   }
 
-  const week = Array.from({ length: 7 }, (_, i) => ({ date: shiftDate(weekStart, i), count: 0 }))
-  for (const o of orders) {
-    const w = week.find((d) => d.date === pragueDate(new Date(o.scheduled_at)))
-    if (w) w.count += 1
-  }
-
-  const dayOrders = orders.filter((o) => {
-    const t = new Date(o.scheduled_at).getTime()
-    return t >= dayStartMs && t < dayEndMs
-  })
-
-  const customerIds = Array.from(new Set(dayOrders.map((o) => o.customer_id).filter(Boolean)))
+  const customerIds = Array.from(new Set(orders.map((o) => o.customer_id).filter(Boolean)))
   const nameOf = new Map<string, string>()
   if (customerIds.length > 0) {
     const { data: profs } = await db.from('profiles').select('id, full_name').in('id', customerIds)
     for (const p of (profs ?? []) as any[]) nameOf.set(p.id, p.full_name || 'Zákazník')
   }
 
-  const items: CalItem[] = []
-  for (const o of dayOrders) {
+  const bookings: CalBooking[] = []
+  for (const o of orders) {
     const startMs = new Date(o.scheduled_at).getTime()
     const dur = Number(o.service_items?.duration_minutes ?? 0)
     const endMs = o.scheduled_end ? new Date(o.scheduled_end).getTime() : startMs + (dur > 0 ? dur : FALLBACK_DURATION_MIN) * 60_000
@@ -242,7 +225,7 @@ export async function getCalendarDay(dateStr?: string): Promise<CalendarDay | nu
     }
 
     const st = o.booking_state ?? (o.offer_kind ? 'pending_payment' : null)
-    items.push({
+    bookings.push({
       type: 'booking',
       id: o.id,
       start: new Date(startMs).toISOString(),
@@ -260,32 +243,31 @@ export async function getCalendarDay(dateStr?: string): Promise<CalendarDay | nu
       arrivalWindow: o.offer_kind === 'B',
     })
   }
-  if (items.some((i) => i.type === 'booking' && i.placeKey === 'vyjezdy') || hasVyjezdy) addPlace('vyjezdy', 'Výjezdy k zákazníkům', 'vyjezdy')
+  if (hasVyjezdy || bookings.some((b) => b.placeKey === 'vyjezdy')) addPlace('vyjezdy', 'Výjezdy k zákazníkům', 'vyjezdy')
 
   // ── Vypsané volné termíny ─────────────────────────────────
   const { data: slotRows } = await db
     .from('availability_slots')
     .select('id, starts_at, ends_at, status, slot_services(service_id, services(title))')
     .eq('provider_id', user.id)
-    .lt('starts_at', dayEndIso)
-    .gt('ends_at', dayStartIso)
+    .lt('starts_at', weekToIso)
+    .gt('ends_at', weekFromIso)
     .order('starts_at', { ascending: true })
-  const busyExtra: { start: number; end: number }[] = []
+  const slots: CalSlot[] = []
+  // Zabrané okno má objednávku – v kalendáři je jako rezervace, tady jen drží čas
+  const takenSlots: { start: string; end: string }[] = []
   for (const s of (slotRows ?? []) as any[]) {
-    if (s.status !== 'volno') {
-      // Zabrané okno má objednávku – v kalendáři je jako rezervace, tady jen drží čas
-      busyExtra.push({ start: new Date(s.starts_at).getTime(), end: new Date(s.ends_at).getTime() })
-      continue
-    }
+    const start = new Date(s.starts_at).toISOString()
+    const end = new Date(s.ends_at).toISOString()
+    if (s.status !== 'volno') { takenSlots.push({ start, end }); continue }
     const links = (s.slot_services ?? []) as any[]
-    const keys = Array.from(new Set(links.flatMap((l) => cardPlaces.get(l.service_id) ?? [])))
-    items.push({
+    slots.push({
       type: 'slot',
       id: s.id,
-      start: new Date(s.starts_at).toISOString(),
-      end: new Date(s.ends_at).toISOString(),
+      start,
+      end,
       label: links.map((l) => l.services?.title).filter(Boolean).join(', ') || 'Volný termín',
-      placeKeys: keys,
+      placeKeys: Array.from(new Set(links.flatMap((l) => cardPlaces.get(l.service_id) ?? []))),
     })
   }
 
@@ -295,59 +277,84 @@ export async function getCalendarDay(dateStr?: string): Promise<CalendarDay | nu
     .from('provider_blocks')
     .select('*')
     .eq('provider_id', user.id)
-    .lt('starts_at', dayEndIso)
-    .gt('ends_at', dayStartIso)
+    .lt('starts_at', weekToIso)
+    .gt('ends_at', weekFromIso)
     .order('starts_at', { ascending: true })
-  for (const b of (blockRows ?? []) as any[]) {
-    items.push({ type: 'block', id: b.id, start: new Date(b.starts_at).toISOString(), end: new Date(b.ends_at).toISOString(), text: b.reason ?? null, kind: b.kind === 'note' ? 'note' : 'block' })
-  }
+  const blocks: CalBlock[] = ((blockRows ?? []) as any[]).map((b) => ({
+    type: 'block',
+    id: b.id,
+    start: new Date(b.starts_at).toISOString(),
+    end: new Date(b.ends_at).toISOString(),
+    text: b.reason ?? null,
+    kind: b.kind === 'note' ? 'note' : 'block',
+  }))
 
-  items.sort((a, b) => a.start.localeCompare(b.start))
-
-  // ── Mezery ────────────────────────────────────────────────
-  const toDayMin = (ms: number) => (ms <= dayStartMs ? 0 : ms >= dayEndMs ? 24 * 60 : minutyOdPulnociPraha(new Date(ms)))
-  const busy = mergeRanges([
-    ...items.map((i) => ({
-      from: toDayMin(new Date(i.start).getTime()),
-      to: toDayMin(new Date(i.type === 'booking' && i.bufferEnd ? i.bufferEnd : i.end).getTime()),
-    })),
-    ...busyExtra.map((b) => ({ from: toDayMin(b.start), to: toDayMin(b.end) })),
-  ])
-  // Minulost se nenabízí; dnes až od nejbližších 5 minut
-  const lowerBound = date < today ? null : date === today ? Math.ceil(minutyOdPulnociPraha(new Date()) / 5) * 5 : 0
-
-  const gapsFor = (cardIds: string[]): CalGap[] => {
-    if (lowerBound == null || cardIds.length === 0) return []
-    const withHours = cardIds.filter((id) => cardsWithHours.has(id))
-    let open: Range[]
-    if (withHours.length > 0) {
-      open = mergeRanges(withHours.flatMap((id) => dayHours.get(id) ?? []))
-    } else {
-      // Bez otevírací doby jen mezery mezi rezervacemi
-      const bookings = mergeRanges(items.filter((i) => i.type === 'booking').map((i) => ({
-        from: toDayMin(new Date(i.start).getTime()),
-        to: toDayMin(new Date((i as CalBooking).bufferEnd ?? i.end).getTime()),
-      })))
-      open = bookings.length > 1 ? [{ from: bookings[0].from, to: bookings[bookings.length - 1].to }] : []
+  // ── Mezery jednoho dne pro každý filtr místa ──────────────
+  const gapsForDay = (d: string, dayStartMs: number, dayEndMs: number, items: CalItem[], taken: { start: string; end: string }[]): Record<string, CalGap[]> => {
+    const dayEndIso = new Date(dayEndMs).toISOString()
+    const weekday = denVTydnuPraha(isoZPrazskehoCasu(d, '12:00'))
+    const dayHours = new Map<string, Range[]>()
+    for (const h of hours) {
+      if (Number(h.weekday) !== weekday) continue
+      const list = dayHours.get(h.service_id) ?? []
+      list.push({ from: casNaMinuty(h.starts_at), to: casNaMinuty(h.ends_at) })
+      dayHours.set(h.service_id, list)
     }
-    open = open.map((r) => ({ from: Math.max(r.from, lowerBound), to: r.to })).filter((r) => r.to > r.from)
-    return subtract(open, busy)
-      .filter((g) => g.to - g.from >= MIN_GAP_MIN)
-      .map((g) => ({
-        start: isoZPrazskehoCasu(date, hhmm(g.from)),
-        end: g.to >= 24 * 60 ? dayEndIso : isoZPrazskehoCasu(date, hhmm(g.to)),
-        minutes: g.to - g.from,
-        // Karty, jejichž otevírací doba mezeru zasahuje (bez otevírací doby všechny z filtru)
-        cardIds: withHours.length > 0
-          ? withHours.filter((id) => (dayHours.get(id) ?? []).some((r) => r.from < g.to && r.to > g.from))
-          : cardIds,
-      }))
+    const toDayMin = (ms: number) => (ms <= dayStartMs ? 0 : ms >= dayEndMs ? 24 * 60 : minutyOdPulnociPraha(new Date(ms)))
+    const span = (i: { start: string; end: string; bufferEnd?: string | null }): Range => ({
+      from: toDayMin(new Date(i.start).getTime()),
+      to: toDayMin(new Date(i.bufferEnd ?? i.end).getTime()),
+    })
+    const busy = mergeRanges([...items.map((i) => (i.type === 'booking' ? span(i) : span({ start: i.start, end: i.end }))), ...taken.map(span)])
+    // Minulost se nenabízí; dnes až od nejbližších 5 minut
+    const lowerBound = d < today ? null : d === today ? Math.ceil(minutyOdPulnociPraha(new Date()) / 5) * 5 : 0
+
+    const gapsFor = (cardIds: string[]): CalGap[] => {
+      if (lowerBound == null || cardIds.length === 0) return []
+      const withHours = cardIds.filter((id) => cardsWithHours.has(id))
+      let open: Range[]
+      if (withHours.length > 0) {
+        open = mergeRanges(withHours.flatMap((id) => dayHours.get(id) ?? []))
+      } else {
+        // Bez otevírací doby jen mezery mezi rezervacemi
+        const bk = mergeRanges(items.filter((i): i is CalBooking => i.type === 'booking').map(span))
+        open = bk.length > 1 ? [{ from: bk[0].from, to: bk[bk.length - 1].to }] : []
+      }
+      open = open.map((r) => ({ from: Math.max(r.from, lowerBound), to: r.to })).filter((r) => r.to > r.from)
+      return subtract(open, busy)
+        .filter((g) => g.to - g.from >= MIN_GAP_MIN)
+        .map((g) => ({
+          start: isoZPrazskehoCasu(d, hhmm(g.from)),
+          end: g.to >= 24 * 60 ? dayEndIso : isoZPrazskehoCasu(d, hhmm(g.to)),
+          minutes: g.to - g.from,
+          // Karty, jejichž otevírací doba mezeru zasahuje (bez otevírací doby všechny z filtru)
+          cardIds: withHours.length > 0
+            ? withHours.filter((id) => (dayHours.get(id) ?? []).some((r) => r.from < g.to && r.to > g.from))
+            : cardIds,
+        }))
+    }
+
+    const out: Record<string, CalGap[]> = { all: gapsFor(active.map((s) => s.id)) }
+    for (const p of places) {
+      out[p.key] = gapsFor(active.filter((s) => (cardPlaces.get(s.id) ?? []).includes(p.key)).map((s) => s.id))
+    }
+    return out
   }
 
-  const gaps: Record<string, CalGap[]> = { all: gapsFor(active.map((s) => s.id)) }
-  for (const p of places) {
-    gaps[p.key] = gapsFor(active.filter((s) => (cardPlaces.get(s.id) ?? []).includes(p.key)).map((s) => s.id))
-  }
+  // ── Jednotlivé dny ────────────────────────────────────────
+  const days: CalDayData[] = weekDates.map((d) => {
+    const startMs = new Date(isoZPrazskehoCasu(d, '00:00')).getTime()
+    const endMs = new Date(isoZPrazskehoCasu(shiftDate(d, 1), '00:00')).getTime()
+    const overlaps = (i: { start: string; end: string }) =>
+      new Date(i.start).getTime() < endMs && new Date(i.end).getTime() > startMs
+    const items: CalItem[] = [
+      // Rezervace patří ke dni, kdy začíná
+      ...bookings.filter((b) => { const t = new Date(b.start).getTime(); return t >= startMs && t < endMs }),
+      ...slots.filter(overlaps),
+      ...blocks.filter(overlaps),
+    ].sort((a, b) => a.start.localeCompare(b.start))
+    return { date: d, items, gaps: gapsForDay(d, startMs, endMs, items, takenSlots.filter(overlaps)) }
+  })
 
-  return { date, today, week, places, items, gaps, hasHours: cardsWithHours.size > 0 }
+  return { date, today, days, places, hasHours: cardsWithHours.size > 0 }
 }

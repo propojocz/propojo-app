@@ -1,5 +1,5 @@
 // app/dashboard/kalendar/page.tsx
-// Kalendář poskytovatele – K1 den (19. 10. 2026, docs/plan-kalendar.md).
+// Kalendář poskytovatele – K1 den, K2 týden (19. 10. 2026, docs/plan-kalendar.md). ?den=YYYY-MM-DD, ?pohled=tyden, ?misto=…
 // Data skládá lib/actions/calendar.ts, zobrazení a formuláře KalendarClient.
 // Volné termíny dopředu se dál spravují v Termínech (/dashboard/terminy), odkaz je v kalendáři.
 
@@ -10,7 +10,7 @@ import KalendarClient from './KalendarClient'
 
 export const metadata = { title: 'Kalendář | Propojo' }
 
-export default async function KalendarPage({ searchParams }: { searchParams: { den?: string; misto?: string } }) {
+export default async function KalendarPage({ searchParams }: { searchParams: { den?: string; misto?: string; pohled?: string } }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/prihlasit?next=/dashboard/kalendar')
@@ -22,8 +22,8 @@ export default async function KalendarPage({ searchParams }: { searchParams: { d
     .single() as { data: { is_provider: boolean } | null }
   if (profile?.is_provider !== true) redirect('/dashboard')
 
-  const day = await getCalendarDay(searchParams?.den)
-  if (!day) redirect('/dashboard')
+  const data = await getCalendarDay(searchParams?.den)
+  if (!data) redirect('/dashboard')
 
-  return <KalendarClient day={day} initialPlace={searchParams?.misto ?? 'all'} />
+  return <KalendarClient data={data} view={searchParams?.pohled === 'tyden' ? 'tyden' : 'den'} initialPlace={searchParams?.misto ?? 'all'} />
 }

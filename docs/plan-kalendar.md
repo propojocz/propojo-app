@@ -47,7 +47,7 @@ volné termíny `availability_slots`, bleskový termín `QuickSlotForm`, stránk
 - Panel „Využijte volné místo“ (největší mezera dne) a „Přidat do kalendáře“.
 - **Poznámka („ruční rezervace“)**: text + čas, zobrazí se v kalendáři a **blokuje čas** pro online rezervace.
   SQL: `provider_blocks.kind` ('block' | 'note'). Text v existujícím `reason`.
-**K2 – Týden + ukázkový den**: počítač 7 sloupců s bloky, mobil seznam po dnech; klik → den. Prázdný kalendář ukáže zašedlou ukázku.
+**K2 – Týden + ukázkový den** (POSTAVENO 19. 10. 2026, čeká na build a test; ukázka jen při prázdném týdnu): počítač 7 sloupců s bloky, mobil seznam po dnech; klik → den. Prázdný kalendář ukáže zašedlou ukázku.
 **K3 – Přehled** (`/dashboard` pro poskytovatele): dnes (rezervace, čeká na potvrzení, největší volno + ⚡), tento týden,
   zaplaceno přes Propojo tento měsíc, poslední hodnocení.
 **K4 – Měsíc**: mřížka s počtem rezervací a volna u dne, klik → den.

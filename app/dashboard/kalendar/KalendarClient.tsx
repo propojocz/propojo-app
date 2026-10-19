@@ -2,15 +2,18 @@
 // app/dashboard/kalendar/KalendarClient.tsx
 // Kalendář K1 – den jako časová osa: rezervace, pauza / přesun, vypsané volné termíny, blokace,
 // poznámky a volné mezery s „Vytvořit bleskový termín“ (⚡ s předvyplněným časem a kartami).
+// K2 – přepínač Den / Týden (WeekView) a ukázkový den, když je celý týden prázdný (SampleDay).
 // Filtr „Místo“ mění jen to, co se ukazuje, a otevírací dobu pro mezery – obsazenost je vždy celá.
 // Poznámka („ruční rezervace“) je jen pro poskytovatele: blokuje čas, bez platby, není to rezervace přes Propojo.
+// Přidávání (Bleskový termín / Poznámka / Blokovat čas) jsou tři samostatná tlačítka nad osou / týdnem –
+// menu pod „+“ na mobilu vyjíždělo mimo obrazovku; panel „Využijte volné místo“ zrušen, ⚡ je u každé mezery (Matej 19. 10.).
 
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  Ban, CalendarDays, ChevronLeft, ChevronRight, Loader2, MapPin, Plus, StickyNote, X, Zap, Coffee, ListChecks,
+  Ban, CalendarDays, ChevronLeft, ChevronRight, Loader2, MapPin, StickyNote, X, Zap, Coffee, ListChecks,
 } from 'lucide-react'
 import type { CalendarDay, CalBooking, CalGap, CalItem } from '@/lib/actions/calendar'
 import { blockTime, unblockTime } from '@/lib/actions/day-schedule'
@@ -19,42 +22,15 @@ import { QuickSlotModal } from '@/components/ui/QuickSlotButton'
 import type { QuickSlotInitial } from '@/components/ui/QuickSlotForm'
 import ShareSlotButton from '@/components/ui/ShareSlotButton'
 import UpcomingDrawer from '@/components/ui/UpcomingDrawer'
-
-// Barvy míst – plné názvy tříd kvůli Tailwindu
-const PALETTE = [
-  { dot: 'bg-sky-400', border: 'border-l-sky-400', chip: 'border-sky-300 bg-sky-50 text-sky-800' },
-  { dot: 'bg-violet-400', border: 'border-l-violet-400', chip: 'border-violet-300 bg-violet-50 text-violet-800' },
-  { dot: 'bg-teal-400', border: 'border-l-teal-400', chip: 'border-teal-300 bg-teal-50 text-teal-800' },
-  { dot: 'bg-rose-400', border: 'border-l-rose-400', chip: 'border-rose-300 bg-rose-50 text-rose-800' },
-  { dot: 'bg-lime-500', border: 'border-l-lime-500', chip: 'border-lime-300 bg-lime-50 text-lime-800' },
-]
-const VYJEZDY = { dot: 'bg-indigo-400', border: 'border-l-indigo-400', chip: 'border-indigo-300 bg-indigo-50 text-indigo-800' }
-const NEUTRAL = { dot: 'bg-slate-300', border: 'border-l-slate-300', chip: 'border-slate-300 bg-slate-50 text-slate-700' }
-
-const WEEKDAYS = ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne']
-
-function durationText(min: number): string {
-  const h = Math.floor(min / 60)
-  const m = min % 60
-  if (h === 0) return `${m} min`
-  return m === 0 ? `${h} h` : `${h} h ${m} min`
-}
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase() || '?'
-}
-
-function shiftDate(dateStr: string, days: number): string {
-  const d = new Date(`${dateStr}T12:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + days)
-  return d.toISOString().slice(0, 10)
-}
-
-const noon = (dateStr: string) => `${dateStr}T12:00:00Z`
+import WeekView from './WeekView'
+import SampleDay from './SampleDay'
+import { WEEKDAYS, bookingsText, durationText, filterItems, initials, makeStyleOf, noon, shiftDate } from './shared'
 
 /** Konec mezery o půlnoci by v poli času byl 00:00 – do formuláře 23:55 */
 const timeField = (iso: string) => (cas(iso) === '00:00' ? '23:55' : cas(iso))
+
+const dayMonth = (dateStr: string) =>
+  new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(noon(dateStr)))
 
 type Row =
   | { kind: 'item'; start: string; item: CalItem }
@@ -63,15 +39,18 @@ type Row =
 
 type FormState = { mode: 'note' | 'block'; date: string; from: string; to: string; text: string }
 
-export default function KalendarClient({ day, initialPlace }: { day: CalendarDay; initialPlace: string }) {
+export default function KalendarClient({ data, view, initialPlace }: {
+  data: CalendarDay
+  view: 'den' | 'tyden'
+  initialPlace: string
+}) {
   const router = useRouter()
   // Vlastní stav místo useTransition – v Reactu 18 transition nečeká na await, tlačítko by šlo kliknout dvakrát
   const [saving, setSaving] = useState(false)
   const [placePick, setPlace] = useState(initialPlace)
-  // Místo, které v jiném dni není, se ukáže jako „Všechna“
-  const place = placePick === 'all' || day.places.some((p) => p.key === placePick) ? placePick : 'all'
+  // Místo, které v jiném týdnu není, se ukáže jako „Všechna“
+  const place = placePick === 'all' || data.places.some((p) => p.key === placePick) ? placePick : 'all'
   const [now, setNow] = useState<number | null>(null)
-  const [menuOpen, setMenuOpen] = useState(false)
   const [quick, setQuick] = useState<QuickSlotInitial | null>(null)
   const [form, setForm] = useState<FormState | null>(null)
   const [error, setError] = useState('')
@@ -86,18 +65,12 @@ export default function KalendarClient({ day, initialPlace }: { day: CalendarDay
     return () => clearInterval(t)
   }, [])
 
-  const isToday = day.date === day.today
-  const isPast = day.date < day.today
-
-  const styleOf = useMemo(() => {
-    const map = new Map<string, typeof NEUTRAL>()
-    let i = 0
-    for (const p of day.places) {
-      if (p.kind === 'vyjezdy') map.set(p.key, VYJEZDY)
-      else { map.set(p.key, PALETTE[i % PALETTE.length]); i += 1 }
-    }
-    return (key: string) => map.get(key) ?? NEUTRAL
-  }, [day.places])
+  const isWeek = view === 'tyden'
+  const day = data.days.find((d) => d.date === data.date) ?? data.days[0]
+  const isToday = data.date === data.today
+  const isPast = data.date < data.today
+  const weekEmpty = data.days.every((d) => d.items.length === 0)
+  const styleOf = useMemo(() => makeStyleOf(data.places), [data.places])
 
   const pickPlace = (key: string) => {
     setPlace(key)
@@ -108,24 +81,23 @@ export default function KalendarClient({ day, initialPlace }: { day: CalendarDay
     } catch { /* jen pohodlí – filtr funguje i bez adresy */ }
   }
 
-  const dayHref = (d: string) => {
+  const href = (d: string, v: 'den' | 'tyden' = view) => {
     const q = new URLSearchParams()
-    if (d !== day.today) q.set('den', d)
+    if (d !== data.today) q.set('den', d)
+    if (v === 'tyden') q.set('pohled', 'tyden')
     if (place !== 'all') q.set('misto', place)
     const s = q.toString()
     return `/dashboard/kalendar${s ? `?${s}` : ''}`
   }
+  const step = isWeek ? 7 : 1
 
-  const visible = day.items.filter((i) => {
-    if (place === 'all') return true
-    if (i.type === 'booking') return i.placeKey === place
-    if (i.type === 'slot') return i.placeKeys.includes(place)
-    return true // blokace a poznámky platí pro celý kalendář
-  })
+  // ── Den ───────────────────────────────────────────────────
+  const visible = filterItems(day.items, place)
   const gaps = day.gaps[place] ?? []
-  const bestGap = gaps.reduce<CalGap | null>((best, g) => (!best || g.minutes > best.minutes ? g : best), null)
   const bookings = visible.filter((i): i is CalBooking => i.type === 'booking')
   const freeMinutes = gaps.reduce((s, g) => s + g.minutes, 0)
+  const weekBookings = data.days.reduce((s, d) => s + filterItems(d.items, place).filter((i) => i.type === 'booking').length, 0)
+  const weekFree = data.days.reduce((s, d) => s + (d.gaps[place] ?? []).reduce((a, g) => a + g.minutes, 0), 0)
 
   const rows: Row[] = []
   for (const it of visible) {
@@ -135,22 +107,21 @@ export default function KalendarClient({ day, initialPlace }: { day: CalendarDay
   for (const g of gaps) rows.push({ kind: 'gap', start: g.start, gap: g })
   rows.sort((a, b) => a.start.localeCompare(b.start) || (a.kind === 'gap' ? 1 : 0) - (b.kind === 'gap' ? 1 : 0))
 
+  // Bleskový termín bez mezery: vybraný den, u minulého dne dnešek
   const openQuick = (g?: CalGap) => {
-    setMenuOpen(false)
-    if (!g) { setQuick(isPast ? {} : { date: day.date }); return }
+    if (!g) { setQuick({ date: isPast ? data.today : data.date }); return }
     // Dnešní mezera začíná „teď“ – volný termín nesmí začínat v minulosti, začátek posuneme o čtvrthodinu
     const soonest = Math.ceil((Date.now() + 15 * 60_000) / (5 * 60_000)) * 5 * 60_000
     const startMs = Math.max(new Date(g.start).getTime(), soonest)
     const from = startMs < new Date(g.end).getTime() ? cas(new Date(startMs)) : cas(g.start)
-    setQuick({ date: day.date, from, to: timeField(g.end), cardIds: g.cardIds })
+    setQuick({ date: data.date, from, to: timeField(g.end), cardIds: g.cardIds })
   }
 
   const openForm = (mode: FormState['mode'], g?: CalGap) => {
-    setMenuOpen(false)
     setError('')
     setForm({
       mode,
-      date: day.date,
+      date: data.date,
       from: g ? cas(g.start) : '',
       to: g ? timeField(g.end) : '',
       text: '',
@@ -197,37 +168,28 @@ export default function KalendarClient({ day, initialPlace }: { day: CalendarDay
 
   // ── Části ────────────────────────────────────────────────
 
-  const bestGapPanel = bestGap && (
-    <div className="rounded-2xl border border-orange-200 bg-orange-50/60 p-4">
-      <p className="flex items-center gap-1.5 text-sm font-black text-slate-900">
-        <Zap className="h-4 w-4 fill-orange-400 text-orange-500" /> Využijte volné místo
-      </p>
-      <p className="mt-1 text-sm text-slate-700">
-        Největší volno {isToday ? 'dnes' : 'v tento den'}: <span className="font-bold tabular-nums">{cas(bestGap.start)}–{cas(bestGap.end)}</span> ({durationText(bestGap.minutes)})
-      </p>
-      <button type="button" onClick={() => openQuick(bestGap)}
-        className="mt-2.5 inline-flex items-center gap-1.5 rounded-xl bg-orange-500 px-3 py-2 text-sm font-bold text-white transition hover:bg-orange-600">
-        <Zap className="h-4 w-4" /> Vytvořit bleskový termín
-      </button>
-    </div>
-  )
-
-  const addMenuItems = (
-    <>
-      <button type="button" onClick={() => openQuick()} disabled={isPast}
-        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-slate-800 transition hover:bg-orange-50 disabled:opacity-40">
-        <Zap className="h-4 w-4 fill-orange-400 text-orange-500" /> Bleskový termín
-      </button>
-      <button type="button" onClick={() => openForm('note')}
-        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-slate-800 transition hover:bg-amber-50">
-        <StickyNote className="h-4 w-4 text-amber-500" /> Poznámka (ruční rezervace)
-      </button>
-      <button type="button" onClick={() => openForm('block')}
-        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-slate-800 transition hover:bg-slate-100">
-        <Ban className="h-4 w-4 text-slate-500" /> Blokovat čas
-      </button>
-    </>
-  )
+  // Tři samostatná tlačítka (nad osou / týdnem, Den na počítači v bočním panelu)
+  const addButtons = (layout: 'row' | 'panel') => {
+    const cls = layout === 'row'
+      ? 'flex flex-col items-center justify-center gap-1 rounded-xl border px-2 py-2 text-center text-[11px] font-semibold leading-tight transition sm:flex-row sm:gap-1.5 sm:px-3 sm:text-xs'
+      : 'flex w-full items-center gap-2.5 rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold transition'
+    return (
+      <>
+        <button type="button" onClick={() => openQuick()}
+          className={`${cls} ${layout === 'row' ? 'border-orange-200 bg-orange-50 text-orange-800 hover:bg-orange-100' : 'text-slate-800 hover:bg-orange-50'}`}>
+          <Zap className="h-4 w-4 shrink-0 fill-orange-400 text-orange-500" /> Bleskový termín
+        </button>
+        <button type="button" onClick={() => openForm('note')}
+          className={`${cls} ${layout === 'row' ? 'border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100' : 'text-slate-800 hover:bg-amber-50'}`}>
+          <StickyNote className="h-4 w-4 shrink-0 text-amber-500" /> {layout === 'row' ? 'Poznámka' : 'Poznámka (ruční rezervace)'}
+        </button>
+        <button type="button" onClick={() => openForm('block')}
+          className={`${cls} ${layout === 'row' ? 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100' : 'text-slate-800 hover:bg-slate-100'}`}>
+          <Ban className="h-4 w-4 shrink-0 text-slate-500" /> Blokovat čas
+        </button>
+      </>
+    )
+  }
 
   const renderRow = (r: Row) => {
     if (r.kind === 'buffer') {
@@ -416,68 +378,95 @@ export default function KalendarClient({ day, initialPlace }: { day: CalendarDay
     document.body,
   ) : null
 
+  const legend = data.places.length > 0 && (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="text-sm font-black text-slate-900">Vaše místa</p>
+      <ul className="mt-2 space-y-1.5">
+        {data.places.map((p) => (
+          <li key={p.key} className="flex items-start gap-2 text-xs text-slate-600">
+            <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${styleOf(p.key).dot}`} />
+            <span className="min-w-0 break-words">{p.kind === 'vyjezdy' ? 'Výjezdy k zákazníkům' : p.label}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+
+  const links = (
+    <div className="space-y-2 px-1">
+      <Link href="/dashboard/terminy" className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 hover:text-emerald-800">
+        <ListChecks className="h-4 w-4" /> Volné termíny dopředu → Termíny
+      </Link>
+      <div><UpcomingDrawer variant="text" /></div>
+    </div>
+  )
+
+  const firstDay = data.days[0].date
+  const lastDay = data.days[data.days.length - 1].date
+
   return (
     <div className="space-y-4">
-      {/* Hlavička: den, přepínání, týden, filtr místa */}
+      {/* Hlavička: den / týden, přepínání, přidávání, filtr místa */}
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-2xl font-black text-slate-900">Kalendář</h1>
             <p className="mt-0.5 flex flex-wrap items-center gap-2 text-sm text-slate-600">
-              <span className="inline-block first-letter:uppercase">{denDlouze(noon(day.date))}</span>
-              {isToday && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-700">Dnes</span>}
+              {isWeek
+                ? <span>{dayMonth(firstDay)} – {dayMonth(lastDay)}</span>
+                : <span className="inline-block first-letter:uppercase">{denDlouze(noon(data.date))}</span>}
+              {!isWeek && isToday && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-700">Dnes</span>}
             </p>
           </div>
-          <div className="flex items-center gap-1.5">
-            <Link href={dayHref(shiftDate(day.date, -1))} aria-label="Předchozí den"
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex rounded-lg border border-slate-200 p-0.5 text-xs font-semibold">
+              <Link href={href(data.date, 'den')}
+                className={`rounded-md px-3 py-1.5 transition ${!isWeek ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
+                Den
+              </Link>
+              <Link href={href(data.date, 'tyden')}
+                className={`rounded-md px-3 py-1.5 transition ${isWeek ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
+                Týden
+              </Link>
+            </div>
+            <Link href={href(shiftDate(data.date, -step))} aria-label={isWeek ? 'Předchozí týden' : 'Předchozí den'}
               className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300">
               <ChevronLeft className="h-4 w-4" />
             </Link>
-            <Link href={dayHref(day.today)}
+            <Link href={href(data.today)}
               className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:border-emerald-300 hover:text-emerald-700">
               Dnes
             </Link>
-            <Link href={dayHref(shiftDate(day.date, 1))} aria-label="Další den"
+            <Link href={href(shiftDate(data.date, step))} aria-label={isWeek ? 'Další týden' : 'Další den'}
               className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 text-slate-500 hover:border-slate-300">
               <ChevronRight className="h-4 w-4" />
             </Link>
-            <div className="relative">
-              <button type="button" onClick={() => setMenuOpen((v) => !v)} aria-label="Přidat do kalendáře" aria-expanded={menuOpen}
-                className="grid h-9 w-9 place-items-center rounded-lg bg-emerald-500 text-white shadow-sm transition hover:bg-emerald-600">
-                <Plus className="h-5 w-5" />
-              </button>
-              {menuOpen && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                  <div className="absolute right-0 z-20 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl">
-                    {addMenuItems}
-                  </div>
-                </>
-              )}
-            </div>
           </div>
         </div>
 
-        {/* Dny v týdnu */}
-        <div className="mt-4 grid grid-cols-7 gap-1">
-          {day.week.map((w, i) => {
-            const on = w.date === day.date
-            const isT = w.date === day.today
-            return (
-              <Link key={w.date} href={dayHref(w.date)}
-                className={`flex flex-col items-center rounded-xl py-1.5 transition ${
-                  on ? 'bg-emerald-500 text-white' : isT ? 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100' : 'text-slate-600 hover:bg-slate-100'
-                }`}>
-                <span className={`text-[11px] font-semibold ${on ? 'text-emerald-50' : 'text-slate-400'}`}>{WEEKDAYS[i]}</span>
-                <span className="text-base font-black tabular-nums">{Number(w.date.slice(8, 10))}</span>
-                <span className={`mt-0.5 h-1.5 w-1.5 rounded-full ${w.count > 0 ? (on ? 'bg-white' : 'bg-emerald-500') : 'bg-transparent'}`} />
-              </Link>
-            )
-          })}
-        </div>
+        {/* Dny v týdnu (jen Den – Týden má vlastní sloupce) */}
+        {!isWeek && (
+          <div className="mt-4 grid grid-cols-7 gap-1">
+            {data.days.map((w, i) => {
+              const on = w.date === data.date
+              const isT = w.date === data.today
+              const has = w.items.some((x) => x.type === 'booking')
+              return (
+                <Link key={w.date} href={href(w.date)}
+                  className={`flex flex-col items-center rounded-xl py-1.5 transition ${
+                    on ? 'bg-emerald-500 text-white' : isT ? 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100' : 'text-slate-600 hover:bg-slate-100'
+                  }`}>
+                  <span className={`text-[11px] font-semibold ${on ? 'text-emerald-50' : 'text-slate-400'}`}>{WEEKDAYS[i]}</span>
+                  <span className="text-base font-black tabular-nums">{Number(w.date.slice(8, 10))}</span>
+                  <span className={`mt-0.5 h-1.5 w-1.5 rounded-full ${has ? (on ? 'bg-white' : 'bg-emerald-500') : 'bg-transparent'}`} />
+                </Link>
+              )
+            })}
+          </div>
+        )}
 
         {/* Filtr místa */}
-        {day.places.length > 1 && (
+        {data.places.length > 1 && (
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
             <span className="mr-1 text-[11px] font-semibold text-slate-500">Místo</span>
             <button type="button" onClick={() => pickPlace('all')}
@@ -486,11 +475,11 @@ export default function KalendarClient({ day, initialPlace }: { day: CalendarDay
               }`}>
               Všechna
             </button>
-            {day.places.map((p) => {
+            {data.places.map((p) => {
               const ps = styleOf(p.key)
               return (
                 <button key={p.key} type="button" onClick={() => pickPlace(p.key)}
-                  className={`inline-flex max-w-[16rem] items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition ${
+                  className={`inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition sm:max-w-[16rem] ${
                     place === p.key ? ps.chip : 'border-slate-200 text-slate-600 hover:border-slate-300'
                   }`}>
                   <span className={`h-2 w-2 shrink-0 rounded-full ${ps.dot}`} />
@@ -502,62 +491,57 @@ export default function KalendarClient({ day, initialPlace }: { day: CalendarDay
         )}
 
         <p className="mt-3 text-xs text-slate-500">
-          {bookings.length === 0 ? 'Žádná rezervace' : bookings.length === 1 ? '1 rezervace' : bookings.length < 5 ? `${bookings.length} rezervace` : `${bookings.length} rezervací`}
-          {!isPast && freeMinutes > 0 && <> · volno celkem {durationText(freeMinutes)}</>}
-          {!day.hasHours && <> · bez otevírací doby ukazujeme volno jen mezi rezervacemi</>}
+          {isWeek ? bookingsText(weekBookings) : bookingsText(bookings.length)}
+          {isWeek
+            ? weekFree > 0 && <> · volno celkem {durationText(weekFree)}</>
+            : !isPast && freeMinutes > 0 && <> · volno celkem {durationText(freeMinutes)}</>}
+          {!data.hasHours && <> · bez otevírací doby ukazujeme volno jen mezi rezervacemi</>}
         </p>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        {/* Časová osa dne */}
-        <div className="space-y-4 lg:col-span-2">
-          <div className="lg:hidden">{bestGapPanel}</div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-            {rows.length === 0 ? (
-              <div className="px-4 py-10 text-center">
-                <CalendarDays className="mx-auto h-8 w-8 text-slate-300" />
-                <p className="mt-2 font-bold text-slate-700">Na tento den nic nemáte</p>
-                <p className="mt-1 text-sm text-slate-500">
-                  {isPast ? 'Tento den už proběhl.' : 'Vypište bleskový termín nebo si poznamenejte, kdo přijde.'}
-                </p>
-              </div>
-            ) : (
-              <ul className="space-y-2">{rows.map(renderRow)}</ul>
-            )}
+      {isWeek ? (
+        <>
+          <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">{addButtons('row')}</div>
+          <WeekView days={data.days} today={data.today} place={place} styleOf={styleOf} dayHref={(d) => href(d, 'den')} />
+          {weekEmpty && <SampleDay />}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {legend}
+            {links}
           </div>
-        </div>
-
-        {/* Boční panel */}
-        <div className="space-y-4">
-          <div className="hidden lg:block">{bestGapPanel}</div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-            <p className="px-3 pb-1 pt-1 text-sm font-black text-slate-900">Přidat do kalendáře</p>
-            {addMenuItems}
-          </div>
-
-          {day.places.length > 0 && (
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-sm font-black text-slate-900">Vaše místa</p>
-              <ul className="mt-2 space-y-1.5">
-                {day.places.map((p) => (
-                  <li key={p.key} className="flex items-start gap-2 text-xs text-slate-600">
-                    <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${styleOf(p.key).dot}`} />
-                    <span className="min-w-0 break-words">{p.kind === 'vyjezdy' ? 'Výjezdy k zákazníkům' : p.label}</span>
-                  </li>
-                ))}
-              </ul>
+        </>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-3">
+          {/* Časová osa dne */}
+          <div className="space-y-4 lg:col-span-2">
+            {/* Přidávání – tři tlačítka (Den na počítači je má v bočním panelu) */}
+            <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap lg:hidden">{addButtons('row')}</div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+              {rows.length === 0 ? (
+                <div className="px-4 py-10 text-center">
+                  <CalendarDays className="mx-auto h-8 w-8 text-slate-300" />
+                  <p className="mt-2 font-bold text-slate-700">Na tento den nic nemáte</p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {isPast ? 'Tento den už proběhl.' : 'Vypište bleskový termín nebo si poznamenejte, kdo přijde.'}
+                  </p>
+                </div>
+              ) : (
+                <ul className="space-y-2">{rows.map(renderRow)}</ul>
+              )}
             </div>
-          )}
+            {weekEmpty && <SampleDay />}
+          </div>
 
-          <div className="space-y-2 px-1">
-            <Link href="/dashboard/terminy" className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 hover:text-emerald-800">
-              <ListChecks className="h-4 w-4" /> Volné termíny dopředu → Termíny
-            </Link>
-            <div><UpcomingDrawer variant="text" /></div>
+          {/* Boční panel */}
+          <div className="space-y-4">
+            <div className="hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm lg:block">
+              <p className="px-3 pb-1 pt-1 text-sm font-black text-slate-900">Přidat do kalendáře</p>
+              {addButtons('panel')}
+            </div>
+            {legend}
+            {links}
           </div>
         </div>
-      </div>
+      )}
 
       {formModal}
       <QuickSlotModal open={quick !== null} onClose={() => setQuick(null)} initial={quick ?? undefined} />
