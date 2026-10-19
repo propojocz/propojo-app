@@ -4,7 +4,7 @@ import { bookingStatusBadge } from '@/lib/booking/labels'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { Package, ShoppingBag, TrendingUp, Star, ArrowRight, PlusCircle, Search, ChevronRight, Heart, CalendarDays } from 'lucide-react'
+import { ShoppingBag, TrendingUp, ArrowRight, PlusCircle, Search, ChevronRight, Heart, CalendarDays } from 'lucide-react'
 import { CATEGORY_META } from '@/types/database'
 import type { Profile } from '@/types/database'
 import Avatar from '@/components/ui/Avatar'
@@ -14,6 +14,9 @@ import FreeSlotReminder, { NoFreeSlotHint, type ReminderSlot } from '@/component
 import PushPrompt from '@/components/ui/PushPrompt'
 import ShareProfileStep from '@/components/ui/ShareProfileStep'
 import { denDlouze, denKratce, rozsahCasu, datum } from '@/lib/format'
+import { getCalendarDay } from '@/lib/actions/calendar'
+import { getProviderOverview } from '@/lib/actions/overview'
+import ProviderOverview from './ProviderOverview'
 
 export const metadata = { title: 'Dashboard | Propojo' }
 
@@ -32,19 +35,17 @@ export default async function DashboardPage() {
 
   // ── DATA PRO ŽIVNOSTNÍKA ──────────────────────────────────
   if (isProvider) {
+    // Přehled K3 (19. 10. 2026): dnešek a týden jako Kalendář, čeká na potvrzení, peníze za měsíc, hodnocení.
+    // Staré dlaždice (počty podle stavů starého modelu) nahradil ProviderOverview.
     const [
       { count: servicesCount },
-      { count: activeServicesCount },
-      { count: pendingOrdersCount },
-      { count: totalOrdersCount },
       { data: recentServices },
       { data: recentOrders },
       { data: freeSlots },
+      cal,
+      overview,
     ] = await Promise.all([
       supabase.from('services').select('id', { count: 'exact', head: true }).eq('provider_id', user.id),
-      supabase.from('services').select('id', { count: 'exact', head: true }).eq('provider_id', user.id).eq('is_active', true),
-      supabase.from('orders').select('id', { count: 'exact', head: true }).eq('provider_id', user.id).eq('status', 'cekajici'),
-      supabase.from('orders').select('id', { count: 'exact', head: true }).eq('provider_id', user.id),
       supabase.from('services').select('id, title, category, price, price_unit, is_active').eq('provider_id', user.id).order('created_at', { ascending: false }).limit(5),
       supabase.from('orders').select('id, status, booking_state, offer_kind, created_at, services(title), profiles!orders_customer_id_fkey(full_name)').eq('provider_id', user.id).order('created_at', { ascending: false }).limit(5),
       // Volná okna, o kterých ještě nikdo neví — hlavní featura Propojo,
@@ -58,6 +59,8 @@ export default async function DashboardPage() {
         .gte('starts_at', new Date().toISOString())
         .order('starts_at', { ascending: true })
         .limit(10),
+      getCalendarDay(),
+      getProviderOverview(),
     ])
 
     // Které z těch oken už mají rozeslané upozornění? Čte se přes service role —
@@ -143,8 +146,8 @@ export default async function DashboardPage() {
             <p className="mt-0.5 text-sm text-slate-500">{denDlouze(new Date())}</p>
           </div>
           <div className="hidden shrink-0 gap-2 sm:flex">
-            <Link href="/dashboard/terminy" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700">
-              <CalendarDays className="h-4 w-4" /> Volný termín
+            <Link href="/dashboard/kalendar" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700">
+              <CalendarDays className="h-4 w-4" /> Kalendář
             </Link>
             <Link href="/pridat-sluzbu" className="btn-primary">
               <PlusCircle className="h-4 w-4" /> Nová nabídka
@@ -159,24 +162,16 @@ export default async function DashboardPage() {
         {/* Upozornění do telefonu — schová se samo, když je prohlížeč nepodporuje */}
         <PushPrompt />
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          {[
-            { label: 'Aktivní nabídky', value: activeServicesCount ?? 0, sub: `z ${servicesCount ?? 0} celkem`, icon: Package, color: 'indigo', href: '/dashboard/nabidky' },
-            { label: 'Čekající poptávky', value: pendingOrdersCount ?? 0, sub: `z ${totalOrdersCount ?? 0} celkem`, icon: ShoppingBag, color: 'amber', href: '/dashboard/objednavky' },
-            { label: 'Celkem objednávek', value: totalOrdersCount ?? 0, sub: 'od spuštění', icon: TrendingUp, color: 'emerald', href: '/dashboard/objednavky' },
-            { label: 'Hodnocení', value: profile?.rating ? `${Number(profile.rating).toFixed(1)} ★` : '—', sub: `${profile?.review_count ?? 0} recenzí`, icon: Star, color: 'violet', href: '/dashboard/profil' },
-          ].map((stat) => (
-            <Link key={stat.label} href={stat.href} className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
-              <div className={`mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-${stat.color}-100`}>
-                <stat.icon className={`h-5 w-5 text-${stat.color}-600`} />
-              </div>
-              <p className="text-2xl font-black text-slate-900">{stat.value}</p>
-              <p className="mt-0.5 text-xs text-slate-500">{stat.label}</p>
-              <p className="mt-0.5 text-xs text-slate-400">{stat.sub}</p>
-            </Link>
-          ))}
-        </div>
+        {/* Přehled: Dnes, Čeká na vás, Tento týden, Zaplaceno přes Propojo, Hodnocení */}
+        {cal && overview && (
+          <ProviderOverview
+            cal={cal}
+            ov={overview}
+            serverNow={Date.now()}
+            rating={profile?.rating != null ? Number(profile.rating) : null}
+            reviewCount={profile?.review_count ?? 0}
+          />
+        )}
 
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Nabídky */}

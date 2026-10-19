@@ -24,10 +24,7 @@ import ShareSlotButton from '@/components/ui/ShareSlotButton'
 import UpcomingDrawer from '@/components/ui/UpcomingDrawer'
 import WeekView from './WeekView'
 import SampleDay from './SampleDay'
-import { WEEKDAYS, bookingsText, durationText, filterItems, initials, makeStyleOf, noon, shiftDate } from './shared'
-
-/** Konec mezery o půlnoci by v poli času byl 00:00 – do formuláře 23:55 */
-const timeField = (iso: string) => (cas(iso) === '00:00' ? '23:55' : cas(iso))
+import { WEEKDAYS, bookingStatus, bookingsText, durationText, filterItems, initials, makeStyleOf, noon, quickFromGap, shiftDate, timeField } from './shared'
 
 const dayMonth = (dateStr: string) =>
   new Intl.DateTimeFormat('cs-CZ', { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(noon(dateStr)))
@@ -109,12 +106,7 @@ export default function KalendarClient({ data, view, initialPlace }: {
 
   // Bleskový termín bez mezery: vybraný den, u minulého dne dnešek
   const openQuick = (g?: CalGap) => {
-    if (!g) { setQuick({ date: isPast ? data.today : data.date }); return }
-    // Dnešní mezera začíná „teď“ – volný termín nesmí začínat v minulosti, začátek posuneme o čtvrthodinu
-    const soonest = Math.ceil((Date.now() + 15 * 60_000) / (5 * 60_000)) * 5 * 60_000
-    const startMs = Math.max(new Date(g.start).getTime(), soonest)
-    const from = startMs < new Date(g.end).getTime() ? cas(new Date(startMs)) : cas(g.start)
-    setQuick({ date: data.date, from, to: timeField(g.end), cardIds: g.cardIds })
+    setQuick(g ? quickFromGap(data.date, g) : { date: isPast ? data.today : data.date })
   }
 
   const openForm = (mode: FormState['mode'], g?: CalGap) => {
@@ -151,19 +143,6 @@ export default function KalendarClient({ data, view, initialPlace }: {
       .then((res) => { if (!res.success) alert(res.error) })
       .catch(() => alert('Nepodařilo se smazat. Zkuste to prosím znovu.'))
       .finally(() => { setBusyId(null); router.refresh() })
-  }
-
-  const statusOf = (b: CalBooking): { text: string; cls: string } => {
-    if (b.state === 'pending_payment') return { text: 'Čeká na platbu', cls: 'bg-slate-100 text-slate-600' }
-    if (b.state === 'awaiting') return { text: 'Čeká na potvrzení', cls: 'bg-amber-100 text-amber-800' }
-    if (b.state === 'no_show') return { text: 'Nahlášeno nedostavení', cls: 'bg-red-100 text-red-700' }
-    if (b.state === 'legacy') return { text: 'Rezervace', cls: 'bg-slate-100 text-slate-600' }
-    const s = new Date(b.start).getTime()
-    const e = new Date(b.end).getTime()
-    if (now != null && now >= s && now < e) return { text: b.arrivalWindow ? 'Okno příjezdu běží' : 'Probíhá', cls: 'bg-emerald-500 text-white' }
-    if (now != null && now >= e) return { text: 'Proběhlo', cls: 'bg-slate-100 text-slate-500' }
-    if (now != null && s - now <= 3 * 3600_000) return { text: `Za ${durationText(Math.max(1, Math.round((s - now) / 60_000)))}`, cls: 'bg-sky-100 text-sky-800' }
-    return { text: 'Potvrzeno', cls: 'bg-emerald-100 text-emerald-700' }
   }
 
   // ── Části ────────────────────────────────────────────────
@@ -238,7 +217,7 @@ export default function KalendarClient({ data, view, initialPlace }: {
     )
 
     if (it.type === 'booking') {
-      const st = statusOf(it)
+      const st = bookingStatus(it, now)
       const ps = styleOf(it.placeKey)
       return (
         <li key={it.id} className="flex gap-3">

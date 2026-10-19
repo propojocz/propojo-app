@@ -1,8 +1,11 @@
 // app/dashboard/kalendar/shared.ts
-// Společné pro Den, Týden a ukázku: barvy míst, filtr podle místa, texty délek.
+// Společné pro Den, Týden, ukázku a Přehled (K3): barvy míst, filtr podle místa, texty délek,
+// stav rezervace podle hodin a předvyplnění bleskového termínu z mezery.
 // Třídy barev jsou vypsané celé, ať je Tailwind najde.
 
-import type { CalItem, CalPlace } from '@/lib/actions/calendar'
+import type { CalBooking, CalGap, CalItem, CalPlace } from '@/lib/actions/calendar'
+import type { QuickSlotInitial } from '@/components/ui/QuickSlotForm'
+import { cas } from '@/lib/format'
 
 export type PlaceStyle = { dot: string; border: string; chip: string }
 
@@ -65,4 +68,32 @@ export function bookingsText(n: number): string {
   if (n === 0) return 'Žádná rezervace'
   if (n === 1) return '1 rezervace'
   return n < 5 ? `${n} rezervace` : `${n} rezervací`
+}
+
+/** Stav rezervace pro štítek – „Za 20 min“ / „Probíhá“ podle hodin (now null = před načtením v prohlížeči) */
+export function bookingStatus(b: CalBooking, now: number | null): { text: string; cls: string } {
+  if (b.state === 'pending_payment') return { text: 'Čeká na platbu', cls: 'bg-slate-100 text-slate-600' }
+  if (b.state === 'awaiting') return { text: 'Čeká na potvrzení', cls: 'bg-amber-100 text-amber-800' }
+  if (b.state === 'no_show') return { text: 'Nahlášeno nedostavení', cls: 'bg-red-100 text-red-700' }
+  if (b.state === 'legacy') return { text: 'Rezervace', cls: 'bg-slate-100 text-slate-600' }
+  const s = new Date(b.start).getTime()
+  const e = new Date(b.end).getTime()
+  if (now != null && now >= s && now < e) return { text: b.arrivalWindow ? 'Okno příjezdu běží' : 'Probíhá', cls: 'bg-emerald-500 text-white' }
+  if (now != null && now >= e) return { text: 'Proběhlo', cls: 'bg-slate-100 text-slate-500' }
+  if (now != null && s - now <= 3 * 3600_000) return { text: `Za ${durationText(Math.max(1, Math.round((s - now) / 60_000)))}`, cls: 'bg-sky-100 text-sky-800' }
+  return { text: 'Potvrzeno', cls: 'bg-emerald-100 text-emerald-700' }
+}
+
+/** Konec mezery o půlnoci by v poli času byl 00:00 – do formuláře 23:55 */
+export const timeField = (iso: string) => (cas(iso) === '00:00' ? '23:55' : cas(iso))
+
+/**
+ * Předvyplnění bleskového termínu z volné mezery. Dnešní mezera začíná „teď“ a volný termín nesmí
+ * začínat v minulosti – začátek posuneme aspoň o čtvrthodinu.
+ */
+export function quickFromGap(date: string, g: CalGap): QuickSlotInitial {
+  const soonest = Math.ceil((Date.now() + 15 * 60_000) / (5 * 60_000)) * 5 * 60_000
+  const startMs = Math.max(new Date(g.start).getTime(), soonest)
+  const from = startMs < new Date(g.end).getTime() ? cas(new Date(startMs)) : cas(g.start)
+  return { date, from, to: timeField(g.end), cardIds: g.cardIds }
 }
