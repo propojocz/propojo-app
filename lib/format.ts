@@ -175,3 +175,21 @@ export function rozpocetText(from: number | null | undefined, to: number | null 
   if (f) return `od ${f.toLocaleString('cs-CZ')} Kč`
   return null
 }
+
+// ─── Rezervace po čtvrthodinách (19. 10. 2026, Matej) ─────────────────────
+// Zákazník si vybírá začátky jen na :00 / :15 / :30 / :45 a poskytovatel vypisuje okna a navrhuje termíny
+// na čtvrthodiny. Praha má posun v celých hodinách, takže čtvrthodina v UTC je i pražská čtvrthodina.
+const CTVRTHODINA_MS = 15 * 60_000
+
+/** Okamžik zaokrouhlený na celou čtvrthodinu – nahoru, nebo na nejbližší. Neplatné datum zůstane neplatné. */
+export function naCtvrthodinu(d: Date | string | number, smer: 'nahoru' | 'nejblizsi' = 'nejblizsi'): Date {
+  const ms = new Date(d).getTime()
+  const n = smer === 'nahoru' ? Math.ceil(ms / CTVRTHODINA_MS) : Math.round(ms / CTVRTHODINA_MS)
+  return new Date(n * CTVRTHODINA_MS)
+}
+
+/** Začíná okamžik přesně na čtvrthodinu? */
+export function jeNaCtvrthodinu(d: Date | string | number): boolean {
+  const ms = new Date(d).getTime()
+  return Number.isFinite(ms) && ms % CTVRTHODINA_MS === 0
+}

@@ -27,6 +27,7 @@ import ChatThread from '@/components/ui/ChatThread'
 import BookingWizard from '@/components/ui/BookingWizard'
 import ServiceMap from '@/components/ui/ServiceMap'
 import AddressInput from '@/components/ui/AddressInput'
+import QuarterTimeInput from '@/components/ui/QuarterTimeInput'
 
 export type ThreadItem = {
   conversationId: string
@@ -720,8 +721,8 @@ export default function PoptavkaChat({
                         </label>
                         <label className="block text-[11px] font-semibold text-slate-500">
                           {offerKind === 'B' ? 'Příjezd od' : 'Začátek'}
-                          <input type="time" step={300} value={termClock} onChange={(e) => setTermClock(e.target.value)}
-                            className="mt-0.5 block rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-900 outline-none focus:border-amber-400" />
+                          <QuarterTimeInput value={termClock} onChange={setTermClock}
+                            className="mt-0.5 flex rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-900 focus-within:border-amber-400" />
                         </label>
                         {offerKind === 'B' ? (
                           <label className="block text-[11px] font-semibold text-slate-500">

@@ -17,6 +17,7 @@ import { CalendarDays, Clock, Plus, Trash2, Loader2, Info, CheckCircle2, ListChe
 import { createSlot, deleteSlot, confirmRemainder, dismissRemainder } from '@/lib/actions/slots'
 import SlotNotifyPanel from '@/components/ui/SlotNotifyPanel'
 import ShareSlotButton from '@/components/ui/ShareSlotButton'
+import QuarterTimeInput from '@/components/ui/QuarterTimeInput'
 
 type ServiceLite = {
   id: string
@@ -232,15 +233,15 @@ export default function TerminyClient({
                 <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
                   <Clock className="h-3.5 w-3.5 text-slate-400" /> Od
                 </label>
-                <input type="time" value={from} onChange={(e) => setFrom(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
+                <QuarterTimeInput value={from} onChange={setFrom} ariaLabel="Od"
+                  className="flex w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus-within:border-emerald-400 focus-within:ring-2 focus-within:ring-emerald-100" />
               </div>
               <div>
                 <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
                   <Clock className="h-3.5 w-3.5 text-slate-400" /> Do
                 </label>
-                <input type="time" value={to} onChange={(e) => setTo(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
+                <QuarterTimeInput value={to} onChange={setTo} ariaLabel="Do"
+                  className="flex w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus-within:border-emerald-400 focus-within:ring-2 focus-within:ring-emerald-100" />
               </div>
             </div>
 

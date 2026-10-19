@@ -13,6 +13,7 @@ import { CheckCircle2, Loader2, Trash2, Zap } from 'lucide-react'
 import { createSlot, deleteSlot, type QuickSlotCard } from '@/lib/actions/slots'
 import { getMyUpcomingSlots, type MyQuickSlot } from '@/lib/actions/slot-share'
 import ShareSlotButton from '@/components/ui/ShareSlotButton'
+import QuarterTimeInput from '@/components/ui/QuarterTimeInput'
 
 function localDate(offsetDays = 0): string {
   const d = new Date(Date.now() + offsetDays * 24 * 3600_000)
@@ -24,7 +25,7 @@ function defaultWindow(): { from: string; to: string } {
   const d = new Date(Date.now() + 15 * 60_000)
   let min = Math.ceil((d.getHours() * 60 + d.getMinutes()) / 15) * 15
   if (min > 22 * 60) min = 9 * 60
-  const end = Math.min(min + 60, 23 * 60 + 55)
+  const end = Math.min(min + 60, 23 * 60 + 45)
   const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
   return { from: hhmm(min), to: hhmm(end) }
 }
@@ -218,13 +219,13 @@ export default function QuickSlotForm({
       <div className="mt-2 grid grid-cols-2 gap-2">
         <label className="min-w-0 text-[11px] font-semibold text-slate-500">
           Od
-          <input type="time" step={300} value={from} onChange={(e) => setFrom(e.target.value)}
-            className="mt-0.5 block w-full min-w-0 rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-900 outline-none focus:border-orange-400" />
+          <QuarterTimeInput value={from} onChange={setFrom} ariaLabel="Od"
+            className="mt-0.5 flex w-full min-w-0 justify-center rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-900 focus-within:border-orange-400" />
         </label>
         <label className="min-w-0 text-[11px] font-semibold text-slate-500">
           Do
-          <input type="time" step={300} value={to} onChange={(e) => setTo(e.target.value)}
-            className="mt-0.5 block w-full min-w-0 rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-900 outline-none focus:border-orange-400" />
+          <QuarterTimeInput value={to} onChange={setTo} ariaLabel="Do"
+            className="mt-0.5 flex w-full min-w-0 justify-center rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-900 focus-within:border-orange-400" />
         </label>
       </div>
 

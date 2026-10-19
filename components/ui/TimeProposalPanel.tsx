@@ -16,6 +16,7 @@ import { releaseUnpaidReservation } from '@/lib/actions/reservation-release'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
 import { computeCommission } from '@/lib/booking/commission'
 import BookingWizard from '@/components/ui/BookingWizard'
+import QuarterTimeInput from '@/components/ui/QuarterTimeInput'
 
 interface Props {
   orderId: string
@@ -600,12 +601,11 @@ export default function TimeProposalPanel({
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-600">{arrivalWindow ? 'Nejdříve v' : 'Čas'}</label>
-                  <input
-                    type="time"
+                  <QuarterTimeInput
                     value={newClock}
-                    step={300}
-                    onChange={(e) => { setNewClock(e.target.value); setError('') }}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-amber-400"
+                    onChange={(v) => { setNewClock(v); setError('') }}
+                    ariaLabel={arrivalWindow ? 'Nejdříve v' : 'Čas'}
+                    className="flex w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm transition focus-within:border-amber-400"
                   />
                 </div>
               </div>

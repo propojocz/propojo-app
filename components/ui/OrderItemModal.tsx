@@ -35,6 +35,7 @@ import { getItemPaymentDisplay } from '@/lib/item-payment-display'
 import BookingWizard from '@/components/ui/BookingWizard'
 import { Info as InfoIcon } from 'lucide-react'
 import type { TimePref } from '@/lib/actions/time-preference'
+import { naCtvrthodinu } from '@/lib/format'
 
 // „Kdy se vám to hodí“ – stejné volby jako v chatu u poptávky (14. 10. 2026)
 const DAY_PART_LABEL: Record<TimePref, string> = {
@@ -109,7 +110,8 @@ function windowMinutes(s: SlotOption): number {
 }
 
 // ── Mřížka časů ──────────────────────────────────────────────
-// Krok 15 minut. Nabízíme jen začátky, do kterých se úkon vejde do konce okna,
+// Krok 15 minut, začátky jen na celé čtvrthodiny (okno od 15:24 nabídne 15:30, 15:45… – 19. 10. 2026).
+// Nabízíme jen začátky, do kterých se úkon vejde do konce okna,
 // a jen budoucí (s pětiminutovou rezervou, ať zákazník nekliká na čas, který
 // mu mezitím utekl). Strop 60 časů na okno drží seznam přehledný i u celodenních oken.
 const STEP_MIN = 15
@@ -123,7 +125,9 @@ function buildTimes(slot: SlotOption, durMin: number | null): TimeOption[] {
   const potrebaMs = ((durMin && durMin > 0) ? durMin : Math.round((end - start) / 60000)) * 60000
   const hranice = Date.now() + 5 * 60000
   const out: TimeOption[] = []
-  for (let t = start; t + potrebaMs <= end; t += STEP_MIN * 60000) {
+  // Úkon bez délky zabírá celé okno – ten začíná se začátkem okna
+  const first = durMin && durMin > 0 ? naCtvrthodinu(start, 'nahoru').getTime() : start
+  for (let t = first; t + potrebaMs <= end; t += STEP_MIN * 60000) {
     if (t >= hranice) out.push({ slotId: slot.id, startIso: new Date(t).toISOString() })
     if (out.length >= MAX_TIMES_PER_SLOT) break
   }

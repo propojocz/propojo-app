@@ -285,7 +285,8 @@ function buildDays(ctx: CardContext, duration: number, itemBuffer: number, daysA
       // Poslední možný začátek, aby se úkon vešel do otevírací doby.
       // Pauza za úkonem smí přesáhnout zavíračku — uklízí se i po zavření.
       const lastStart = r.to - duration
-      for (let m = r.from; m <= lastStart; m += STEP_MIN) {
+      // Začátky jen na celé čtvrthodiny, i když otevírací doba začíná třeba v 9:10 (19. 10. 2026)
+      for (let m = Math.ceil(r.from / STEP_MIN) * STEP_MIN; m <= lastStart; m += STEP_MIN) {
         const hh = String(Math.floor(m / 60)).padStart(2, '0')
         const mm = String(m % 60).padStart(2, '0')
         const startDate = pragueToUtc(dateStr, `${hh}:${mm}`)

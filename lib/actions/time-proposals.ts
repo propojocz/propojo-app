@@ -18,7 +18,7 @@ import { releaseSlotAndMerge } from '@/lib/slot-merge'
 import { claimMatchingAvailabilitySlot } from '@/lib/slot-claim'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
 import { alertIfHighCharge } from '@/lib/booking/alerts'
-import { cas } from '@/lib/format'
+import { cas, jeNaCtvrthodinu } from '@/lib/format'
 import { bookingBufferMs } from '@/lib/booking/rules'
 import { adminDb, checkNewBooking } from '@/lib/booking/payments'
 import { bookingCharge, itemPriceKc } from '@/lib/booking/commission'
@@ -257,6 +257,8 @@ export async function proposeTimes(
   }
 
   const clean = Array.from(new Set(starts.filter(Boolean))).slice(0, MAX_PROPOSALS)
+  // Začátky jen po 15 minutách (19. 10. 2026) – výběr času jiné nedává, tohle je pojistka
+  if (clean.some((x) => !isNaN(new Date(x).getTime()) && !jeNaCtvrthodinu(x))) return { success: false, error: 'Čas vyberte po 15 minutách (:00, :15, :30 nebo :45).' }
   if (clean.length === 0) return { success: false, error: 'Vyberte alespoň jeden termín.' }
   if (order.scheduled_at && clean.some((x) => new Date(x).toISOString() === new Date(order.scheduled_at).toISOString())) {
     return { success: false, error: 'Nový návrh je stejný jako současný termín.' }

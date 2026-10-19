@@ -19,6 +19,7 @@ import {
   refundByProvider,
   withdrawFromBooking,
 } from '@/lib/actions/booking'
+import QuarterTimeInput from '@/components/ui/QuarterTimeInput'
 
 export type RefundView = { id: string; amountKc: number; status: string; createdText: string }
 
@@ -190,11 +191,18 @@ export default function BookingAfterPayment({
             (nejpozději do začátku původního termínu) nezareaguje, rezervace se zruší a zákazníkovi se z vašeho Stripe účtu
             vrátí celá částka {castka}. Nepřijatý termín se započítává do důvěryhodnosti účtu.
           </p>
-          <label className="mt-3 block text-xs font-semibold text-slate-600">
+          <div className="mt-3 text-xs font-semibold text-slate-600">
             Nový termín – začátek
-            <input type="datetime-local" value={rStart} onChange={(e) => setRStart(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-amber-400 sm:w-72" />
-          </label>
+            {/* Den + čas po 15 minutách (rStart = 'YYYY-MM-DDTHH:MM') */}
+            <span className="mt-1 flex flex-wrap items-center gap-2">
+              <input type="date" aria-label="Den" value={rStart.slice(0, 10)}
+                onChange={(e) => setRStart(e.target.value ? `${e.target.value}T${rStart.slice(11, 16) || '09:00'}` : '')}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal outline-none focus:border-amber-400" />
+              <QuarterTimeInput value={rStart.slice(11, 16)} ariaLabel="Čas"
+                onChange={(t) => setRStart(`${rStart.slice(0, 10) || new Date().toLocaleDateString('en-CA')}T${t}`)}
+                className="rounded-xl border border-slate-200 px-2 py-2 text-sm font-normal focus-within:border-amber-400" />
+            </span>
+          </div>
           <p className="mt-1 text-xs text-slate-400">
             {offerKind === 'B'
               ? `Okno příjezdu zůstane stejně dlouhé jako původní (${rDur} min).`

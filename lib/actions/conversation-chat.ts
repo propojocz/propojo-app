@@ -25,7 +25,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { createNotification } from './notifications'
 import { BOOKING_POLICY } from '@/lib/booking/policy'
 import { createDraftOrderFromResponse, draftOrdersBy } from '@/lib/booking/request-selection'
-import { cas, terminDlouze } from '@/lib/format'
+import { cas, terminDlouze, jeNaCtvrthodinu } from '@/lib/format'
 
 function getAdminClient() {
   return createAdminClient(
@@ -336,6 +336,8 @@ export async function proposeTermInChat(
 
   const start = new Date(startsAt)
   if (isNaN(start.getTime())) return { success: false, error: 'Neplatný termín.' }
+  // Začátek jen po 15 minutách (19. 10. 2026) – pojistka, výběr času jiné nedává
+  if (!jeNaCtvrthodinu(start)) return { success: false, error: 'Čas vyberte po 15 minutách (:00, :15, :30 nebo :45).' }
   if (start.getTime() < Date.now() + BOOKING_POLICY.minLeadMinutes * 60_000) {
     return { success: false, error: `Termín musí začínat nejdříve za ${BOOKING_POLICY.minLeadMinutes} minut.` }
   }

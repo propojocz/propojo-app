@@ -12,7 +12,7 @@ import { createClient } from '@supabase/supabase-js'
 import { stripe } from '@/lib/stripe'
 import { prazskyMesic, terminDlouze } from '@/lib/format'
 import { releaseSlotAndMerge } from '@/lib/slot-merge'
-import { claimMatchingAvailabilitySlot } from '@/lib/slot-claim'
+import { claimMatchingAvailabilitySlot, trimOverlappingFreeSlots } from '@/lib/slot-claim'
 import { createNotification } from '@/lib/actions/notifications'
 import { BOOKING_POLICY, policyFromSnapshot, type OfferKind } from './policy'
 import { bookingCharge, type ChargeableItem, type CommissionBreakdown } from './commission'
@@ -860,6 +860,15 @@ export async function handleCaptured(db: Db, accountId: string, pi: Stripe.Payme
     })
     if (!r.ok) return
     await recordCapture(db, order, accountId, pi, capturedAt)
+    // Potvrzený čas se už nesmí nabízet jako volný: překrývající se vypsaná volná okna zkrátit / smazat
+    // (i když rezervace okno přesahuje – 19. 10. 2026). Selhání nesmí zastavit potvrzení.
+    if (order.scheduled_at && order.scheduled_end) {
+      try {
+        await trimOverlappingFreeSlots(db, { providerId: order.provider_id, startsAt: order.scheduled_at, endsAt: order.scheduled_end })
+      } catch (err) {
+        console.error('[booking] zkrácení volných oken:', err)
+      }
+    }
     // Potvrzení e-mailem na trvalém nosiči (VOP 8.3) – i při potvrzení ve Stripe a automatickém potvrzení
     await sendBookingConfirmedEmail(db, order)
     const nazev = orderName(order)

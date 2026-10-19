@@ -19,7 +19,7 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
-import { rozsahCasu, cas, denVTydnuPraha, minutyOdPulnociPraha, casNaMinuty } from '@/lib/format'
+import { rozsahCasu, cas, denVTydnuPraha, minutyOdPulnociPraha, casNaMinuty, jeNaCtvrthodinu } from '@/lib/format'
 import { bookingBufferMs } from '@/lib/booking/rules'
 import { checkNewBooking, logOrderEvent } from '@/lib/booking/payments'
 
@@ -133,7 +133,7 @@ async function kryjeSeSBlokaci(
 
   const b = platne[0]
   const kdy = `${cas(b.starts_at)}–${cas(b.ends_at)}`
-  const co = b.kind === 'note' ? 'poznámku' : 'blokaci'
+  const co = b.kind === 'note' ? 'vlastní termín' : 'blokaci'
   return b.reason
     ? `V tomhle čase máte ${co} ${kdy} (${b.reason}).`
     : `V tomhle čase máte ${co} ${kdy}.`
@@ -201,6 +201,8 @@ export async function createSlot(values: {
   if (isNaN(starts.getTime()) || isNaN(ends.getTime())) {
     return { success: false, error: 'Neplatný čas.' }
   }
+  // Okna jen po 15 minutách – výběr času jiné nedává, tohle je pojistka (nic se nezaokrouhluje)
+  if (!jeNaCtvrthodinu(starts) || !jeNaCtvrthodinu(ends)) return { success: false, error: 'Čas vyberte po 15 minutách (:00, :15, :30 nebo :45).' }
   if (ends <= starts) return { success: false, error: 'Konec okna musí být po začátku.' }
   if (starts < new Date()) return { success: false, error: 'Okno nemůže začínat v minulosti.' }
 
@@ -252,7 +254,7 @@ export async function createSlot(values: {
   }
 
   const chybaBloku = await kryjeSeSBlokaci(admin, user.id, ids, starts.toISOString(), ends.toISOString())
-  if (chybaBloku) return { success: false, error: `${chybaBloku} Nejdřív ji smažte v Kalendáři.` }
+  if (chybaBloku) return { success: false, error: `${chybaBloku} Čas nejdřív uvolněte v Kalendáři.` }
 
   // Vytvoř okno
   const { data: slot, error } = await (admin.from('availability_slots') as any)
@@ -411,6 +413,8 @@ export async function reserveSlotForItem(values: {
     const chosen = new Date(values.starts_at)
     if (isNaN(chosen.getTime())) return { success: false, error: 'Neplatný čas.' }
     if (chosen < new Date()) return { success: false, error: 'Tento čas už proběhl.' }
+    // Pojistka: začátek úkonu s délkou jen na celou čtvrthodinu (nabídka v prohlížeči jiné nedává)
+    if (item.duration_minutes && !jeNaCtvrthodinu(chosen)) return { success: false, error: 'Vyberte prosím čas z nabídky.' }
     const offset = minutesBetween(loadedStart, values.starts_at)
     if (offset < 0) return { success: false, error: 'Vybraný čas je mimo nabízené okno.' }
     const potreba = item.duration_minutes ?? windowMin

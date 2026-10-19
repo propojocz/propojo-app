@@ -37,7 +37,7 @@ import { providerSeesCustomerContact } from '@/lib/booking/state'
 import { updateOrderStatus } from '@/lib/actions/orders'
 import { sendEmail } from '@/lib/email/send'
 import { bookingCancelledEmail } from '@/lib/email/templates'
-import { terminDlouze } from '@/lib/format'
+import { terminDlouze, jeNaCtvrthodinu } from '@/lib/format'
 import { runAutoRefund, runProviderRefund } from '@/lib/booking/refunds'
 import { alertIfCustomerCancelsOften } from '@/lib/booking/alerts'
 import { openRescheduleOf, proposeCannotKeep, resolveReschedule } from '@/lib/booking/reschedule'
@@ -731,6 +731,8 @@ export async function declareCannotKeep(orderId: string, startIso: string, endIs
   const start = new Date(startIso)
   const end = new Date(endIso)
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return { success: false, error: 'Vyberte nový termín.' }
+  // Nový začátek jen po 15 minutách (19. 10. 2026) – pojistka, výběr času jiné nedává
+  if (!jeNaCtvrthodinu(start)) return { success: false, error: 'Čas vyberte po 15 minutách (:00, :15, :30 nebo :45).' }
   const res = await proposeCannotKeep(db, order, { start, end, note: note ?? null })
   revalidateOrder(orderId)
   return res.ok ? { success: true } : { success: false, error: res.error }
