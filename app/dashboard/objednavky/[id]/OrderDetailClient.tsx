@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { restOnSiteKc } from '@/lib/booking/texts'
 import { pollThreadMessages } from '@/lib/actions/conversation-chat'
 import { useRouter } from 'next/navigation'
-import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2, CreditCard, ShieldCheck, Clock, XCircle, Flag, AlertTriangle, ImagePlus, X, RotateCcw, Package } from 'lucide-react'
+import { Loader2, Send, MapPin, Phone, Tag, Wallet, ExternalLink, CalendarDays, CheckCircle2, CreditCard, ShieldCheck, Clock, XCircle, Flag, AlertTriangle, ImagePlus, X, RotateCcw, Package, ChevronRight, Copy, Navigation, Coins, MessageCircle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import OrderStatusButton from '../OrderStatusButton'
 import { sendOrderMessage, updateOrderStatus, setOrderAddress } from '@/lib/actions/orders'
@@ -22,9 +22,35 @@ import Avatar from '@/components/ui/Avatar'
 import AddressInput from '@/components/ui/AddressInput'
 import ServiceMap from '@/components/ui/ServiceMap'
 import StornoPanel from '@/components/ui/StornoPanel'
-import { terminDlouze, datumCas } from '@/lib/format'
+import { terminDlouze, datumCas, cas, denDlouzeRok } from '@/lib/format'
 import OrderTimeline from '@/components/ui/OrderTimeline'
 import { vyrobekStornoPodil } from '@/lib/product-storno'
+
+// Tlačítka v dlaždici místa (detail podle mockupu 19. 10. 2026)
+function CopyBigButton({ text, label = 'Kopírovat adresu' }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Prohlížeč schránku nepovolil – adresa jde označit ručně.
+    }
+  }
+  return (
+    <button type="button" onClick={copy}
+      className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3.5 py-2 text-sm font-bold text-emerald-700 transition hover:bg-emerald-50">
+      {copied ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />} {copied ? 'Zkopírováno' : label}
+    </button>
+  )
+}
+
+/** Navigace v mapách telefonu – podle souřadnic, jinak podle textu adresy */
+function navigationUrl(address: string, lat: number | null | undefined, lng: number | null | undefined): string {
+  const dest = lat != null && lng != null ? `${lat},${lng}` : address
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}`
+}
 
 // Malé tlačítko „Kopírovat“ hned za adresou (do navigace, zprávy kolegovi…).
 function CopyAddressButton({ text }: { text: string }) {
@@ -143,15 +169,6 @@ const STATUS_LABELS: Record<string, string> = {
   dokonceno: 'Dokončeno',
   zruseno: 'Zrušeno',
   spor: 'Řeší se',
-}
-const STATUS_COLORS: Record<string, string> = {
-  cekajici: 'bg-amber-100 text-amber-700 border-amber-200',
-  prijato: 'bg-blue-100 text-blue-700 border-blue-200',
-  v_procesu: 'bg-indigo-100 text-indigo-700 border-indigo-200',
-  ceka_potvrzeni: 'bg-purple-100 text-purple-700 border-purple-200',
-  dokonceno: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-  zruseno: 'bg-red-100 text-red-700 border-red-200',
-  spor: 'bg-orange-100 text-orange-700 border-orange-200',
 }
 
 // Popisky kategorií sporu — musí sedět s hodnotami, které ukládá
@@ -448,6 +465,7 @@ export default function OrderDetailClient({
     }
     setImgUploading(false)
     if (fileRef.current) fileRef.current.value = ''
+    if (modalFileRef.current) modalFileRef.current.value = ''
   }
 
   const handlePay = async () => {
@@ -547,6 +565,85 @@ export default function OrderDetailClient({
     </div>
   )
 
+  // ── Detail podle mockupu (19. 10. 2026): texty z pohledu přihlášeného, platba jen podle skutečného stavu ──
+  const offerKindNow = ((order as any).offer_kind ?? (order as any).service_items?.offer_kind ?? (isModelB ? 'B' : 'A')) as string
+  const captured = !!(order as any).confirmed_at || ['confirmed', 'no_show_reported', 'no_show_disputed'].includes(bookingState ?? '')
+  const blocked = bookingState === 'awaiting_confirmation' || bookingState === 'capture_in_progress'
+  const noMoneyTaken = !captured && ['declined', 'expired', 'payment_expired', 'capture_failed', 'cancelled'].includes(bookingState ?? '')
+  // Rezervace skončila (zrušena, odmítnuta, propadla) – odečtení z ceny ani zbytek na místě už neplatí
+  const bookingEnded = ['declined', 'expired', 'payment_expired', 'capture_failed', 'cancelled'].includes(bookingState ?? '') || order.status === 'zruseno'
+  const chargeKc = (order as any).charge_halere != null ? Number((order as any).charge_halere) / 100 : depositAmount
+  const refundedKc = Number((order as any).refunded_halere ?? 0) / 100
+  const kc = (n: number) => `${n.toLocaleString('cs-CZ')} Kč`
+  // Započtení: služba vždy (VOP 11.1), výjezd podle volby poskytovatele uložené u rezervace (VOP 11.6), výrobek po přijetí nabídky
+  const deductible = ((order as any).quote_fee_deductible ?? (item as any)?.quote_fee_deductible) === true
+  const deductLine = offerKindNow === 'B'
+    ? (deductible
+        ? (isProvider ? 'Když zákazník přijme vaši nabídku, odečtěte mu částku z ceny zakázky.' : 'Když přijmete nabídku poskytovatele, odečte vám částku z ceny zakázky.')
+        : (isProvider ? 'Do ceny zakázky se nezapočítává.' : 'Cena výjezdu se do ceny zakázky nezapočítává.'))
+    : offerKindNow === 'C'
+      ? (isProvider ? 'Když zákazník přijme vaši závaznou nabídku, odečtěte částku z ceny výrobku.' : 'Když přijmete závaznou nabídku, odečte se z ceny výrobku.')
+      : (isProvider ? 'Částku zákazníkovi odečtěte z ceny služby.' : 'Při placení služby se vám částka odečte z ceny.')
+  const payLine = captured
+    ? (isProvider ? `Zákazník uhradil ${kc(chargeKc)}.` : `Uhradili jste ${kc(chargeKc)}.`)
+    : blocked
+      ? (isProvider ? `Zákazník má ${kc(chargeKc)} zablokovaných na kartě. Strhnou se vaším potvrzením.` : `Částka ${kc(chargeKc)} je zatím jen zablokovaná na vaší kartě. Strhne se, až poskytovatel rezervaci potvrdí.`)
+      : noMoneyTaken
+        ? (isProvider ? 'Platba nebyla stržena.' : 'Nic vám nebylo strženo.')
+        : (isProvider ? 'Zákazník zatím nezaplatil.' : 'Zatím nezaplaceno.')
+  // Stav v hlavičce podle role (Potvrzeno až po stržení platby)
+  const head: { over: string; text: string; tone: 'ok' | 'wait' | 'off' | 'info' } = (() => {
+    if ((order as any).is_inquiry === true && order.status === 'cekajici' && !order.scheduled_at) return { over: 'Dotaz', text: 'Dotaz', tone: 'info' }
+    if (bookingState === 'confirmed') return { over: 'Potvrzená rezervace', text: isProvider ? 'Máte potvrzenou rezervaci.' : 'Váš termín je potvrzený.', tone: 'ok' }
+    if (blocked) return { over: 'Čeká na potvrzení', text: isProvider ? 'Rezervaci potvrďte.' : 'Poskytovatel rezervaci ještě potvrdí.', tone: 'wait' }
+    if (bookingState === 'pending_payment' || (jeV2Polozka && !bookingState)) return { over: 'Rozpracovaná rezervace', text: isProvider ? 'Zákazník ještě nezaplatil.' : 'Dokončete platbu.', tone: 'info' }
+    if (bookingState) return { over: 'Rezervace', text: statusBadge?.label ?? 'Rezervace', tone: ['no_show_reported', 'no_show_disputed'].includes(bookingState) ? 'wait' : 'off' }
+    return { over: 'Objednávka', text: statusBadge?.label ?? STATUS_LABELS[order.status] ?? order.status, tone: order.status === 'zruseno' ? 'off' : order.status === 'dokonceno' ? 'ok' : 'info' }
+  })()
+  const HEAD_TONE = {
+    ok: 'bg-emerald-50 text-emerald-700',
+    wait: 'bg-amber-50 text-amber-800',
+    off: 'bg-slate-100 text-slate-600',
+    info: 'bg-sky-50 text-sky-800',
+  }[head.tone]
+  const HeadIcon = head.tone === 'ok' ? CheckCircle2 : head.tone === 'wait' ? Clock : head.tone === 'off' ? XCircle : CalendarDays
+  // Termín: kdo kam jde (výjezd / provozovna) z pohledu přihlášeného
+  const termLabel = atCustomer
+    ? (isProvider ? 'K zákazníkovi dorazíte' : 'Poskytovatel k vám dorazí')
+    : (isProvider ? 'Zákazník přijde' : 'Dostavte se')
+  const scheduledEnd = (order as any).scheduled_end as string | null
+  // Místo: popisek, viditelná adresa (přesná u zákazníka až po potvrzení – AK bod 8), navigace
+  const placeLabel = atCustomer
+    ? (isProvider ? 'Adresa zákazníka' : 'Místo realizace')
+    : (isProvider ? 'Vaše provozovna' : 'Adresa provozovny')
+  const shownAddress: string | null = atCustomer
+    ? (order.location_address && order.status !== 'cekajici' && showCustomerContact ? order.location_address : null)
+    : (placeAddress && order.status !== 'cekajici' ? placeAddress : null)
+  const addressNote = atCustomer
+    ? (order.status === 'cekajici' ? '' : order.location_address && !showCustomerContact ? 'Přesnou adresu uvidíte po potvrzení rezervace.' : 'Přesná adresa se doplní.')
+    : (placeAddress ? 'Přesnou adresu uvidíte po potvrzení objednávky.' : '')
+  const addressCity = atCustomer ? (order.location_city ?? null) : (service?.city ?? order.location_city ?? null)
+  const navLat = atCustomer ? order.location_lat : placeLat
+  const navLng = atCustomer ? order.location_lng : placeLng
+  // Navigovat tomu, kdo na místo jede: poskytovatel k zákazníkovi, zákazník do provozovny
+  const canNavigate = !!shownAddress && (atCustomer ? isProvider : isCustomer)
+  const [addrMain, ...addrRestParts] = (shownAddress ?? '').split(',')
+  const addrRest = addrRestParts.join(',').trim()
+  const showPlaceTile = order.status !== 'zruseno' && !jeVyrobek && (atCustomer ? !!(order.location_city || order.location_address) : true)
+  const showTermTile = !!order.scheduled_at && order.status !== 'zruseno'
+  // Zprávy na mobilu jako okno přes celou obrazovku (na počítači zůstávají pod detailem)
+  const [chatOpen, setChatOpen] = useState(false)
+  const modalScrollRef = useRef<HTMLDivElement>(null)
+  const modalFileRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (!chatOpen) return
+    modalScrollRef.current?.scrollTo({ top: modalScrollRef.current.scrollHeight })
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [chatOpen, messages.length])
+  const chatTitle = isProvider ? 'Napsat zákazníkovi' : 'Napsat poskytovateli'
+
   // Nový model: zákazník ruší bez peněz až do předautorizace (i během rozpracované platby).
   // Po předautorizaci se ruší jinak (uvolnění / refund) – vrstvy 3 a 4.
   const canCustomerCancel = isCustomer
@@ -567,38 +664,33 @@ export default function OrderDetailClient({
     <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
       {/* Levý sloupec: detail + chat */}
       <div className="space-y-4">
-        {/* Hlavička objednávky */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-xl font-black text-slate-900">
+        {/* Hlavička (mockup 19. 10. 2026): stav podle role, služba, protistrana */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{head.over}</p>
+              <h1 className="mt-1 text-2xl font-black leading-tight text-slate-900 sm:text-3xl">
                 {service?.id
                   ? <Link href={`/sluzby/${service.id}`} className="hover:text-emerald-700 hover:underline">{service.title}</Link>
-                  : (service?.title ?? 'Neznámá služba')}
+                  : (service?.title ?? 'Zakázka z poptávky')}
               </h1>
-              <p className="mt-1 text-sm text-slate-500">
-                Vytvořeno {datumCas(order.created_at)}
-              </p>
             </div>
-            {(order as any).is_inquiry === true && order.status === 'cekajici' && !order.scheduled_at ? (
-              <span className="shrink-0 rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                Dotaz
-              </span>
-            ) : (
-              <span className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold ${statusBadge?.cls ?? STATUS_COLORS[order.status] ?? 'bg-slate-100 text-slate-500'}`}>
-                {statusBadge?.label ?? STATUS_LABELS[order.status] ?? order.status}
-              </span>
-            )}
+            <span className={`inline-flex items-center gap-2 rounded-2xl px-3.5 py-2 text-sm font-bold ${HEAD_TONE}`}>
+              <HeadIcon className="h-5 w-5 shrink-0" /> {head.text}
+            </span>
           </div>
+          {bookingState === 'confirmed' && (
+            <p className="mt-2 text-xs text-slate-500">Den předem vám{isProvider ? ' oběma' : ''} pošleme připomínku.</p>
+          )}
 
-          <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-600">
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-600">
             {service?.category && (
-              <span className="inline-flex items-center gap-1.5"><Tag className="h-4 w-4 text-slate-400" /> {service.category}</span>
+              <span className="inline-flex items-center gap-1.5"><Tag className="h-4 w-4 text-slate-400" /><span className="rounded-lg bg-slate-100 px-2.5 py-1 text-slate-700">{service.category}</span></span>
             )}
             {service?.city && (
-              <span className="inline-flex items-center gap-1.5"><MapPin className="h-4 w-4 text-slate-400" /> {service.city}</span>
+              <span className="inline-flex items-center gap-1.5 text-slate-500"><MapPin className="h-4 w-4 text-slate-400" /> Lokalita nabídky: {service.city}</span>
             )}
-            {!bezPolozky && Number(item?.price ?? service?.price ?? 0) > 0 && (
+            {!bezPolozky && !jeV2Polozka && Number(item?.price ?? service?.price ?? 0) > 0 && (
               <span className="inline-flex items-center gap-1.5">
                 <Wallet className="h-4 w-4 text-slate-400" />
                 {Number(item?.price ?? service?.price).toLocaleString('cs-CZ')} Kč
@@ -607,28 +699,128 @@ export default function OrderDetailClient({
             )}
           </div>
 
-          {/* Model v2: Rezervační poplatek / Cena výjezdu není záloha a nezapočítává se do ceny
-              Hlavní smlouvy. Stav platby ukazuje štítek nad detailem. */}
-          {jeV2Polozka && depositAmount > 0 && (
-            <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${isModelB ? 'border-blue-200 bg-blue-50 text-blue-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
-              <strong>{isModelB ? 'Cena výjezdu' : 'Rezervační poplatek'}:</strong> {depositAmount.toLocaleString('cs-CZ')} Kč
-              <span className="opacity-80">
-                {' · '}
-                {!isModelB
-                  ? 'odečte se z ceny služby'
-                  : (((order as any).quote_fee_deductible ?? (item as any)?.quote_fee_deductible) === true)
-                    ? 'odečte se z ceny zakázky'
-                    : 'do ceny zakázky se nezapočítává'}
-              </span>
-              {zbytekNaMiste && (
-                <span className="mt-0.5 block">
-                  Zbytek <strong>{zbytekNaMiste.restKc.toLocaleString('cs-CZ')} Kč</strong>{' '}
-                  {isProvider ? 'vám zákazník zaplatí na místě' : 'zaplatíte poskytovateli na místě'}
-                  <span className="opacity-80"> (cena služby {zbytekNaMiste.totalKc.toLocaleString('cs-CZ')} Kč podle ceníku)</span>
-                </span>
-              )}
+          {/* Protistrana – zákazník vidí poskytovatele, poskytovatel zákazníka */}
+          {otherProfile && (
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              {(() => {
+                const inner = (
+                  <>
+                    <Avatar name={otherProfile.full_name} url={otherProfile.avatar_url} size={44} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{isProvider ? 'Zákazník' : 'Poskytovatel'}</p>
+                      <p className="truncate text-base font-bold text-slate-900">{otherProfile.full_name ?? (isProvider ? 'Zákazník' : 'Poskytovatel')}</p>
+                    </div>
+                    {profileHref && <ChevronRight className="h-5 w-5 shrink-0 text-slate-300" />}
+                  </>
+                )
+                return profileHref
+                  ? <Link href={profileHref} className="flex items-center gap-3 rounded-2xl bg-slate-50 p-3 transition hover:bg-slate-100">{inner}</Link>
+                  : <div className="flex items-center gap-3 rounded-2xl bg-slate-50 p-3">{inner}</div>
+              })()}
             </div>
           )}
+        </div>
+
+        {/* Termín a místo – výrazně, vedle sebe (na mobilu pod sebou) */}
+        {(showTermTile || showPlaceTile) && (
+          <div className="grid gap-4 md:grid-cols-2">
+            {showTermTile && (
+              <div className="flex gap-4 rounded-3xl border border-emerald-100 bg-emerald-50/60 p-5">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-emerald-600 shadow-sm">
+                  <CalendarDays className="h-5 w-5" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">{termLabel}</p>
+                  <p className="mt-0.5 text-lg font-bold text-slate-900 first-letter:uppercase">{denDlouzeRok(order.scheduled_at)}</p>
+                  <p className="text-5xl font-black tabular-nums tracking-tight text-emerald-700">{cas(order.scheduled_at)}</p>
+                  {scheduledEnd && (
+                    <p className="mt-1 text-sm text-slate-500">
+                      {isModelB ? `okno příjezdu ${cas(order.scheduled_at)}–${cas(scheduledEnd)}` : `do ${cas(scheduledEnd)}`}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+            {showPlaceTile && (
+              <div className="flex gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-600">
+                  <MapPin className="h-5 w-5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-slate-500">{placeLabel}</p>
+                  {shownAddress ? (
+                    <>
+                      <p className="mt-0.5 text-xl font-black text-slate-900">{addrMain}</p>
+                      {addrRest && <p className="text-sm text-slate-600">{addrRest}</p>}
+                    </>
+                  ) : (
+                    <>
+                      <p className="mt-0.5 text-xl font-black text-slate-900">{addressCity ?? '—'}</p>
+                      {addressNote && <p className="text-sm text-slate-500">{addressNote}</p>}
+                    </>
+                  )}
+                  {!atCustomer && service?.phone && order.status !== 'cekajici' && (
+                    <p className="mt-1 text-xs text-slate-500">Telefon: {service.phone}</p>
+                  )}
+                  {shownAddress && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {canNavigate && (
+                        <a href={navigationUrl(shownAddress, navLat, navLng)} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3.5 py-2 text-sm font-bold text-emerald-700 transition hover:bg-emerald-50">
+                          <Navigation className="h-4 w-4" /> Navigovat
+                        </a>
+                      )}
+                      <CopyBigButton text={shownAddress} label={canNavigate ? 'Kopírovat' : 'Kopírovat adresu'} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Rezervační poplatek / Cena výjezdu – stav jen podle skutečné platby, započtení podle pravidel rezervace */}
+        {jeV2Polozka && depositAmount > 0 && (
+          <div className="rounded-3xl border border-emerald-200 bg-emerald-50/60 p-5">
+            <div className="flex items-center gap-4">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white text-emerald-600 shadow-sm">
+                <Coins className="h-5 w-5" />
+              </span>
+              <div>
+                <p className="text-sm text-slate-600">{isModelB ? 'Cena výjezdu' : 'Rezervační poplatek'}</p>
+                <p className="text-2xl font-black text-slate-900">{kc(chargeKc)}</p>
+              </div>
+            </div>
+            <div className="mt-4 flex items-start gap-3 border-t border-emerald-200/70 pt-4">
+              {captured
+                ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+                : blocked ? <Clock className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+                : <CreditCard className="mt-0.5 h-5 w-5 shrink-0 text-slate-400" />}
+              <div className="text-sm">
+                <p className={`font-bold ${captured ? 'text-emerald-800' : blocked ? 'text-amber-800' : 'text-slate-700'}`}>{payLine}</p>
+                {!bookingEnded && <p className="mt-0.5 text-slate-600">{deductLine}</p>}
+                {bookingEnded && captured && (
+                  <p className="mt-0.5 text-slate-600">Rezervace je ukončená.</p>
+                )}
+                {zbytekNaMiste && !bookingEnded && (
+                  <p className="mt-0.5 text-slate-600">
+                    Zbytek <strong>{kc(zbytekNaMiste.restKc)}</strong>{' '}
+                    {isProvider ? 'vám zákazník zaplatí na místě' : 'zaplatíte poskytovateli na místě'}
+                    <span className="opacity-80"> (cena služby {kc(zbytekNaMiste.totalKc)} podle ceníku)</span>
+                  </p>
+                )}
+                {refundedKc > 0 && (
+                  <p className="mt-1 font-semibold text-slate-700">
+                    {isProvider ? `Zákazníkovi vráceno ${kc(refundedKc)}.` : `Vráceno vám ${kc(refundedKc)}.`}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Další údaje a akce */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 [&>*:first-child]:mt-0">
           {!jeV2Polozka && !isModelB && depositType !== 'bez_platby' && depositAmount > 0 && (
             <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
               {isFullPayment ? (
@@ -697,18 +889,6 @@ export default function OrderDetailClient({
             </div>
           )}
 
-          {/* Termín (z rezervace) */}
-          {order.scheduled_at && order.status !== 'zruseno' && (
-            <div className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm">
-              <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Termín</p>
-                <p className="font-bold text-slate-800">
-                  {terminDlouze(order.scheduled_at)}
-                </p>
-              </div>
-            </div>
-          )}
 
           {/* Výrobek nemá termín (scheduled_at) — místo něj množství, den
               dodání/vyzvednutí a způsob převzetí (service_location se u
@@ -773,45 +953,16 @@ export default function OrderDetailClient({
             </div>
           )}
 
-          {/* Místo výkonu */}
-          {order.status !== 'zruseno' && (atCustomer ? (order.location_city || order.location_address) : true) && (
+          {/* Místo výkonu u výrobku (služba ho má v dlaždici výš) */}
+          {jeVyrobek && order.status !== 'zruseno' && (atCustomer ? (order.location_city || order.location_address) : true) && (
             <div className="mt-4 flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
               <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Místo</p>
-                {!atCustomer
-                  ? (
-                    // Adresa provozovny — bez ní zákazník neví, kam si má dojít.
-                    // Přesnou adresu ukážeme až po potvrzení objednávky; předtím
-                    // (nebo když ji poskytovatel nezveřejnil) jen město.
-                    <>
-                      {placeAddress && order.status !== 'cekajici' ? (
-                        <p className="font-medium text-slate-800">
-                          {placeAddress}
-                          <CopyAddressButton text={placeAddress} />
-                        </p>
-                      ) : (
-                        <p className="font-medium text-slate-800">
-                          {service?.city ?? order.location_city ?? '—'}
-                          {placeAddress ? ' — přesnou adresu uvidíte po potvrzení objednávky' : ''}
-                        </p>
-                      )}
-                      {service?.phone && order.status !== 'cekajici' ? (
-                        <p className="mt-0.5 text-xs text-slate-500">Telefon: {service.phone}</p>
-                      ) : null}
-                    </>
-                  )
-                  : order.location_address && order.status !== 'cekajici' && showCustomerContact
-                    ? (
-                      <p className="font-medium text-slate-800">
-                        {order.location_address}
-                        <CopyAddressButton text={order.location_address} />
-                      </p>
-                    )
-                    : <p className="font-medium text-slate-800">
-                        {order.location_city ?? '—'}
-                        {order.status === 'cekajici' ? '' : order.location_address && !showCustomerContact ? ' (přesnou adresu uvidíte po potvrzení rezervace)' : ' (přesná adresa se doplní)'}
-                      </p>}
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{placeLabel}</p>
+                <p className="font-medium text-slate-800">
+                  {shownAddress ?? addressCity ?? '—'}
+                  {shownAddress ? <CopyAddressButton text={shownAddress} /> : addressNote ? ` – ${addressNote}` : ''}
+                </p>
               </div>
             </div>
           )}
@@ -833,10 +984,21 @@ export default function OrderDetailClient({
 
           {order.description && (
             <div className="mt-4">
-              <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Poznámka od zákazníka</h3>
-              <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700 whitespace-pre-wrap">{order.description}</p>
+              <h3 className="mb-1.5 text-sm text-slate-500">{isProvider ? 'Poznámka od zákazníka' : 'Vaše poznámka'}</h3>
+              <p className="whitespace-pre-wrap rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-800">{order.description}</p>
             </div>
           )}
+
+          {/* Zprávy na mobilu – okno přes celou obrazovku; na počítači je chat pod detailem */}
+          <button type="button" onClick={() => setChatOpen(true)}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-3.5 text-base font-bold text-white shadow-sm transition hover:bg-emerald-600 lg:hidden">
+            <MessageCircle className="h-5 w-5" /> {chatTitle}
+            {messages.length > 0 && <span className="rounded-full bg-white/25 px-2 py-0.5 text-xs">{messages.length}</span>}
+          </button>
+
+          <p className="mt-4 flex items-center gap-1.5 text-xs text-slate-400">
+            <Clock className="h-3.5 w-3.5" /> Vytvořeno {datumCas(order.created_at)}
+          </p>
 
           {/* Nový model, termín přijatý, čeká se na platbu zákazníka: poskytovatel může jen zrušit. */}
           {canProviderCancelBeforePayment && (
@@ -1269,16 +1431,15 @@ export default function OrderDetailClient({
           </div>
         )}
 
-        {/* Chat */}
-        <div className="flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 px-5 py-3">
-            <h2 className="text-sm font-bold text-slate-800">Zprávy</h2>
+        {/* Chat – na počítači pod detailem (na mobilu tlačítko výš otevře okno) */}
+        <div className="hidden flex-col rounded-3xl border border-slate-200 bg-white shadow-sm lg:flex">
+          <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
+            <MessageCircle className="h-4 w-4 text-emerald-600" />
+            <h2 className="text-sm font-bold text-slate-800">{chatTitle}</h2>
           </div>
-
           <div ref={scrollRef} className="max-h-[420px] min-h-[200px] space-y-3 overflow-y-auto px-5 py-4">
             <ChatThread messages={messages as any} myUserId={userId} senderNames={senderNames} />
           </div>
-
           <div className="border-t border-slate-100 p-3">
             {chatImage && (
               <div className="mb-2 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-1.5">
@@ -1321,8 +1482,68 @@ export default function OrderDetailClient({
             </div>
           </div>
         </div>
-      </div>
 
+        {/* Chat na mobilu – okno přes celou obrazovku */}
+        {chatOpen && (
+          <div className="fixed inset-0 z-[100] flex flex-col bg-white lg:hidden">
+            <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3">
+              <MessageCircle className="h-5 w-5 text-emerald-600" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-black text-slate-900">{chatTitle}</p>
+                <p className="truncate text-xs text-slate-500">{otherProfile?.full_name ?? ''}{service?.title ? ` · ${service.title}` : ''}</p>
+              </div>
+              <button type="button" onClick={() => setChatOpen(false)} aria-label="Zavřít zprávy"
+                className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div ref={modalScrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+              <ChatThread messages={messages as any} myUserId={userId} senderNames={senderNames} />
+            </div>
+          <div className="border-t border-slate-100 p-3">
+            {chatImage && (
+              <div className="mb-2 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-1.5">
+                <img src={chatImage} alt="Náhled" className="h-12 w-12 rounded object-cover" />
+                <button onClick={() => setChatImage(null)} className="flex h-6 w-6 items-center justify-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-600">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <input
+                ref={modalFileRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleChatImage(f) }}
+              />
+              <button
+                onClick={() => modalFileRef.current?.click()}
+                disabled={imgUploading || sending}
+                title="Přidat fotku"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-40"
+              >
+                {imgUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+              </button>
+              <input
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+                placeholder="Napište zprávu…"
+                className="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+              />
+              <button
+                onClick={handleSend}
+                disabled={sending || (!text.trim() && !chatImage)}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white transition-colors hover:bg-emerald-600 disabled:opacity-40"
+              >
+                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+          </div>
+        )}
+      </div>
       {/* Pravý sloupec: průběh + druhá strana */}
       <div className="space-y-4">
 

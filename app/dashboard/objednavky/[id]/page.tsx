@@ -371,12 +371,18 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
 
   return (
     <div className="space-y-4">
-      <Link href="/dashboard/objednavky" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
-        <ArrowLeft className="h-4 w-4" /> Zpět na objednávky
-      </Link>
+      {/* Drobečková navigace (detail podle mockupu 19. 10. 2026) */}
+      <nav className="flex items-center gap-2 text-sm">
+        <Link href="/dashboard/objednavky" className="inline-flex items-center gap-1.5 text-slate-500 hover:text-slate-800">
+          <ArrowLeft className="h-4 w-4" /> Rezervace
+        </Link>
+        <span className="text-slate-300">/</span>
+        <span className="font-semibold text-slate-700">Detail rezervace</span>
+      </nav>
 
-      {/* Poskytovatel u čekající rezervace: stav i akce jsou ve velkém bloku níž – bez duplicity */}
-      {!(isProvider && (order as any).booking_state === 'awaiting_confirmation') && <BookingStateBadge
+      {/* Poskytovatel u čekající rezervace: stav i akce jsou ve velkém bloku níž – bez duplicity.
+          Potvrzená rezervace: stav je v hlavičce detailu („Váš termín je potvrzený.“), pruh by se opakoval. */}
+      {!(isProvider && (order as any).booking_state === 'awaiting_confirmation') && (order as any).booking_state !== 'confirmed' && <BookingStateBadge
         state={(order as any).booking_state ?? null}
         isProvider={isProvider}
         confirmDeadlineAt={(order as any).confirm_deadline_at ?? null}

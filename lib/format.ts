@@ -59,6 +59,13 @@ export function datum(iso: string | Date | null | undefined): string {
   return new Intl.DateTimeFormat(CS, { day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ }).format(d)
 }
 
+/** „úterý 20. října 2026" — den termínu s rokem (detail rezervace). */
+export function denDlouzeRok(iso: string | Date | null | undefined): string {
+  const d = bezpecne(iso)
+  if (!d) return '—'
+  return new Intl.DateTimeFormat(CS, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ }).format(d)
+}
+
 /** „14:00" — samotný čas. Pro mřížky termínů a rozsahy. */
 export function cas(iso: string | Date | null | undefined): string {
   const d = bezpecne(iso)

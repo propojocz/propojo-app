@@ -53,3 +53,15 @@ volné termíny `availability_slots`, bleskový termín `QuickSlotForm`, stránk
 **K4 – Měsíc + Den a Týden jako Apple Kalendář** (POSTAVENO 19. 10. 2026, build prošel, čeká na test a nasazení; mřížka hodin v Dni a Týdnu na počítači, Týden na mobilu seznam): mřížka s počtem rezervací a volna u dne, klik → den.
 
 Každá fáze zvlášť: build → test → commit. Pobočky (Provider OS) se do filtru „Místo“ doplní později.
+
+## Po K4 – úpravy podle Mateje (19. 10. 2026, nasazeno)
+- **Podoba podle mockupu Mateje** v barvách Propoja (smaragdová místo modré): nadpis „Váš pracovní den / týden / měsíc“, záložky Den | Týden | Měsíc,
+  karta „Místa a výjezdy“ s tlačítky, mřížka hodin s kartami rezervací v barvě místa (iniciály, „09:00 – 09:45“, služba, štítek stavu s ikonou),
+  vypsaný volný termín oranžově s ⚡, délkou a „Sdílet“, ⚡ u dne s vypsaným termínem, čas mimo otevírací dobu šrafovaně, „+“ při najetí myší.
+- **„+ Přidat termín“ = vlastní termín mimo Propojo** (den, od–do, poznámka; dřívější „Poznámka“ / ruční rezervace, `provider_blocks.kind = 'note'`, blokuje čas).
+- **Výběr více míst** – klik místo přidá / odebere, „Všechna místa“ výběr zruší; volno a otevírací doba výběru = spojení míst.
+- **Hledání** člověka, služby nebo vlastního termínu (bez diakritiky, rok zpět a dopředu); mřížka shodné záznamy zvýrazní, „Zrušit hledání“.
+- **Volno** v mřížce jen na :00 / :30 a aspoň 1 h, zašedlé (zelené až při najetí).
+- **Rezervace po 15 minutách**: zákazník vybírá jen :00 / :15 / :30 / :45, poskytovatel zadává čas výběrem po 15 minutách (`QuarterTimeInput`), nic se nezaokrouhluje.
+- **Oprava**: potvrzená rezervace zkrátí / rozdělí / smaže překrývající se vypsaný volný termín (`trimOverlappingFreeSlots`).
+- Týden na mobilu zůstává seznam po dnech; v Týdnu na počítači nejsou u rezervací iniciály (úzký sloupec).
