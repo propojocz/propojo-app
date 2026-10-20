@@ -978,7 +978,7 @@ export default function OrderDetailClient({
           {/* Mapa pro POSKYTOVATELE — kam dojet, když zákazník vybral adresu z našeptávače */}
           {isProvider && atCustomer && showCustomerContact && order.location_lat != null && order.location_lng != null && order.status !== 'zruseno' && order.status !== 'cekajici' && (
             <div className="mt-4">
-              <ServiceMap lat={order.location_lat} lng={order.location_lng} label={order.location_address ?? 'Adresa zákazníka'} />
+              <ServiceMap lat={order.location_lat} lng={order.location_lng} label={order.location_address ?? 'Adresa zákazníka'} kind="customer" />
             </div>
           )}
 

@@ -109,3 +109,6 @@ button[class*="bg-slate-900"], a[class*="bg-slate-900"] {
 @media (prefers-reduced-motion: reduce) {
   .propojo-blob { animation: none !important; }
 }
+
+/* Špendlík Propoja na mapě (PropojoMap, M1 20. 10. 2026) – bez rámečku Leafletu, s jemným stínem */
+.propojo-pin { background: none; border: none; filter: drop-shadow(0 2px 3px rgba(15, 23, 42, 0.35)); }
