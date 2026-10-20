@@ -103,7 +103,11 @@ Popsat hlavní parametry v pořadí významu a proč jsou důležité:
   Zákazník může přepnout na řazení podle ceny nebo hodnocení.
 - **Nástěnka poptávek pro Poskytovatele:** shoda oboru a dosah Nabídky, pak vzdálenost, pak čas zadání. Filtr vzdálenosti.
 - **Nabídky Poskytovatele bez funkčního platebního účtu** zůstávají dohledatelné, ale nejde je rezervovat online; jsou označené „Zatím nepřijímá online rezervace“.
-- Pozor: dřívější zvýhodnění předplatitelů se před spuštěním odstraní. Ve VOP s ním nepočítat.
+- Předplatné ve zobrazení už nehraje roli (brána zrušena 20. 10. 2026 – marketplace, úvodní stránka i sdílené termíny ukazují všechny nepozastavené Poskytovatele). Ve VOP s předplatným nepočítat.
+- **Pásy nad výsledky marketplace (20. 10. 2026)** – počítají se jen z Nabídek, které odpovídají hledání a obci zákazníka:
+  - *Bleskové termíny* – Nabídky s vypsaným volným termínem, seřazené podle nejbližšího termínu (jen Poskytovatelé s funkčním platebním účtem);
+  - *Dobře hodnocení* – Poskytovatelé, jejichž 4 poslední Hodnocení od různých Zákazníků mají průměr aspoň 4,8; pořadí je náhodné (při každém načtení jiné), jedna Nabídka na Poskytovatele;
+  - *Naposledy prohlížené* – Nabídky, které si Zákazník sám otevřel; seznam se drží jen v jeho prohlížeči, neovlivňuje pořadí pro ostatní.
 
 ### A11. Evidence rekapitulace a souhlasů
 - Při odeslání Rezervace se ukládá:
@@ -227,3 +231,4 @@ Pro finální revizi AK zvýrazni jako **LEGAL_REVIEW_NEEDED**:
 20. ~~Kdo je smluvní stranou u rezervace konkrétního holiče~~ – **bez otázky, vyřešíme sami** (pracovní princip §21: konkretizace potvrzeného principu). Pravidlo: smluvní stranou Rezervační smlouvy je vždy Poskytovatel, který je držitelem Stripe účtu a IČO, na který jde platba – u zaměstnance salonu salon, u samostatného holiče on sám. Jeho identita (jméno / název, IČO, kontakt) se zákazníkovi ukáže ve shrnutí před platbou (model §15, čl. 7.8) a v potvrzovacím e-mailu. Do VOP jen doplnit větu, že Poskytovatel může službu plnit prostřednictvím svých pracovníků.
 21. ~~Profil pracovníka bez vlastního účtu~~ – **bez otázky** (Matej 15. 10. 2026): u pracovníka bez účtu se zobrazí jen křestní jméno, bez fotky a dalších údajů.
 22. **Tlačítko „Navigovat“ v detailu rezervace (19. 10. 2026).** Poskytovatel u výjezdu (a zákazník u služby v provozovně) může jedním klepnutím otevřít navigaci v Google Mapách; odkaz obsahuje adresu (nebo souřadnice) místa zakázky. Údaje do Google předá prohlížeč uživatele až po jeho kliknutí, Propojo je nikam neposílá samo. Stačí zmínka v Zásadách (odkaz na mapovou službu třetí strany, přenos do USA), nebo je potřeba víc? Přesnou adresu zákazníka poskytovatel vidí až po potvrzení rezervace (AK bod 8).
+23. **„Naposledy prohlížené“ na marketplace (20. 10. 2026).** Seznam Nabídek, které si návštěvník otevřel, ukládáme jen do úložiště jeho prohlížeče (localStorage, max. 12 položek), na server se nic neposílá kromě dotazu na aktuální údaje těch Nabídek. Je to funkce, o kterou si uživatel „řekl“ prohlížením (technicky nezbytné / funkční úložiště bez souhlasu podle § 89 odst. 3 ZEK), nebo je potřeba souhlas v cookie liště? A stačí zmínka v Zásadách?

@@ -6,7 +6,6 @@
 
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,29 +25,11 @@ export async function GET() {
       return NextResponse.json({ services: [] })
     }
 
-    // Viditelnost řídí AKTIVNÍ PŘEDPLATNÉ (ne napojení Connectu). Bez předplatného
-    // se profil ani karty nezobrazují — stejné pravidlo jako v marketplace.
+    // Brána předplatného zrušena (20. 10. 2026, model §18) – stejně jako v marketplace se ukazují všichni
+    // nepozastavení poskytovatelé.
     const candidates = (data ?? []).filter((s: any) => s.profiles?.is_suspended !== true)
-    const providerIds = Array.from(new Set(candidates.map((s: any) => s.profiles?.id ?? s.provider_id)))
-
-    const activeSubscribers = new Set<string>()
-    if (providerIds.length > 0) {
-      // Přes service role — RLS na subscriptions by anonymnímu návštěvníkovi
-      // nevrátilo nic a hlavní stránka by nikdy neukázala žádnou nabídku.
-      const adminDb = createAdminClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!
-      )
-      const { data: subs } = await adminDb
-        .from('subscriptions')
-        .select('user_id, status')
-        .in('user_id', providerIds)
-        .in('status', ['active', 'trialing'])
-      for (const row of (subs ?? []) as any[]) activeSubscribers.add(row.user_id)
-    }
 
     const services = candidates
-      .filter((s: any) => activeSubscribers.has(s.profiles?.id ?? s.provider_id))
       .sort((a: any, b: any) => (b.profiles?.rating ?? 0) - (a.profiles?.rating ?? 0))
       .slice(0, 3)
 

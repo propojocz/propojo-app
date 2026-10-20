@@ -53,16 +53,8 @@ export default async function PridatSluzbuPage({ searchParams }: Props) {
   }
   const showChooser = isProvider && existingCards.length > 0 && searchParams.novy !== '1'
 
-  // Má aktivní předplatné? Bez něj se nabídka po uložení nezveřejní — a poskytovatel
-  // to musí vědět DŘÍV, než ji vyplní, ne až když ji nikde nenajde.
-  const { data: sub } = await supabase
-    .from('subscriptions')
-    .select('status')
-    .eq('user_id', user.id)
-    .in('status', ['active', 'trialing'])
-    .limit(1)
-    .maybeSingle() as { data: { status: string } | null }
-  const hasActiveSub = !!sub
+  // Brána předplatného zrušena (20. 10. 2026, model §18) – nabídka se zveřejní vždy, varování se neukazuje.
+  const hasActiveSub = true
 
   // Zákazník (bez role poskytovatele) – výzva ke stání se živnostníkem
   if (!isProvider) {

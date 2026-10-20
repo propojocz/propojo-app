@@ -110,15 +110,7 @@ export default async function TerminPage({ params }: Props) {
   const activeServices = (services ?? []).filter((s) => s.profiles?.is_suspended !== true)
   if (activeServices.length === 0) notFound()
 
-  // Viditelnost stejná jako v marketplace: bez aktivního předplatného karta neexistuje.
-  // (Čte se přes service role — subscriptions má RLS „každý vidí jen svoje".)
-  const { data: subs } = await adminDb
-    .from('subscriptions')
-    .select('user_id')
-    .eq('user_id', slot.provider_id)
-    .in('status', ['active', 'trialing'])
-    .limit(1)
-  if (!subs || subs.length === 0) notFound()
+  // Brána předplatného zrušena (20. 10. 2026, model §18) – sdílený termín se ukáže vždy.
 
   const provider = activeServices[0].profiles
   const providerName = provider?.display_name || provider?.company_name || provider?.full_name || 'Poskytovatel'

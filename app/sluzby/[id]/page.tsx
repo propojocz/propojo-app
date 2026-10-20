@@ -29,6 +29,7 @@ import ServiceFaqEditor from '@/components/ui/ServiceFaqEditor'
 import AskProviderButton from '@/components/ui/AskProviderButton'
 import { getServiceBrand } from '@/lib/actions/brands'
 import { denKratce, rozsahCasu, datum } from '@/lib/format'
+import { RememberViewed } from '@/components/ui/RecentlyViewed'
 import type { Metadata } from 'next'
 
 interface Props { params: { id: string } }
@@ -235,6 +236,8 @@ export default async function ServiceDetailPage({ params }: Props) {
   return (
     <main className="min-h-screen bg-slate-50 pb-28 lg:pb-0">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      {/* „Naposledy prohlížené“ na marketplace – jen v prohlížeči zákazníka */}
+      <RememberViewed serviceId={s.id} />
 
       <div className="mx-auto max-w-6xl px-3 py-4 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
         <Link

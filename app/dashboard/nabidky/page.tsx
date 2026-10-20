@@ -4,15 +4,14 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { PlusCircle, Eye, EyeOff, Trash2, Loader2, BarChart2, Pencil, CalendarPlus, ArrowRight } from 'lucide-react'
 import { toggleServiceActive, deleteService } from '@/lib/actions/services'
-import { createClient } from '@/lib/supabase/client'
 import { CATEGORY_META } from '@/types/database'
 
 export default function NabidkyPage() {
   const [services, setServices] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [actionId, setActionId] = useState<string | null>(null)
-  // Má poskytovatel aktivní předplatné? Bez něj se nabídky v marketplace nezobrazují.
-  const [hasActiveSub, setHasActiveSub] = useState<boolean | null>(null)
+  // Brána předplatného zrušena (20. 10. 2026, model §18) – nabídky se zobrazují vždy, varování se neukazuje.
+  const hasActiveSub = true as boolean | null
 
   const fetchServices = async () => {
     setLoading(true)
@@ -24,22 +23,6 @@ export default function NabidkyPage() {
 
   useEffect(() => { fetchServices() }, [])
 
-  // Zjisti, jestli má uživatel aktivní (nebo zkušební) předplatné
-  useEffect(() => {
-    const checkSub = async () => {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { setHasActiveSub(false); return }
-      const { data } = await supabase
-        .from('subscriptions')
-        .select('status')
-        .eq('user_id', user.id)
-        .in('status', ['active', 'trialing'])
-        .limit(1)
-      setHasActiveSub((data?.length ?? 0) > 0)
-    }
-    checkSub()
-  }, [])
 
   const handleToggle = async (id: string, current: boolean) => {
     setActionId(id)

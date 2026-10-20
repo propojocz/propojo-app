@@ -4,9 +4,9 @@
 // se ke každé nalezené kartě dotáhnou její zveřejněné úkony a z nich se spočítá
 // minimální cena (řazení/filtr ceny běží v kódu, ne v DB — u desítek karet stačí).
 //
-// MŘÍŽKA: dvě karty vedle sebe na mobilu, tři na širokých obrazovkách.
-// Karty jsou kompaktní (viz ServiceCard), takže se do jedné obrazovky vejde
-// šestkrát víc nabídek než dřív a člověk nemusí donekonečna rolovat.
+// PODOBA podle mockupu Mateje (20. 10. 2026): nahoře pásy ⚡ Bleskové termíny, ⭐ Dobře hodnocení
+// a 🕒 Naposledy prohlížené (počítané z aktuálních výsledků hledání), pod nimi „Poskytovatelé“ – filtry
+// vlevo, velké karty (mobil 1, tablet 2, počítač 3 vedle sebe). Brána předplatného odstraněna (model §18).
 
 import { expandSearch, relevanceScore, searchPlan } from '@/lib/search'
 import { accountBlocks } from '@/lib/booking/rules'
@@ -21,7 +21,11 @@ import ServiceListSkeleton from '@/components/ui/ServiceListSkeleton'
 import FilterBar from '@/components/ui/FilterBar'
 import FilterSidebar from '@/components/ui/FilterSidebar'
 import Link from 'next/link'
-import { PlusCircle, Send } from 'lucide-react'
+import { PlusCircle, Send, Star, Users, Zap } from 'lucide-react'
+import MarketCarousel from '@/components/ui/MarketCarousel'
+import MiniServiceCard, { type MiniCard } from '@/components/ui/MiniServiceCard'
+import RecentlyViewed from '@/components/ui/RecentlyViewed'
+import { cas, denKratce } from '@/lib/format'
 import type { Metadata } from 'next'
 import { haversineKm } from '@/lib/geo'
 import ProviderInvite from '@/components/ui/ProviderInvite'
@@ -89,13 +93,29 @@ async function serviceIdsByItemText(q: string): Promise<string[]> {
   return Array.from(new Set((hits ?? []).map((r: any) => r.service_id)))
 }
 
+// „Dobře hodnocení“ (Matej 20. 10. 2026): 4 poslední hodnocení od různých zákazníků s průměrem aspoň 4,8
+const GOOD_LAST_REVIEWS = 4
+const GOOD_MIN_AVG = 4.8
+const CAROUSEL_MAX = 12
+
+/** Štítek nejbližšího volna: „Dnes 14:00“ / „Zítra 9:00“ / „st 22. 10. 9:00“ (pražsky) */
+function slotLabel(iso: string): string {
+  const day = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(d)
+  const d = day(new Date(iso))
+  if (d === day(new Date())) return `Dnes ${cas(iso)}`
+  if (d === day(new Date(Date.now() + 86_400_000))) return `Zítra ${cas(iso)}`
+  return `${denKratce(iso)} ${cas(iso)}`
+}
+
 async function ServiceList({
-  category, city, q, sort, priceMin, priceMax, minRating, subcats, dosah, volno,
+  category, city, q, sort, priceMin, priceMax, minRating, subcats, dosah, volno, sidebar,
 }: {
   category?: string; city?: string; q?: string; sort?: string
   priceMin?: string; priceMax?: string; minRating?: string; subcats?: string; dosah?: string
   /** Filtr volného termínu: 'dnes' / 'tyden' */
   volno?: string
+  /** Boční filtry (vykreslí se vlevo u nabídek) */
+  sidebar: React.ReactNode
 }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -173,27 +193,20 @@ async function ServiceList({
 
   const { data: services } = await query.limit(60)
 
-  // ── VIDITELNOST = AKTIVNÍ PŘEDPLATNÉ ──────────────────────────────────
+  // ── Poskytovatelé ve výsledcích (brána předplatného zrušena 20. 10. 2026, model §18) ──
   const candidateProviderIds = Array.from(
     new Set(((services as ServiceWithProvider[]) ?? []).map((s) => (s.profiles as any)?.id ?? s.provider_id))
   )
 
-  const activeSubscribers = new Set<string>()
   const acceptsOnline = new Set<string>()
   // Štítky: „Nový na Propoju“ (žádná dokončená rezervace), „Důvěryhodný“ (20 dokončených bez problémů)
   const trustBadgeOf = new Map<string, 'new' | 'trusted'>()
   if (candidateProviderIds.length > 0) {
-    // POZOR: číst přes SERVICE ROLE (subscriptions má RLS „každý vidí jen svoje").
+    // Stripe účty, pokyny a IČO se čtou přes service role (RLS „každý vidí jen svoje“)
     const adminDb = createAdminClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )
-    const { data: subs } = await adminDb
-      .from('subscriptions')
-      .select('user_id, status')
-      .in('user_id', candidateProviderIds)
-      .in('status', ['active', 'trialing'])
-    for (const row of (subs ?? []) as any[]) activeSubscribers.add(row.user_id)
 
     // Model v2: rezervovat s platbou jde jen u poskytovatele s funkčním Standard účtem.
     const { data: accs } = await adminDb
@@ -235,11 +248,12 @@ async function ServiceList({
   // a filtr podle hodnocení ho vyhodil úplně. Tady se čte pravda z tabulky
   // reviews jedním dotazem pro všechny karty naráz.
   const ratingOf = new Map<string, { avg: number; count: number }>()
+  const goodProviders = new Set<string>()
   if (candidateProviderIds.length > 0) {
     const { data: revRows } = await supabase
       .from('reviews')
-      .select('provider_id, rating')
-      .in('provider_id', candidateProviderIds) as { data: Array<{ provider_id: string; rating: number | null }> | null }
+      .select('provider_id, rating, reviewer_id, created_at')
+      .in('provider_id', candidateProviderIds) as { data: Array<{ provider_id: string; rating: number | null; reviewer_id: string | null; created_at: string }> | null }
 
     const soucet = new Map<string, { sum: number; count: number }>()
     for (const r of revRows ?? []) {
@@ -253,6 +267,24 @@ async function ServiceList({
     for (const [pid, v] of soucet) {
       ratingOf.set(pid, { avg: Math.round((v.sum / v.count) * 10) / 10, count: v.count })
     }
+
+    // „Dobře hodnocení“: posledních 4 hodnocení od různých zákazníků, průměr aspoň 4,8
+    const byProvider = new Map<string, Array<{ rating: number; reviewer: string; at: string }>>()
+    for (const r of revRows ?? []) {
+      if (!r.provider_id || !r.reviewer_id || Number(r.rating ?? 0) <= 0) continue
+      ;(byProvider.get(r.provider_id) ?? byProvider.set(r.provider_id, []).get(r.provider_id)!).push({ rating: Number(r.rating), reviewer: r.reviewer_id, at: r.created_at })
+    }
+    for (const [pid, list] of byProvider) {
+      const seen = new Set<string>()
+      const last: number[] = []
+      for (const r of list.sort((a, b) => b.at.localeCompare(a.at))) {
+        if (seen.has(r.reviewer)) continue
+        seen.add(r.reviewer)
+        last.push(r.rating)
+        if (last.length === GOOD_LAST_REVIEWS) break
+      }
+      if (last.length === GOOD_LAST_REVIEWS && last.reduce((a, b) => a + b, 0) / last.length >= GOOD_MIN_AVG) goodProviders.add(pid)
+    }
   }
 
   /** Hodnocení poskytovatele — vždy živé, nikdy z profilu. */
@@ -263,10 +295,7 @@ async function ServiceList({
 
   let sorted = ((services as ServiceWithProvider[]) ?? []).filter((s) => {
     const pid = (s.profiles as any)?.id ?? s.provider_id
-    return (
-      (s.profiles as any)?.is_suspended !== true &&
-      activeSubscribers.has(pid)
-    )
+    return !!pid && (s.profiles as any)?.is_suspended !== true
   })
 
   if (minRating) {
@@ -482,7 +511,9 @@ async function ServiceList({
     const hledaneMesto = params.get('city') ?? undefined
 
     return (
-      <div className="space-y-4">
+      <div className="flex flex-col gap-6 lg:flex-row">
+      <aside className="lg:w-64 lg:shrink-0">{sidebar}</aside>
+      <div className="min-w-0 flex-1 space-y-4">
         <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white py-14 text-center">
           <h3 className="mb-2 text-xl font-bold text-slate-800">Zatím tu nikoho nemáme</h3>
           <p className="mb-6 max-w-sm text-sm leading-relaxed text-slate-500">
@@ -498,6 +529,7 @@ async function ServiceList({
         </div>
 
         <ProviderInvite category={hledanyObor} city={hledaneMesto} />
+      </div>
       </div>
     )
   }
@@ -530,46 +562,113 @@ async function ServiceList({
     for (const r of (favRows ?? []) as any[]) favSet.add(r.provider_id)
   }
 
+  // ── Pásy nahoře (z aktuálních výsledků, takže respektují hledání i obec) ──
+  const imageOf = (s: any): string | null => ((s.gallery ?? [])[0] ?? s.image_url ?? null)
+  const priceTextOf = (s: any): string => {
+    const mp = minPriceOf(s.id)
+    if (mp != null) return `od ${Number(mp).toLocaleString('cs-CZ')} Kč`
+    const its = itemsByService[s.id] ?? []
+    return its.length > 0 && its.every((i: any) => i.payment_model === 'B' || i.offer_kind === 'B') ? 'Výjezd a nacenění' : 'Cena dohodou'
+  }
+  const miniOf = (s: any, withSlot: boolean): MiniCard => {
+    const pid = (s.profiles as any)?.id ?? s.provider_id
+    const r = hodnoceni(s)
+    const slots = acceptsOnline.has(pid) ? (slotTimesOf[s.id] ?? []) : []
+    return {
+      id: s.id,
+      title: s.title,
+      image: imageOf(s),
+      place: s.city ?? null,
+      priceText: priceTextOf(s),
+      slotLabel: withSlot && slots[0] ? slotLabel(slots[0]) : null,
+      rating: withSlot ? null : (r.count > 0 ? r : null),
+      hasSlots: slots.length > 0,
+    }
+  }
+  // ⚡ nejbližší volné termíny, jedna karta = jeden řádek
+  const flash = sorted
+    .filter((s: any) => acceptsOnline.has((s.profiles as any)?.id ?? s.provider_id) && (slotTimesOf[s.id] ?? []).length > 0)
+    .sort((a: any, b: any) => earliestOf(a.id) - earliestOf(b.id))
+    .slice(0, CAROUSEL_MAX)
+    .map((s: any) => miniOf(s, true))
+  // ⭐ náhodně poskytovatelé z výsledků s dobrým posledním hodnocením (jedna karta na poskytovatele)
+  const ratedPick = new Map<string, any>()
+  for (const s of sorted as any[]) {
+    const pid = (s.profiles as any)?.id ?? s.provider_id
+    if (goodProviders.has(pid) && !ratedPick.has(pid)) ratedPick.set(pid, s)
+  }
+  const rated = Array.from(ratedPick.values())
+    .map((s) => ({ s, k: Math.random() }))
+    .sort((a, b) => a.k - b.k)
+    .slice(0, CAROUSEL_MAX)
+    .map(({ s }) => miniOf(s, false))
+
   return (
-    <div>
-      <p className="mb-5 text-sm text-slate-500">
-        Nalezeno <strong className="text-slate-800">{sorted.length}</strong> {sorted.length === 1 ? 'nabídka' : sorted.length < 5 ? 'nabídky' : 'nabídek'}
-      </p>
-      {/* Dvě karty vedle sebe i na mobilu, tři na širokých obrazovkách. */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-3">
-        {sorted.map((service, i) => {
-          const pid = (service.profiles as any)?.id ?? service.provider_id
-          // Kartě předáváme profil s ŽIVÝM hodnocením — uložené profiles.rating
-          // je nespolehlivé (viz výpočet výše), takže ho tady přebijeme.
-          const r = hodnoceni(service)
-          const serviceSHodnocenim = {
-            ...service,
-            profiles: service.profiles
-              ? { ...(service.profiles as any), rating: r.avg, review_count: r.count }
-              : service.profiles,
-          }
-          return (
-            <ServiceCard
-              key={service.id}
-              service={serviceSHodnocenim as typeof service}
-              index={i}
-              categoryName={catName[service.category]}
-              subcatNames={subsByService[service.id] ?? []}
-              hasFreeSlot={freeSlotServices.has(service.id)}
-              freeSlots={slotTimesOf[service.id] ?? []}
-              isFavorited={favSet.has(pid)}
-              isLoggedIn={!!user}
-              minItemPrice={minPriceOf(service.id)}
-              minItemUnit={minUnitOf(service.id)}
-              itemCount={itemCountOf(service.id)}
-              gallery={(service as any).gallery ?? []}
-              priceItems={priceItemsOf(service.id)}
-              acceptsOnline={acceptsOnline.has(pid)}
-              trustBadge={trustBadgeOf.get(pid) ?? null}
-            />
-          )
-        })}
-      </div>
+    <div className="space-y-9">
+      {flash.length >= 2 && (
+        <MarketCarousel title="Bleskové termíny" icon={<Zap className="h-6 w-6 fill-orange-400 text-orange-500" />}
+          subtitle={city ? 'Volné termíny ve vašem okolí' : 'Nejbližší volné termíny'} count={flash.length}>
+          {flash.map((c) => <MiniServiceCard key={c.id} card={c} />)}
+        </MarketCarousel>
+      )}
+      {rated.length >= 2 && (
+        <MarketCarousel title="Dobře hodnocení" icon={<Star className="h-6 w-6 fill-amber-400 text-amber-400" />}
+          subtitle="Poslední hodnocení 4,8 a víc" count={rated.length}>
+          {rated.map((c) => <MiniServiceCard key={c.id} card={c} />)}
+        </MarketCarousel>
+      )}
+      <RecentlyViewed />
+
+      <section>
+        <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <h2 className="flex items-center gap-2 text-xl font-black tracking-tight text-slate-900 sm:text-2xl">
+            <Users className="h-6 w-6 text-sky-500" /> {city ? 'Poskytovatelé ve vašem okolí' : 'Poskytovatelé'}
+          </h2>
+          <p className="text-sm text-slate-500">
+            Nalezeno <strong className="text-slate-800">{sorted.length}</strong> {sorted.length === 1 ? 'nabídka' : sorted.length < 5 ? 'nabídky' : 'nabídek'}
+          </p>
+        </div>
+        <div className="flex flex-col gap-6 lg:flex-row">
+          <aside className="lg:w-64 lg:shrink-0">{sidebar}</aside>
+          {/* Velké karty: mobil 1, tablet 2, počítač 3 vedle sebe */}
+          <div className="grid min-w-0 flex-1 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {sorted.map((service, i) => {
+              const pid = (service.profiles as any)?.id ?? service.provider_id
+              // Kartě předáváme profil s ŽIVÝM hodnocením — uložené profiles.rating
+              // je nespolehlivé (viz výpočet výše), takže ho tady přebijeme.
+              const r = hodnoceni(service)
+              const serviceSHodnocenim = {
+                ...service,
+                profiles: service.profiles
+                  ? { ...(service.profiles as any), rating: r.avg, review_count: r.count }
+                  : service.profiles,
+              }
+              return (
+                <ServiceCard
+                  key={service.id}
+                  service={serviceSHodnocenim as typeof service}
+                  index={i}
+                  variant="large"
+                  hideBadges
+                  categoryName={catName[service.category]}
+                  subcatNames={subsByService[service.id] ?? []}
+                  hasFreeSlot={freeSlotServices.has(service.id)}
+                  freeSlots={slotTimesOf[service.id] ?? []}
+                  isFavorited={favSet.has(pid)}
+                  isLoggedIn={!!user}
+                  minItemPrice={minPriceOf(service.id)}
+                  minItemUnit={minUnitOf(service.id)}
+                  itemCount={itemCountOf(service.id)}
+                  gallery={(service as any).gallery ?? []}
+                  priceItems={priceItemsOf(service.id)}
+                  acceptsOnline={acceptsOnline.has(pid)}
+                  trustBadge={trustBadgeOf.get(pid) ?? null}
+                />
+              )
+            })}
+          </div>
+        </div>
+      </section>
     </div>
   )
 }
@@ -579,51 +678,47 @@ export default async function MarketplacePage({ searchParams }: Props) {
   const categories = await getCategories()
   const subcategories = await getSubcategories(category)
 
+  const sidebar = (
+    <FilterSidebar
+      categories={categories}
+      subcategories={subcategories}
+      activeCategory={category}
+      currentPriceMin={priceMin}
+      currentPriceMax={priceMax}
+      currentMinRating={minRating}
+      currentSubcats={subcats}
+      currentCity={city}
+      currentDosah={dosah}
+      currentVolno={volno}
+      hideMobileTrigger
+    />
+  )
+
   return (
     <main className="min-h-screen bg-slate-50">
-      <div className="border-b border-slate-200 bg-white">
-        <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-emerald-600">Živnostenský marketplace</p>
-              <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">Najděte zkušeného řemeslníka</h1>
-              <p className="mt-1.5 text-slate-500">Ověření živnostníci ve vašem okolí. Žádné přirážky, přímý kontakt.</p>
-            </div>
-            <Link href="/pridat-sluzbu" className="inline-flex shrink-0 items-center gap-2 self-start rounded-xl bg-emerald-500 px-5 py-2.5 font-bold text-white transition hover:bg-emerald-600 sm:self-auto">
-              <PlusCircle className="h-4 w-4" /> Nabídnout službu
-            </Link>
+      <div className="mx-auto max-w-7xl px-4 pb-5 pt-8 sm:px-6 lg:px-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">
+              Najděte zkušeného <span className="text-emerald-600">řemeslníka</span>
+            </h1>
+            <p className="mt-1.5 text-slate-500">Ověřené IČO, volné termíny a platba kartou.</p>
           </div>
+          <Link href="/pridat-sluzbu" className="inline-flex shrink-0 items-center gap-2 self-start rounded-xl bg-emerald-500 px-5 py-3 font-bold text-white shadow-sm transition hover:bg-emerald-600 sm:self-auto">
+            <PlusCircle className="h-5 w-5" /> Nabídnout službu
+          </Link>
         </div>
       </div>
 
       <FilterBar currentCity={city} currentSort={sort} currentQ={q} />
 
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="flex flex-col gap-8 lg:flex-row">
-          <aside className="lg:w-64 lg:shrink-0">
-            <FilterSidebar
-              categories={categories}
-              subcategories={subcategories}
-              activeCategory={category}
-              currentPriceMin={priceMin}
-              currentPriceMax={priceMax}
-              currentMinRating={minRating}
-              currentSubcats={subcats}
-              currentCity={city}
-              currentDosah={dosah}
-              currentVolno={volno}
-            />
-          </aside>
-
-          <div className="min-w-0 flex-1">
-            <Suspense
-              key={`${category}-${city}-${q}-${sort}-${priceMin}-${priceMax}-${minRating}-${subcats}-${dosah}-${volno}`}
-              fallback={<ServiceListSkeleton />}
-            >
-              <ServiceList category={category} city={city} q={q} sort={sort} priceMin={priceMin} priceMax={priceMax} minRating={minRating} subcats={subcats} dosah={dosah} volno={volno} />
-            </Suspense>
-          </div>
-        </div>
+        <Suspense
+          key={`${category}-${city}-${q}-${sort}-${priceMin}-${priceMax}-${minRating}-${subcats}-${dosah}-${volno}`}
+          fallback={<ServiceListSkeleton />}
+        >
+          <ServiceList category={category} city={city} q={q} sort={sort} priceMin={priceMin} priceMax={priceMax} minRating={minRating} subcats={subcats} dosah={dosah} volno={volno} sidebar={sidebar} />
+        </Suspense>
       </div>
     </main>
   )

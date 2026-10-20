@@ -64,6 +64,10 @@ interface ServiceCardProps {
   acceptsOnline?: boolean
   /** „Nový na Propoju“ / „Důvěryhodný“ (20 dokončených rezervací bez problémů) */
   trustBadge?: 'new' | 'trusted' | null
+  /** 'large' = marketplace podle mockupu (20. 10. 2026): větší fotka, písmo a tlačítko, na mobilu přes celou šířku */
+  variant?: 'compact' | 'large'
+  /** Schovat štítky „Ověřeno“ / „Důvěryhodný“ / „Nový na Propoju“ (Matej 20. 10. 2026: na marketplace zatím žádný) */
+  hideBadges?: boolean
 }
 
 const DEFAULT_META = { label: 'Služba', emoji: '🔧' }
@@ -97,7 +101,10 @@ export default function ServiceCard({
   minItemPrice = null, minItemUnit = null, itemCount = 0, gallery = [], priceItems = [],
   acceptsOnline = true,
   trustBadge = null,
+  variant = 'compact',
+  hideBadges = false,
 }: ServiceCardProps) {
+  const large = variant === 'large'
   const meta = (CATEGORY_META as Record<string, { label: string; emoji: string }>)[service.category] ?? DEFAULT_META
   const p = service.profiles as any
 
@@ -182,7 +189,7 @@ export default function ServiceCard({
                   src={src}
                   alt={i === 0 ? service.title : `${service.title} — fotka ${i + 1}`}
                   fill
-                  sizes="(max-width: 768px) 50vw, 360px"
+                  sizes={large ? '(max-width: 640px) 100vw, 420px' : '(max-width: 768px) 50vw, 360px'}
                   className="object-cover"
                 />
               </Link>
@@ -273,15 +280,15 @@ export default function ServiceCard({
       )}
 
       {/* ── TĚLO ── */}
-      <div className="flex flex-1 flex-col gap-2 p-3">
+      <div className={`flex flex-1 flex-col gap-2 ${large ? 'p-4' : 'p-3'}`}>
         <div>
           <Link href={detailHref} className="block">
-            <h3 className="line-clamp-2 text-[15px] font-extrabold leading-snug tracking-tight text-slate-900 transition-colors group-hover:text-emerald-700">
+            <h3 className={`line-clamp-2 font-extrabold leading-snug tracking-tight text-slate-900 transition-colors group-hover:text-emerald-700 ${large ? 'text-lg' : 'text-[15px]'}`}>
               {service.title}
             </h3>
           </Link>
           {(service as any).subtitle && (
-            <p className="mt-0.5 line-clamp-1 text-[12.5px] text-slate-500">{(service as any).subtitle}</p>
+            <p className={`mt-0.5 line-clamp-1 text-slate-500 ${large ? 'text-sm' : 'text-[12.5px]'}`}>{(service as any).subtitle}</p>
           )}
         </div>
 
@@ -301,7 +308,7 @@ export default function ServiceCard({
 
         {/* Důvěra na jednom řádku, dole nad patičkou — díky tomu se řádky
             karet srovnají i při různě dlouhých názvech. */}
-        <div className="mt-auto flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11.5px] text-slate-500">
+        <div className={`mt-auto flex flex-wrap items-center gap-x-1.5 gap-y-1 text-slate-500 ${large ? 'text-[13px]' : 'text-[11.5px]'}`}>
           {hasRating ? (
             <span className="inline-flex items-center gap-1 font-semibold text-slate-700">
               <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
@@ -311,7 +318,7 @@ export default function ServiceCard({
           ) : (
             <span className="text-slate-400">Bez hodnocení</span>
           )}
-          {verified && (
+          {verified && !hideBadges && (
             <>
               <span className="text-slate-300">·</span>
               <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
@@ -319,7 +326,7 @@ export default function ServiceCard({
               </span>
             </>
           )}
-          {trustBadge === 'trusted' && (
+          {trustBadge === 'trusted' && !hideBadges && (
             <>
               <span className="text-slate-300">·</span>
               <span
@@ -330,7 +337,7 @@ export default function ServiceCard({
               </span>
             </>
           )}
-          {trustBadge === 'new' && (
+          {trustBadge === 'new' && !hideBadges && (
             <>
               <span className="text-slate-300">·</span>
               <span className="inline-flex items-center gap-1 text-slate-500" title="Zatím žádná dokončená rezervace přes Propojo">
@@ -347,11 +354,11 @@ export default function ServiceCard({
       </div>
 
       {/* ── SPODNÍ LIŠTA: cena a akce ── */}
-      <div className="flex items-end justify-between gap-2 border-t border-slate-100 p-3">
+      <div className={`flex items-end justify-between gap-2 border-t border-slate-100 ${large ? 'p-4' : 'p-3'}`}>
         <div className="min-w-0">
           {minItemPrice != null && minItemPrice > 0 ? (
             <>
-              <p className="text-[14.5px] font-extrabold leading-none text-slate-900">
+              <p className={`font-extrabold leading-none text-slate-900 ${large ? 'text-lg' : 'text-[14.5px]'}`}>
                 od {Number(minItemPrice).toLocaleString('cs-CZ')} Kč<span className="text-[11px] font-bold text-slate-500">{jednotka}</span>
               </p>
               <p className="mt-0.5 text-[10.5px] text-slate-400">
@@ -360,7 +367,7 @@ export default function ServiceCard({
             </>
           ) : (
             <>
-              <p className="text-[13px] font-bold leading-none text-slate-700">Cena dohodou</p>
+              <p className={`font-bold leading-none text-slate-700 ${large ? 'text-base' : 'text-[13px]'}`}>Cena dohodou</p>
               <p className="mt-0.5 text-[10.5px] text-slate-400">Podle rozsahu práce</p>
             </>
           )}
@@ -371,7 +378,7 @@ export default function ServiceCard({
 
         <Link
           href={maVolno ? terminyHref : detailHref}
-          className={`inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-2 text-[12.5px] font-bold transition ${
+          className={`inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl font-bold transition ${large ? 'px-5 py-2.5 text-sm' : 'px-3 py-2 text-[12.5px]'} ${
             maVolno
               ? 'bg-emerald-500 text-white hover:bg-emerald-600'
               : 'border-[1.5px] border-emerald-200 bg-white text-emerald-800 hover:border-emerald-400 hover:bg-emerald-50'

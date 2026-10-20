@@ -41,6 +41,8 @@ interface Props {
   currentDosah?: string
   /** 'dnes' | 'tyden' — filtr podle vypsaného volna */
   currentVolno?: string
+  /** Tlačítko „Filtry“ je v liště nahoře (FilterBar) – vlastní mobilní vstup se neukazuje */
+  hideMobileTrigger?: boolean
 }
 
 type MobileSection = 'availability' | 'category' | 'price' | 'rating' | 'range'
@@ -60,6 +62,7 @@ export default function FilterSidebar({
   currentCity,
   currentDosah,
   currentVolno,
+  hideMobileTrigger = false,
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -74,6 +77,13 @@ export default function FilterSidebar({
 
   useEffect(() => setMin(currentPriceMin ?? ''), [currentPriceMin])
   useEffect(() => setMax(currentPriceMax ?? ''), [currentPriceMax])
+
+  // Tlačítko „Filtry“ v liště nahoře (FilterBar) otevírá stejný mobilní panel
+  useEffect(() => {
+    const open = () => setMobileOpen(true)
+    window.addEventListener('propojo:open-filters', open)
+    return () => window.removeEventListener('propojo:open-filters', open)
+  }, [])
 
   useEffect(() => {
     if (!mobileOpen) return
@@ -358,8 +368,8 @@ export default function FilterSidebar({
 
   return (
     <>
-      {/* MOBIL: na stránce jen kompaktní vstup do filtrů. */}
-      <div className="lg:hidden">
+      {/* MOBIL: na stránce jen kompaktní vstup do filtrů (na marketplace je v liště nahoře). */}
+      <div className={hideMobileTrigger ? 'hidden' : 'lg:hidden'}>
         <button
           type="button"
           onClick={() => setMobileOpen(true)}
