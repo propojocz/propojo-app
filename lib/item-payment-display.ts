@@ -53,7 +53,7 @@ export function getItemPaymentDisplay(item: PaymentItem, quantity = 1): ItemPaym
     const deposit = depositType === 'zaloha' ? Math.max(0, Number(item.deposit_amount ?? 0)) * qty : 0
     return {
       action: 'Domluvit',
-      detail: deposit > 0 ? `záloha ${money(deposit)} · cena se upřesní` : 'cena se upřesní',
+      detail: deposit > 0 ? `poplatek ${money(deposit)} · cena se upřesní` : 'cena se upřesní',
       total: null,
       upfront: deposit > 0 ? deposit : 0,
       later: null,
@@ -67,7 +67,7 @@ export function getItemPaymentDisplay(item: PaymentItem, quantity = 1): ItemPaym
       const deposit = Math.min(Math.max(0, Number(item.deposit_amount ?? 0)) * qty, min)
       return {
         action: 'Objednat',
-        detail: deposit > 0 ? `záloha ${money(deposit)} · zbytek dle konečné ceny` : `cena ${moneyRange(min, max)}`,
+        detail: deposit > 0 ? `poplatek ${money(deposit)} · zbytek dle konečné ceny` : `cena ${moneyRange(min, max)}`,
         total: null,
         upfront: deposit > 0 ? deposit : 0,
         later: null,
@@ -97,7 +97,7 @@ export function getItemPaymentDisplay(item: PaymentItem, quantity = 1): ItemPaym
       const deposit = Math.max(0, Number(item.deposit_amount ?? 0))
       return {
         action: 'Objednat',
-        detail: deposit > 0 ? `záloha ${money(deposit)}` : `${money(unitPrice)} / hod`,
+        detail: deposit > 0 ? `poplatek ${money(deposit)}` : `${money(unitPrice)} / hod`,
         total: null,
         upfront: deposit > 0 ? deposit : 0,
         later: null,
@@ -140,7 +140,7 @@ export function getItemPaymentDisplay(item: PaymentItem, quantity = 1): ItemPaym
     action: 'Objednat',
     detail: upfront > 0
       ? later != null && later > 0
-        ? `záloha ${money(upfront)} · ${money(later)} ${laterWhere}`
+        ? `poplatek ${money(upfront)} · zbytek ${money(later)} ${laterWhere}`
         : `zaplatíte ${money(upfront)}`
       : total != null
         ? `${money(total)} ${laterWhere}`

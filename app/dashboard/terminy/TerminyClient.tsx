@@ -214,7 +214,7 @@ export default function TerminyClient({
           <div className="flex items-start gap-2 rounded-xl bg-blue-50 px-4 py-3 text-sm text-slate-600">
             <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
             <span>
-              Termíny fungují u úkonů s pevnou cenou a zálohou. Zatím žádný takový v ceníku nemáte —
+              Termíny fungují u úkonů s pevnou cenou a rezervačním poplatkem. Zatím žádný takový v ceníku nemáte –
               přidejte úkon do ceníku některé karty a vraťte se sem.
             </span>
           </div>

@@ -73,7 +73,7 @@ export default function SlotBooking({ items, slot, providerId, serviceMap, isLog
                   )}
                   {deposit > 0 && (
                     <span className="inline-flex items-center gap-1">
-                      <Wallet className="h-3.5 w-3.5 text-slate-400" /> záloha {deposit.toLocaleString('cs-CZ')} Kč
+                      <Wallet className="h-3.5 w-3.5 text-slate-400" /> rezervační poplatek {deposit.toLocaleString('cs-CZ')} Kč
                     </span>
                   )}
                 </div>

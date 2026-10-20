@@ -680,7 +680,7 @@ export default function OrderItemModal({
                           ? 'Platba při převzetí'
                           : depositType === 'plna_platba'
                             ? 'Zaplatíte teď (celá cena)'
-                            : 'Zaplatíte teď (záloha)'}
+                            : 'Zaplatíte teď (rezervační poplatek)'}
                       </span>
                       <strong className="text-emerald-700">{productDueNow.toLocaleString('cs-CZ')} Kč</strong>
                     </div>
@@ -695,7 +695,7 @@ export default function OrderItemModal({
                         ? `Neplatíte nic předem — celou částku uhradíte při ${productDelivery ? 'doručení' : 'převzetí'}.`
                         : depositType === 'plna_platba'
                           ? `Platíte celou cenu předem — při ${productDelivery ? 'doručení' : 'převzetí'} už nic nedoplácíte.`
-                          : `Záloha se započítá do konečné ceny — zbytek doplatíte při ${productDelivery ? 'doručení' : 'převzetí'}.`}
+                          : `Rezervační poplatek se odečte z ceny výrobku – zbytek doplatíte při ${productDelivery ? 'doručení' : 'převzetí'}.`}
                     </p>
                   </div>
                 )}
