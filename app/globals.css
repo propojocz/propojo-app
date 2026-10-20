@@ -92,3 +92,20 @@ button[class*="bg-slate-900"], a[class*="bg-slate-900"] {
     text-align: left;
   }
 }
+
+/* Barevné kruhy v pozadí (PageBlobs, 20. 10. 2026) – pomalé vznášení jen přes transform (GPU, nezpomaluje).
+   Každý kruh má jinou dráhu, délku a zpoždění; při omezení animací stojí. */
+@keyframes propojo-drift-a {
+  0%   { transform: translate(0, 0) scale(1); }
+  50%  { transform: translate(40px, -55px) scale(1.08); }
+  100% { transform: translate(-30px, 35px) scale(0.95); }
+}
+@keyframes propojo-drift-b {
+  0%   { transform: translate(0, 0) scale(1); }
+  50%  { transform: translate(-45px, 40px) scale(0.94); }
+  100% { transform: translate(35px, -45px) scale(1.06); }
+}
+.propojo-blob { will-change: transform; animation-timing-function: ease-in-out; animation-iteration-count: infinite; animation-direction: alternate; }
+@media (prefers-reduced-motion: reduce) {
+  .propojo-blob { animation: none !important; }
+}

@@ -25,6 +25,7 @@ import { PlusCircle, Send, Star, Users, Zap } from 'lucide-react'
 import MarketCarousel from '@/components/ui/MarketCarousel'
 import MiniServiceCard, { type MiniCard } from '@/components/ui/MiniServiceCard'
 import RecentlyViewed from '@/components/ui/RecentlyViewed'
+import PageBlobs from '@/components/ui/PageBlobs'
 import { cas, denKratce } from '@/lib/format'
 import type { Metadata } from 'next'
 import { haversineKm } from '@/lib/geo'
@@ -695,7 +696,9 @@ export default async function MarketplacePage({ searchParams }: Props) {
   )
 
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main className="relative isolate min-h-screen bg-slate-50">
+      {/* Barevné kruhy v pozadí jako na úvodní stránce (mockup) */}
+      <PageBlobs />
       <div className="mx-auto max-w-7xl px-4 pb-5 pt-8 sm:px-6 lg:px-8">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>

@@ -7,6 +7,7 @@ import ServiceCard from "@/components/ui/ServiceCard";
 import ProviderInvite from "@/components/ui/ProviderInvite";
 import HeroParallaxDots from "@/components/ui/HeroParallaxDots";
 import HowItWorks from "@/components/ui/HowItWorks";
+import PageBlobs from "@/components/ui/PageBlobs";
 import { BOOKING_POLICY } from "@/lib/booking/policy";
 import { ShieldCheck, CreditCard, CalendarClock } from "lucide-react";
 
@@ -115,15 +116,8 @@ export default function Home() {
         html { scroll-behavior:smooth; }
 
         .home h1, .home h2, .home .display { font-family:'Poppins',sans-serif; }
-        /* Barevné kruhy v barvách loga po celé stránce (20. 10. 2026) – statické, za obsahem, jen barevný přechod
-           (žádný blur filtr, na telefonu nezpomaluje); pohyblivé malé tečky v hero zůstávají (HeroParallaxDots). */
+        /* Barevné kruhy v pozadí: společná komponenta PageBlobs (pomalu se vznášejí); malé tečky v hero zůstávají (HeroParallaxDots) */
         .home { position:relative; isolation:isolate; }
-        .home-blobs { position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:-1; }
-        .home-blob { position:absolute; width:460px; height:460px; border-radius:50%; }
-        .home-blob.l { left:-230px; } .home-blob.r { right:-230px; }
-        .home-blob.b { background:radial-gradient(circle, rgba(59,130,246,.16) 0%, transparent 70%); }
-        .home-blob.o { background:radial-gradient(circle, rgba(249,115,22,.14) 0%, transparent 70%); }
-        .home-blob.g { background:radial-gradient(circle, rgba(16,185,129,.14) 0%, transparent 70%); }
 
         /* HERO */
         .hero { text-align:center; padding:76px 48px 96px; position:relative; overflow:visible;
@@ -266,7 +260,6 @@ export default function Home() {
         .faq details p { padding:0 22px 18px; color:var(--gray-600); font-size:14.5px; line-height:1.65; }
 
         @media (max-width:880px) {
-          .home-blob { width:300px; height:300px; } .home-blob.l { left:-170px; } .home-blob.r { right:-170px; }
           .hero { padding:52px 20px 48px; }
           .hero-search { flex-direction:column; }
           .hs-divider { display:none; }
@@ -280,16 +273,8 @@ export default function Home() {
       `}</style>
 
       <div className="home">
-        {/* Barevné kruhy v pozadí po celé výšce stránky, střídavě vlevo a vpravo */}
-        <div className="home-blobs" aria-hidden="true">
-          <span className="home-blob l b" style={{ top: "6%" }} />
-          <span className="home-blob r o" style={{ top: "16%" }} />
-          <span className="home-blob l g" style={{ top: "30%" }} />
-          <span className="home-blob r b" style={{ top: "44%" }} />
-          <span className="home-blob l o" style={{ top: "58%" }} />
-          <span className="home-blob r g" style={{ top: "72%" }} />
-          <span className="home-blob l b" style={{ top: "86%" }} />
-        </div>
+        {/* Barevné kruhy v pozadí po celé výšce stránky (pomalu se vznášejí) */}
+        <PageBlobs />
         {/* HERO */}
         <section className="hero">
           <HeroParallaxDots />
