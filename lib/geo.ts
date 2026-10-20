@@ -45,3 +45,9 @@ export function distanceFromKnownKm(k: KnownPlace, lat: number | null | undefine
   const ref = k.obec ?? k.base
   return ref ? Math.round(haversineKm(ref.lat, ref.lng, lat, lng)) : null
 }
+
+/** M2 (20. 10. 2026): „2,4 km“ / „12 km“ / „do 1 km“ – vzdálenost vzdušnou čarou pro karty */
+export function formatKm(km: number): string {
+  if (km < 1) return 'do 1 km'
+  return km < 10 ? `${km.toLocaleString('cs-CZ', { maximumFractionDigits: 1 })} km` : `${Math.round(km)} km`
+}

@@ -15,11 +15,12 @@ doménu propojo.cz (+ localhost).
   platbou, chat poptávky). Adresa zákazníka v detailu rezervace má zelený špendlík.
 - Bez SQL a bez nových služeb.
 
-## M2 – vzdálenosti (vzdušnou čarou)
+## M2 – vzdálenosti (vzdušnou čarou) – POSTAVENO 20. 10. 2026
 - „X km od vás“ na kartách v marketplace a v pásech, řazení a filtr podle vzdálenosti.
 - Výchozí bod: obec zadaná v hledání (souřadnice z tabulky `obce`), volitelně „Použít moji polohu“
   (souhlas prohlížeče, poloha se neukládá).
 - Na kartě „vzdušnou čarou“, dokud nebude routing.
+- Hotovo: „Obec · 2,4 km“ na kartách a v pásech, řazení „Nejblíž“, filtr do 5/10/25/50 km + „Jen kdo za mnou přijede“; „Použít moji polohu“ převádí polohu na obec přes Mapy.com v prohlížeči (k nám jde jen název obce).
 
 ## M3 – mapa výsledků
 - Přepínač Seznam / Mapa v marketplace: špendlíky karet z výsledků, po kliknutí malá karta.

@@ -28,7 +28,9 @@ import RecentlyViewed from '@/components/ui/RecentlyViewed'
 import PageBlobs from '@/components/ui/PageBlobs'
 import { cas, denKratce } from '@/lib/format'
 import type { Metadata } from 'next'
-import { haversineKm } from '@/lib/geo'
+import { formatKm, haversineKm } from '@/lib/geo'
+import { findObec, findObecAll } from '@/lib/obce'
+import ObecChooser from '@/components/ui/ObecChooser'
 import ProviderInvite from '@/components/ui/ProviderInvite'
 
 interface Props {
@@ -42,6 +44,10 @@ interface Props {
     minRating?: string
     subcats?: string
     dosah?: string
+    /** Okres u stejnojmenných obcí (z našeptávače) */
+    okres?: string
+    /** M2: max. vzdálenost od obce v km */
+    vzdalenost?: string
     volno?: string
   }
 }
@@ -109,10 +115,12 @@ function slotLabel(iso: string): string {
 }
 
 async function ServiceList({
-  category, city, q, sort, priceMin, priceMax, minRating, subcats, dosah, volno, sidebar,
+  category, city, okres, q, sort, priceMin, priceMax, minRating, subcats, dosah, vzdalenost, volno, sidebar,
 }: {
-  category?: string; city?: string; q?: string; sort?: string
+  category?: string; city?: string; okres?: string; q?: string; sort?: string
   priceMin?: string; priceMax?: string; minRating?: string; subcats?: string; dosah?: string
+  /** M2: max. vzdálenost od obce v km ('5' | '10' | '25' | '50') */
+  vzdalenost?: string
   /** Filtr volného termínu: 'dnes' / 'tyden' */
   volno?: string
   /** Boční filtry (vykreslí se vlevo u nabídek) */
@@ -120,6 +128,14 @@ async function ServiceList({
 }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
+
+  // Obec z hledání bez diakritiky a s malou chybou („roznov“ → Rožnov pod Radhoštěm) – lib/obce.ts
+  const obecHit = city ? await findObec(city, okres).catch(() => null) : null
+  const cityName = obecHit?.obec ?? city
+  // Stejnojmenné obce (Bystřice, Střítež…) – nabídnout upřesnění okresu
+  const sameName = obecHit ? (await findObecAll(obecHit.obec).catch(() => [])) : []
+  const okresy = sameName.length > 1 ? Array.from(new Set(sameName.map((o) => o.okres))).sort((a, b) => a.localeCompare(b, 'cs')) : []
+  const cityLabel = obecHit && okresy.length > 0 ? `${obecHit.obec} (okres ${obecHit.okres})` : cityName
 
   const subIds = (subcats ?? '').split(',').filter(Boolean)
 
@@ -149,14 +165,14 @@ async function ServiceList({
     }
   }
 
-  if (city) {
-    const { data: provRows } = await supabase.from('profiles').select('id').ilike('city', `%${city}%`)
+  if (cityName) {
+    const { data: provRows } = await supabase.from('profiles').select('id').ilike('city', `%${cityName}%`)
     const provIds = (provRows ?? []).map((p: any) => p.id)
     if (provIds.length > 0) {
       const idList = provIds.map((id: string) => `"${id}"`).join(',')
-      query = query.or(`city.ilike.%${city}%,provider_id.in.(${idList})`)
+      query = query.or(`city.ilike.%${cityName}%,provider_id.in.(${idList})`)
     } else {
-      query = query.ilike('city', `%${city}%`)
+      query = query.ilike('city', `%${cityName}%`)
     }
   }
 
@@ -168,6 +184,18 @@ async function ServiceList({
     const { data: ids, error: rpcErr } = await supabase.rpc('search_service_ids' as any, { patterns } as any)
     if (!rpcErr && Array.isArray(ids)) {
       smartIds = (ids as any[]).map((x) => (typeof x === 'string' ? x : (x?.search_service_ids ?? x?.id))).filter(Boolean)
+    }
+  }
+
+  // Nic přesně? Zkusíme podobná slova (malá chyba, „elektrykar“ → elektrikář) – docs/sql/hledani-preklepy.sql.
+  // Když funkce v DB ještě není, zůstane prázdný výsledek jako dřív.
+  let fuzzyUsed = false
+  if (q && smartIds && smartIds.length === 0) {
+    const { data: fz, error: fzErr } = await supabase.rpc('search_service_ids_fuzzy' as any, { q } as any)
+    const fzList = (Array.isArray(fz) ? fz : []) as any[]
+    if (!fzErr && fzList.length > 0) {
+      const fuzzyIds: string[] = fzList.map((x) => (typeof x === 'string' ? x : (x?.search_service_ids_fuzzy ?? x?.id))).filter(Boolean)
+      if (fuzzyIds.length > 0) { smartIds = fuzzyIds; fuzzyUsed = true }
     }
   }
 
@@ -304,12 +332,27 @@ async function ServiceList({
     sorted = sorted.filter((s) => hodnoceni(s).avg >= min)
   }
 
-  // ── Filtr "Jen v mém dosahu" ──
-  if (dosah === '1' && city) {
-    const { data: cityRow } = await supabase
-      .from('obce').select('latitude, longitude').ilike('obec', city).limit(1).maybeSingle() as
-      { data: { latitude: number; longitude: number } | null }
+  // ── M2 (20. 10. 2026): vzdálenost vzdušnou čarou od obce z hledání ──
+  // Karta u poskytovatele: od adresy provozovny (když má souřadnice), jinak od obce karty.
+  // Výchozí bod = obec rozpoznaná výš (bez diakritiky, s malou chybou)
+  const cityRow = obecHit ? { latitude: obecHit.latitude, longitude: obecHit.longitude } : null
+  const distanceOf = new Map<string, number>()
+  if (cityRow) {
+    for (const s of sorted as any[]) {
+      const usePlace = s.location_type !== 'u_zakaznika' && s.address_lat != null && s.address_lng != null
+      const lat = usePlace ? s.address_lat : s.city_lat
+      const lng = usePlace ? s.address_lng : s.city_lng
+      if (lat == null || lng == null) continue
+      distanceOf.set(s.id, haversineKm(cityRow.latitude, cityRow.longitude, Number(lat), Number(lng)))
+    }
+  }
+  const maxKm = Number(vzdalenost)
+  if (cityRow && [5, 10, 25, 50].includes(maxKm)) {
+    sorted = sorted.filter((s) => (distanceOf.get(s.id) ?? Infinity) <= maxKm)
+  }
 
+  // ── Filtr „Jen kdo za mnou přijede“ (dojezd poskytovatele) ──
+  if (dosah === '1' && city) {
     if (cityRow) {
       sorted = sorted.filter((s: any) => {
         if (s.location_type === 'u_poskytovatele') return false
@@ -448,6 +491,9 @@ async function ServiceList({
     })
   } else if (sort === 'hodnoceni') {
     sorted = [...sorted].sort((a, b) => hodnoceni(b).avg - hodnoceni(a).avg)
+  } else if (sort === 'nejblize' && cityRow) {
+    // Karty bez souřadnic na konec
+    sorted = [...sorted].sort((a, b) => (distanceOf.get(a.id) ?? Infinity) - (distanceOf.get(b.id) ?? Infinity))
   }
 
   // ── ROZMANITOST VÝSLEDKŮ ──────────────────────────────────────
@@ -579,7 +625,7 @@ async function ServiceList({
       id: s.id,
       title: s.title,
       image: imageOf(s),
-      place: s.city ?? null,
+      place: [s.city, distanceOf.has(s.id) ? formatKm(distanceOf.get(s.id)!) : null].filter(Boolean).join(' · ') || null,
       priceText: priceTextOf(s),
       slotLabel: withSlot && slots[0] ? slotLabel(slots[0]) : null,
       rating: withSlot ? null : (r.count > 0 ? r : null),
@@ -606,6 +652,7 @@ async function ServiceList({
 
   return (
     <div className="space-y-9">
+      {obecHit && okresy.length > 1 && <ObecChooser obec={obecHit.obec} okresy={okresy} current={okres && okresy.includes(okres) ? okres : null} />}
       {flash.length >= 2 && (
         <MarketCarousel title="Bleskové termíny" icon={<Zap className="h-6 w-6 fill-orange-400 text-orange-500" />}
           subtitle={city ? 'Volné termíny ve vašem okolí' : 'Nejbližší volné termíny'} count={flash.length}>
@@ -627,7 +674,11 @@ async function ServiceList({
           </h2>
           <p className="text-sm text-slate-500">
             Nalezeno <strong className="text-slate-800">{sorted.length}</strong> {sorted.length === 1 ? 'nabídka' : sorted.length < 5 ? 'nabídky' : 'nabídek'}
+            {cityRow && <> · vzdálenosti vzdušnou čarou od obce {cityLabel}</>}
           </p>
+          {fuzzyUsed && (
+            <p className="w-full text-sm text-amber-700">Nic přesně neodpovídá „{q}“ – ukazujeme podobné výsledky.</p>
+          )}
         </div>
         <div className="flex flex-col gap-6 lg:flex-row">
           <aside className="lg:w-64 lg:shrink-0">{sidebar}</aside>
@@ -664,6 +715,8 @@ async function ServiceList({
                   priceItems={priceItemsOf(service.id)}
                   acceptsOnline={acceptsOnline.has(pid)}
                   trustBadge={trustBadgeOf.get(pid) ?? null}
+                  distanceKm={distanceOf.get(service.id) ?? null}
+                  distanceFrom={cityRow ? cityLabel ?? null : null}
                 />
               )
             })}
@@ -675,7 +728,7 @@ async function ServiceList({
 }
 
 export default async function MarketplacePage({ searchParams }: Props) {
-  const { category, city, q, sort, priceMin, priceMax, minRating, subcats, dosah, volno } = searchParams
+  const { category, city, okres, q, sort, priceMin, priceMax, minRating, subcats, dosah, vzdalenost, volno } = searchParams
   const categories = await getCategories()
   const subcategories = await getSubcategories(category)
 
@@ -690,6 +743,7 @@ export default async function MarketplacePage({ searchParams }: Props) {
       currentSubcats={subcats}
       currentCity={city}
       currentDosah={dosah}
+      currentVzdalenost={vzdalenost}
       currentVolno={volno}
       hideMobileTrigger
     />
@@ -717,10 +771,10 @@ export default async function MarketplacePage({ searchParams }: Props) {
 
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <Suspense
-          key={`${category}-${city}-${q}-${sort}-${priceMin}-${priceMax}-${minRating}-${subcats}-${dosah}-${volno}`}
+          key={`${category}-${city}-${okres}-${q}-${sort}-${priceMin}-${priceMax}-${minRating}-${subcats}-${dosah}-${vzdalenost}-${volno}`}
           fallback={<ServiceListSkeleton />}
         >
-          <ServiceList category={category} city={city} q={q} sort={sort} priceMin={priceMin} priceMax={priceMax} minRating={minRating} subcats={subcats} dosah={dosah} volno={volno} sidebar={sidebar} />
+          <ServiceList category={category} city={city} okres={okres} q={q} sort={sort} priceMin={priceMin} priceMax={priceMax} minRating={minRating} subcats={subcats} dosah={dosah} vzdalenost={vzdalenost} volno={volno} sidebar={sidebar} />
         </Suspense>
       </div>
     </main>

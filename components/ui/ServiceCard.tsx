@@ -27,6 +27,7 @@ import type { ServiceWithProvider } from '@/types/database'
 import { CATEGORY_META } from '@/types/database'
 import { cas, denKratce } from '@/lib/format'
 import FavoriteButton from '@/components/ui/FavoriteButton'
+import { formatKm } from '@/lib/geo'
 
 /** Položka ceníku do náhledu na kartě bez fotky. */
 export type CardPriceItem = {
@@ -68,6 +69,10 @@ interface ServiceCardProps {
   variant?: 'compact' | 'large'
   /** Schovat štítky „Ověřeno“ / „Důvěryhodný“ / „Nový na Propoju“ (Matej 20. 10. 2026: na marketplace zatím žádný) */
   hideBadges?: boolean
+  /** M2: vzdálenost vzdušnou čarou od obce z hledání (km) */
+  distanceKm?: number | null
+  /** Obec, od které se vzdálenost počítá (do tooltipu) */
+  distanceFrom?: string | null
 }
 
 const DEFAULT_META = { label: 'Služba', emoji: '🔧' }
@@ -103,6 +108,8 @@ export default function ServiceCard({
   trustBadge = null,
   variant = 'compact',
   hideBadges = false,
+  distanceKm = null,
+  distanceFrom = null,
 }: ServiceCardProps) {
   const large = variant === 'large'
   const meta = (CATEGORY_META as Record<string, { label: string; emoji: string }>)[service.category] ?? DEFAULT_META
@@ -349,6 +356,11 @@ export default function ServiceCard({
           <span className="inline-flex min-w-0 items-center gap-1">
             <MapPin className="h-3 w-3 shrink-0 text-slate-400" />
             <span className="truncate">{service.city}</span>
+            {distanceKm != null && (
+              <span className="shrink-0 font-semibold text-slate-700" title={`Vzdušnou čarou${distanceFrom ? ` od obce ${distanceFrom}` : ''}`}>
+                · {formatKm(distanceKm)}
+              </span>
+            )}
           </span>
         </div>
       </div>

@@ -39,6 +39,8 @@ interface Props {
   currentSubcats?: string
   currentCity?: string
   currentDosah?: string
+  /** M2: max. vzdálenost od obce z hledání v km ('5' | '10' | '25' | '50') */
+  currentVzdalenost?: string
   /** 'dnes' | 'tyden' — filtr podle vypsaného volna */
   currentVolno?: string
   /** Tlačítko „Filtry“ je v liště nahoře (FilterBar) – vlastní mobilní vstup se neukazuje */
@@ -61,6 +63,7 @@ export default function FilterSidebar({
   currentSubcats,
   currentCity,
   currentDosah,
+  currentVzdalenost,
   currentVolno,
   hideMobileTrigger = false,
 }: Props) {
@@ -132,7 +135,7 @@ export default function FilterSidebar({
 
   const clearFilters = () => {
     const params = new URLSearchParams(searchParams.toString())
-    ;['category', 'subcats', 'priceMin', 'priceMax', 'minRating', 'dosah', 'volno'].forEach((k) => params.delete(k))
+    ;['category', 'subcats', 'priceMin', 'priceMax', 'minRating', 'dosah', 'vzdalenost', 'volno'].forEach((k) => params.delete(k))
     startTransition(() => router.push(`${pathname}?${params.toString()}`, { scroll: false }))
   }
 
@@ -152,14 +155,14 @@ export default function FilterSidebar({
 
   const hasFilters =
     !!activeCategory || !!currentSubcats || !!currentPriceMin || !!currentPriceMax ||
-    !!currentMinRating || !!currentDosah || !!currentVolno
+    !!currentMinRating || !!currentDosah || !!currentVzdalenost || !!currentVolno
 
   const activeFilterCount = [
     activeCategory,
     currentSubcats,
     currentPriceMin || currentPriceMax,
     currentMinRating,
-    currentDosah,
+    currentDosah || currentVzdalenost,
     currentVolno,
   ].filter(Boolean).length
 
@@ -336,16 +339,37 @@ export default function FilterSidebar({
     </div>
   )
 
+  // M2 (20. 10. 2026): vzdálenost vzdušnou čarou od obce z hledání + dojezd poskytovatele
   const renderRange = () => currentCity ? (
-    <label className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-slate-600 hover:bg-slate-50">
-      <input
-        type="checkbox"
-        checked={currentDosah === '1'}
-        onChange={(e) => setParam('dosah', e.target.checked ? '1' : undefined)}
-        className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-      />
-      Jen v mém dosahu
-    </label>
+    <div className="space-y-1">
+      {[
+        { value: '', label: 'Kdekoli' },
+        { value: '5', label: 'Do 5 km' },
+        { value: '10', label: 'Do 10 km' },
+        { value: '25', label: 'Do 25 km' },
+        { value: '50', label: 'Do 50 km' },
+      ].map((opt) => {
+        const on = (currentVzdalenost ?? '') === opt.value
+        return (
+          <button key={opt.value || 'all'} type="button" onClick={() => setParam('vzdalenost', opt.value || undefined)}
+            className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition ${
+              on ? 'bg-emerald-50 font-semibold text-emerald-700' : 'text-slate-600 hover:bg-slate-50'
+            }`}>
+            {opt.label}
+          </button>
+        )
+      })}
+      <p className="px-3 pb-1 text-[11px] text-slate-400">Vzdušnou čarou od obce {currentCity}.</p>
+      <label className="flex cursor-pointer items-center gap-2 rounded-lg border-t border-slate-100 px-3 pt-2.5 pb-2 text-sm text-slate-600 hover:bg-slate-50">
+        <input
+          type="checkbox"
+          checked={currentDosah === '1'}
+          onChange={(e) => setParam('dosah', e.target.checked ? '1' : undefined)}
+          className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+        />
+        Jen kdo za mnou přijede
+      </label>
+    </div>
   ) : (
     <p className="px-3 py-2 text-xs leading-relaxed text-slate-400">
       Nejdřív zadejte město ve vyhledávání nahoře.
@@ -363,7 +387,7 @@ export default function FilterSidebar({
     { id: 'category', label: 'Kategorie', value: activeCategoryName ?? 'Všechny', icon: SlidersHorizontal, content: renderCategories() },
     { id: 'price', label: 'Cena', value: priceLabel, icon: Banknote, content: renderPrice() },
     { id: 'rating', label: 'Hodnocení', value: ratingLabel, icon: Star, content: renderRating() },
-    { id: 'range', label: 'Dojezd', value: currentDosah === '1' ? 'Jen v mém dosahu' : 'Kdekoli', icon: MapPin, content: renderRange() },
+    { id: 'range', label: 'Vzdálenost', value: [currentVzdalenost ? `Do ${currentVzdalenost} km` : '', currentDosah === '1' ? 'Přijede za mnou' : ''].filter(Boolean).join(' · ') || 'Kdekoli', icon: MapPin, content: renderRange() },
   ]
 
   return (
@@ -518,7 +542,7 @@ export default function FilterSidebar({
         </div>
 
         <div className="mt-6 border-t border-slate-100 pt-5">
-          <h3 className="mb-3 text-sm font-semibold text-slate-800">Dojezd</h3>
+          <h3 className="mb-3 text-sm font-semibold text-slate-800">Vzdálenost</h3>
           {renderRange()}
         </div>
       </div>

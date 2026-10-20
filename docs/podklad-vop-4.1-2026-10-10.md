@@ -98,7 +98,7 @@ Popsat hlavní parametry v pořadí významu a proč jsou důležité:
 - **Marketplace při hledání:**
   1. shoda se zadáním (shoda v názvu, oboru a ceníku Nabídky váží víc než zmínka v popisu; Nabídky z kategorie, ke které hledaný výraz patří, jdou dopředu);
   2. reálná dostupnost („Nejdřív volno“, výchozí řazení);
-  3. vzdálenost.
+  3. vzdálenost (vzdušnou čarou od obce, kterou zákazník zadal; od 20. 10. 2026 i samostatné řazení „Nejblíž“ a filtr do 5 / 10 / 25 / 50 km).
 
   Zákazník může přepnout na řazení podle ceny nebo hodnocení.
 - **Nástěnka poptávek pro Poskytovatele:** shoda oboru a dosah Nabídky, pak vzdálenost, pak čas zadání. Filtr vzdálenosti.
@@ -232,3 +232,4 @@ Pro finální revizi AK zvýrazni jako **LEGAL_REVIEW_NEEDED**:
 21. ~~Profil pracovníka bez vlastního účtu~~ – **bez otázky** (Matej 15. 10. 2026): u pracovníka bez účtu se zobrazí jen křestní jméno, bez fotky a dalších údajů.
 22. **Tlačítko „Navigovat“ v detailu rezervace (19. 10. 2026).** Poskytovatel u výjezdu (a zákazník u služby v provozovně) může jedním klepnutím otevřít navigaci v Google Mapách; odkaz obsahuje adresu (nebo souřadnice) místa zakázky. Údaje do Google předá prohlížeč uživatele až po jeho kliknutí, Propojo je nikam neposílá samo. Stačí zmínka v Zásadách (odkaz na mapovou službu třetí strany, přenos do USA), nebo je potřeba víc? Přesnou adresu zákazníka poskytovatel vidí až po potvrzení rezervace (AK bod 8).
 23. **„Naposledy prohlížené“ na marketplace (20. 10. 2026).** Seznam Nabídek, které si návštěvník otevřel, ukládáme jen do úložiště jeho prohlížeče (localStorage, max. 12 položek), na server se nic neposílá kromě dotazu na aktuální údaje těch Nabídek. Je to funkce, o kterou si uživatel „řekl“ prohlížením (technicky nezbytné / funkční úložiště bez souhlasu podle § 89 odst. 3 ZEK), nebo je potřeba souhlas v cookie liště? A stačí zmínka v Zásadách?
+24. **„Použít moji polohu“ na marketplace (20. 10. 2026).** Prohlížeč (po souhlasu uživatele v systémovém dotazu) zjistí polohu, ta se přímo z prohlížeče pošle do Mapy.com (Seznam.cz) k převodu na název obce a na server Propoja jde jen název obce (ten je pak v adrese stránky). Přesnou polohu Propojo nedostane ani neukládá. Stačí to popsat v Zásadách (Mapy.com jako příjemce, účel, žádné ukládání), nebo je potřeba víc?

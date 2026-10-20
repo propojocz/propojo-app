@@ -545,14 +545,7 @@ export default async function ServiceDetailPage({ params }: Props) {
               </Link>
             </section>
 
-            {/* Časté dotazy – o patro výš, tedy před mapou / adresou. */}
-            <section>
-              {jeMoje
-                ? <ServiceFaqEditor serviceId={s.id} faqs={faqs} />
-                : <ServiceFaq faqs={faqs} />}
-            </section>
-
-            {/* Adresa + mapa */}
+            {/* Adresa + mapa – nad častými dotazy (Matej 20. 10. 2026) */}
             {showAddress && (
               <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
                 <h3 className="mb-2 flex items-center gap-2 text-sm font-black text-slate-800">
@@ -562,6 +555,13 @@ export default async function ServiceDetailPage({ params }: Props) {
                 {showMap && <ServiceMap lat={Number(adresaLat)} lng={Number(adresaLng)} label={s.title} />}
               </section>
             )}
+
+            {/* Časté dotazy – pod adresou a mapou */}
+            <section>
+              {jeMoje
+                ? <ServiceFaqEditor serviceId={s.id} faqs={faqs} />
+                : <ServiceFaq faqs={faqs} />}
+            </section>
 
             {hasEstablishment && !addressPublic && (
               <section className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm sm:p-5">
