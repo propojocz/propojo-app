@@ -7,7 +7,14 @@ import ServiceCard from "@/components/ui/ServiceCard";
 import ProviderInvite from "@/components/ui/ProviderInvite";
 import HeroParallaxDots from "@/components/ui/HeroParallaxDots";
 import HowItWorks from "@/components/ui/HowItWorks";
-import { Search, ShieldCheck, CreditCard, CalendarClock } from "lucide-react";
+import { BOOKING_POLICY } from "@/lib/booking/policy";
+import { ShieldCheck, CreditCard, CalendarClock } from "lucide-react";
+
+// Čísla na stránce z pravidel rezervací (změna policy = změna textu, nic natvrdo) – texty podle modelu v2 (19. 10. 2026)
+const COMM = BOOKING_POLICY.commission;
+const kcFromHalere = (h: number) => (h / 100).toLocaleString("cs-CZ");
+const PROVIZE = `Provize ${COMM.rateBps / 100} % z rezervačního poplatku nebo ceny výjezdu · min. ${kcFromHalere(COMM.minBaseHalere)} Kč, max. ${kcFromHalere(COMM.maxBaseHalere)} Kč · u plateb nad ${kcFromHalere(COMM.surcharge.thresholdHalere)} Kč navíc ${COMM.surcharge.rateBps / 100} % z části nad touto hranicí`;
+const NOSHOW = BOOKING_POLICY.providerNoShow;
 
 export default function Home() {
   const router = useRouter();
@@ -108,6 +115,15 @@ export default function Home() {
         html { scroll-behavior:smooth; }
 
         .home h1, .home h2, .home .display { font-family:'Poppins',sans-serif; }
+        /* Barevné kruhy v barvách loga po celé stránce (20. 10. 2026) – statické, za obsahem, jen barevný přechod
+           (žádný blur filtr, na telefonu nezpomaluje); pohyblivé malé tečky v hero zůstávají (HeroParallaxDots). */
+        .home { position:relative; isolation:isolate; }
+        .home-blobs { position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:-1; }
+        .home-blob { position:absolute; width:460px; height:460px; border-radius:50%; }
+        .home-blob.l { left:-230px; } .home-blob.r { right:-230px; }
+        .home-blob.b { background:radial-gradient(circle, rgba(59,130,246,.16) 0%, transparent 70%); }
+        .home-blob.o { background:radial-gradient(circle, rgba(249,115,22,.14) 0%, transparent 70%); }
+        .home-blob.g { background:radial-gradient(circle, rgba(16,185,129,.14) 0%, transparent 70%); }
 
         /* HERO */
         .hero { text-align:center; padding:76px 48px 96px; position:relative; overflow:visible;
@@ -250,6 +266,7 @@ export default function Home() {
         .faq details p { padding:0 22px 18px; color:var(--gray-600); font-size:14.5px; line-height:1.65; }
 
         @media (max-width:880px) {
+          .home-blob { width:300px; height:300px; } .home-blob.l { left:-170px; } .home-blob.r { right:-170px; }
           .hero { padding:52px 20px 48px; }
           .hero-search { flex-direction:column; }
           .hs-divider { display:none; }
@@ -263,10 +280,20 @@ export default function Home() {
       `}</style>
 
       <div className="home">
+        {/* Barevné kruhy v pozadí po celé výšce stránky, střídavě vlevo a vpravo */}
+        <div className="home-blobs" aria-hidden="true">
+          <span className="home-blob l b" style={{ top: "6%" }} />
+          <span className="home-blob r o" style={{ top: "16%" }} />
+          <span className="home-blob l g" style={{ top: "30%" }} />
+          <span className="home-blob r b" style={{ top: "44%" }} />
+          <span className="home-blob l o" style={{ top: "58%" }} />
+          <span className="home-blob r g" style={{ top: "72%" }} />
+          <span className="home-blob l b" style={{ top: "86%" }} />
+        </div>
         {/* HERO */}
         <section className="hero">
           <HeroParallaxDots />
-          <div className="hero-badge"><span className="dot"></span> Ověření živnostníci · Záloha = jistota</div>
+          <div className="hero-badge"><span className="dot"></span> Ověřené IČO · Rezervace a platba online</div>
           <h1> Nemusíte umět <br /> <span className="accent">všechno.</span></h1>
           <p className="sub">Najděte, domluvte a rezervujte služby na jednom místě.</p>
 
@@ -337,7 +364,7 @@ export default function Home() {
           <div className="sec-head reveal">
             <span className="eyebrow">Kategorie</span>
             <h2>Od střihu po rekonstrukci</h2>
-            <p>Vyberte si obor — nebo prostě napište nahoře, co potřebujete.</p>
+            <p>Vyberte si obor – nebo prostě napište nahoře, co potřebujete.</p>
           </div>
           <div className="cats reveal">
             <Link className="cat" href="/marketplace?q=Kadeřnictví"><img src="/kategorie/kadernictvi.jpg" alt="Kadeřnictví" /><span className="name">Kadeřnictví</span></Link>
@@ -374,10 +401,10 @@ export default function Home() {
             <div className="sec-head reveal">
               <span className="eyebrow">Startujeme na Valašsku</span>
               <h2>Vsetínsko a Zlínsko jako první</h2>
-              <p>Teprve začínáme — a hledáme řemeslníky, kteří tu budou první.</p>
+              <p>Teprve začínáme – a hledáme živnostníky, kteří tu budou první.</p>
             </div>
             <div className="reveal" style={{ maxWidth: 620, margin: "0 auto" }}>
-              <ProviderInvite heading="Jste řemeslník? Buďte tu první." />
+              <ProviderInvite heading="Jste živnostník? Buďte tu první." />
             </div>
           </section>
         )}
@@ -387,12 +414,12 @@ export default function Home() {
           <div className="sec-head reveal">
             <span className="eyebrow">Proč Propojo?</span>
             <h2>Postavené na jistotě</h2>
-            <p>Tři věci, které jinde nenajdete pohromadě.</p>
+            <p>Na čem si u Propoja dáváme záležet.</p>
           </div>
           <div className="why reveal">
-            <div className="why-card c1"><div className="icon"><ShieldCheck size={22} strokeWidth={2} color="#059669" /></div><h3>Ověřené IČO přes ARES</h3><p>Žádné falešné profily. Každého živnostníka ověřujeme v oficiálním rejstříku, než se u nás objeví.</p></div>
-            <div className="why-card c2"><div className="icon"><CreditCard size={22} strokeWidth={2} color="#2563eb" /></div><h3>Záloha jako jistota</h3><p>Záloha jde přes zabezpečenou platební bránu a řemeslníkovi se uvolní až po provedení práce. Když nedorazí, vrátí se vám celá.</p></div>
-            <div className="why-card c3"><div className="icon"><CalendarClock size={22} strokeWidth={2} color="#d97706" /></div><h3>Termín bez telefonování</h3><p>Vidíte volné termíny v kalendáři. Kliknete — a termín je váš. Žádné „zavolám vám zpátky".</p></div>
+            <div className="why-card c1"><div className="icon"><ShieldCheck size={22} strokeWidth={2} color="#059669" /></div><h3>Ověřené IČO přes ARES</h3><p>IČO každého živnostníka ověřujeme v rejstříku ARES dřív, než u nás začne nabízet služby.</p></div>
+            <div className="why-card c2"><div className="icon"><CreditCard size={22} strokeWidth={2} color="#2563eb" /></div><h3>Bezpečná platba kartou</h3><p>Rezervační poplatek platíte kartou přímo poskytovateli přes Stripe – Propojo vaše peníze nedrží. Dokud poskytovatel termín nepotvrdí, je částka jen zablokovaná.</p></div>
+            <div className="why-card c3"><div className="icon"><CalendarClock size={22} strokeWidth={2} color="#d97706" /></div><h3>Termín bez telefonování</h3><p>Vidíte volné termíny a rovnou si je zarezervujete. Termín vypsaný poskytovatelem se potvrdí hned po zaplacení. Žádné „zavolám vám zpátky“.</p></div>
           </div>
         </section>
 
@@ -400,10 +427,10 @@ export default function Home() {
         <section className="home-section">
           <div className="pro-cta reveal">
             <span className="eyebrow">Pro živnostníky</span>
-            <h2>Zakázky bez provizí</h2>
-            <p>Z vaší práce si nebereme ani korunu. Platíte jen předplatné — zákazníci vás najdou a rezervují si termín sami.</p>
+            <h2>Zakázky bez měsíčního poplatku</h2>
+            <p>Profil a nabídky máte zdarma. Platíte jen provizi z rezervací zaplacených přes Propojo – zákazníci vás najdou a rezervují si termín sami.</p>
             <Link className="btn" href="/registrace">Začít zdarma →</Link>
-            <span className="note">První měsíc zdarma · zrušíte kdykoli · 299 Kč/měsíc</span>
+            <span className="note">{PROVIZE}</span>
           </div>
         </section>
 
@@ -412,20 +439,24 @@ export default function Home() {
           <div className="sec-head reveal"><span className="eyebrow">Časté otázky</span><h2>Na co se lidi ptají</h2></div>
           <div className="faq reveal">
             <details open>
-              <summary>Co když řemeslník nedorazí?</summary>
-              <p>Vrátíme vám celou zálohu. Řemeslníkovi se totiž uvolní až poté, co práci skutečně odvede — do té doby je zadržená v platební bráně.</p>
+              <summary>Co když poskytovatel nedorazí?</summary>
+              <p>Nahlásíte to v aplikaci do {NOSHOW.reportWindowHours} hodin po skončení termínu. Když poskytovatel souhlasí nebo do {NOSHOW.responseHours} hodin nereaguje, zaplacená částka se vám automaticky vrátí z jeho účtu. Když s hlášením nesouhlasí, Propojo spor nerozhoduje – nárok uplatníte přímo u poskytovatele.</p>
             </details>
             <details>
               <summary>Kolik mě to stojí?</summary>
-              <p>Nic navíc. Platíte cenu řemeslníka — žádné přirážky, žádné poplatky. Propojo vydělává na předplatném živnostníků, ne na vás.</p>
+              <p>Propojo si od vás nic neúčtuje. Platíte cenu poskytovatele, přes Propojo jen rezervační poplatek (u výjezdu cenu výjezdu). Rezervační poplatek se vám odečte z ceny služby; u výjezdu záleží na podmínkách poskytovatele – uvidíte je před platbou. Propojo vydělává na provizi, kterou platí poskytovatel.</p>
             </details>
             <details>
-              <summary>Jak funguje záloha?</summary>
-              <p>Při rezervaci zaplatíte zálohu (třeba 200 Kč) přes zabezpečenou platební bránu. Po dokončení práce se započítá do konečné ceny — nic neplatíte dvakrát. Propojo je jen zprostředkovatel; smlouva o provedení práce vzniká přímo mezi vámi a řemeslníkem.</p>
+              <summary>Jak funguje rezervační poplatek?</summary>
+              <p>Při rezervaci ho zaplatíte kartou přímo poskytovateli přes zabezpečenou platební bránu Stripe. Dokud poskytovatel termín nepotvrdí, je částka na kartě jen zablokovaná; když ho nepotvrdí, blokace se uvolní. Smlouva o samotné službě vzniká přímo mezi vámi a poskytovatelem – Propojo je jen zprostředkovatel.</p>
+            </details>
+            <details>
+              <summary>Můžu rezervaci zrušit?</summary>
+              <p>Dokud ji poskytovatel nepotvrdí, zrušíte ji zdarma – blokace na kartě se uvolní. Po potvrzení platí pravidla, která uvidíte před platbou; přehled najdete na stránce <Link href="/storno" className="font-semibold text-emerald-700 underline">Zrušení rezervace a vrácení peněz</Link>.</p>
             </details>
             <details>
               <summary>Musím se registrovat?</summary>
-              <p>Prohlížet můžete bez registrace. Účet potřebujete až na rezervaci termínu — zabere půl minuty.</p>
+              <p>Prohlížet můžete bez registrace. Účet potřebujete až na rezervaci termínu – zabere půl minuty.</p>
             </details>
           </div>
         </section>

@@ -3,8 +3,7 @@
 // Úvodní stránka – „Jak to funguje“ podle mockupu Mateje (19. 10. 2026), v barvách Propoja.
 // Počítač: karta se třemi kroky vlevo přes velký obrázek vpravo. Mobil: obrázek nahoře, karta pod ním.
 // Obrázek nahrává admin (/admin/obrazky), vybírá se náhodně (getHomepageImage); bez něj barevné pozadí.
-// Kolem jemné barevné kruhy v barvách loga – jen barevný přechod (žádný blur filtr, na telefonu nezpomaluje),
-// za obsahem, neklikací, bez pohybu.
+// Barevné kruhy v pozadí jsou za celou úvodní stránkou (app/page.tsx, .home-blobs) – v sekci by je ořízly její okraje.
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -18,14 +17,6 @@ const STEPS = [
   { n: 1, dot: 'bg-sky-100 text-sky-800', title: 'Vyberte si službu', text: 'Prohlédněte si nabídky a ukázky práce.' },
   { n: 2, dot: 'bg-emerald-100 text-emerald-800', title: 'Zvolte místo a termín', text: 'Vyberte si, kde a kdy službu potřebujete.' },
   { n: 3, dot: 'bg-orange-100 text-orange-800', title: 'Rezervujte a zaplaťte', text: 'Rezervační poplatek zaplatíte kartou, potvrzení přijde e-mailem.' },
-]
-
-// Barevné kruhy v barvách loga (modrá, oranžová, zelená)
-const BLOBS: { cls: string; color: string }[] = [
-  { cls: '-left-24 -top-16 h-80 w-80', color: 'rgba(59,130,246,0.16)' },
-  { cls: '-right-24 -top-10 h-72 w-72', color: 'rgba(249,115,22,0.14)' },
-  { cls: '-bottom-24 -left-16 h-72 w-72', color: 'rgba(16,185,129,0.14)' },
-  { cls: '-bottom-20 -right-16 h-80 w-80', color: 'rgba(59,130,246,0.12)' },
 ]
 
 export default function HowItWorks() {
@@ -49,11 +40,7 @@ export default function HowItWorks() {
   )
 
   return (
-    <section id="jak" className="relative overflow-hidden px-4 py-14 sm:px-6 md:py-20">
-      {BLOBS.map((b) => (
-        <span key={b.cls} aria-hidden="true" className={`pointer-events-none absolute rounded-full ${b.cls}`}
-          style={{ background: `radial-gradient(circle, ${b.color} 0%, transparent 70%)` }} />
-      ))}
+    <section id="jak" className="relative px-4 py-14 sm:px-6 md:py-20">
 
       <div className="relative mx-auto max-w-6xl md:grid md:grid-cols-12 md:items-center">
         {/* Obrázek: mobil nahoře, počítač vpravo pod kartou */}

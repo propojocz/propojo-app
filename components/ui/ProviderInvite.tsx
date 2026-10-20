@@ -43,7 +43,7 @@ export default function ProviderInvite({
     const url = 'https://propojo.cz/registrace/zivnostnik'
     const text =
       'Na Propojo.cz si lidi rezervují řemeslníky online — bez obvolávání. ' +
-      'Zakázky bez provizí, první měsíc zdarma. Mrkni na to:'
+      'Profil zdarma, bez měsíčního poplatku – platí se jen provize z rezervací. Mrkni na to:'
 
     // Na mobilu vyvolá systémové sdílení (WhatsApp, Messenger, SMS, e-mail…).
     if (typeof navigator !== 'undefined' && navigator.share) {
@@ -97,7 +97,7 @@ export default function ProviderInvite({
       </Link>
 
       <p className="mt-3 text-xs text-slate-500">
-        První měsíc zdarma · bez provizí · zrušíte kdykoli
+        Bez měsíčního poplatku · provize jen z rezervací zaplacených přes Propojo
       </p>
 
       {/* ── Zákazník: pozvěte někoho, koho znáte ── */}
