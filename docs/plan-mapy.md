@@ -21,6 +21,11 @@ doménu propojo.cz (+ localhost).
   (souhlas prohlížeče, poloha se neukládá).
 - Na kartě „vzdušnou čarou“, dokud nebude routing.
 - Hotovo: „Obec · 2,4 km“ na kartách a v pásech, řazení „Nejblíž“, filtr do 5/10/25/50 km + „Jen kdo za mnou přijede“; „Použít moji polohu“ převádí polohu na obec přes Mapy.com v prohlížeči (k nám jde jen název obce).
+- Hledání v okolí (20. 10. 2026): výchozí „V okolí“ = služba u poskytovatele do 15 km, výjezd podle dojezdu poskytovatele (bez dojezdu 25 km); dál do 5–50 km a Celá ČR.
+- Části obcí a městské části (20. 10. 2026): `lib/data/casti-obci.ts` z RÚIAN (ČÚZK, adresní místa, licence CC BY 4.0 – zdroj uvádět).
+  Přegenerování (jednou za čas, třeba ročně): stáhnout `https://vdp.cuzk.gov.cz/vymenny_format/csv/<RRRRMMDD>_OB_ADR_csv.zip` (poslední den měsíce),
+  vypsat tabulku `obce` do JSON (obec, okres, latitude, longitude), pak `python -I scripts/ruian/casti.py adr.zip obce.json casti.json`
+  a `python -I scripts/ruian/gen-ts.py casti.json lib/data/casti-obci.ts`. Kontrola: medián odchylky středu obce od tabulky `obce` ~0,25 km.
 
 ## M3 – mapa výsledků
 - Přepínač Seznam / Mapa v marketplace: špendlíky karet z výsledků, po kliknutí malá karta.

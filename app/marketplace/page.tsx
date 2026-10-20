@@ -8,7 +8,7 @@
 // a 🕒 Naposledy prohlížené (počítané z aktuálních výsledků hledání), pod nimi „Poskytovatelé“ – filtry
 // vlevo, velké karty (mobil 1, tablet 2, počítač 3 vedle sebe). Brána předplatného odstraněna (model §18).
 
-import { expandSearch, relevanceScore, searchPlan } from '@/lib/search'
+import { expandSearch, normalizeText, relevanceScore, searchPlan } from '@/lib/search'
 import { accountBlocks } from '@/lib/booking/rules'
 import { AUTOREF_CATALOG_VERSION } from '@/lib/booking/texts'
 import { tierOf, trustCounts } from '@/lib/booking/trust'
@@ -28,8 +28,8 @@ import RecentlyViewed from '@/components/ui/RecentlyViewed'
 import PageBlobs from '@/components/ui/PageBlobs'
 import { cas, denKratce } from '@/lib/format'
 import type { Metadata } from 'next'
-import { formatKm, haversineKm } from '@/lib/geo'
-import { findObec, findObecAll } from '@/lib/obce'
+import { formatKm, haversineKm, NEARBY_DEFAULT_RADIUS_KM, NEARBY_PLACE_KM } from '@/lib/geo'
+import { findObec, findObecAll, obceCoordsByName } from '@/lib/obce'
 import ObecChooser from '@/components/ui/ObecChooser'
 import ProviderInvite from '@/components/ui/ProviderInvite'
 
@@ -130,12 +130,24 @@ async function ServiceList({
   const { data: { user } } = await supabase.auth.getUser()
 
   // Obec z hledání bez diakritiky a s malou chybou („roznov“ → Rožnov pod Radhoštěm) – lib/obce.ts
-  const obecHit = city ? await findObec(city, okres).catch(() => null) : null
-  const cityName = obecHit?.obec ?? city
-  // Stejnojmenné obce (Bystřice, Střítež…) – nabídnout upřesnění okresu
-  const sameName = obecHit ? (await findObecAll(obecHit.obec).catch(() => [])) : []
-  const okresy = sameName.length > 1 ? Array.from(new Set(sameName.map((o) => o.okres))).sort((a, b) => a.localeCompare(b, 'cs')) : []
-  const cityLabel = obecHit && okresy.length > 0 ? `${obecHit.obec} (okres ${obecHit.okres})` : cityName
+  // i části obcí a městské části (Praha 3, Žižkov, Brno-Židenice) – výchozí bod vzdálenosti
+  const obecHit = city ? await findObec(city, okres, { parts: true }).catch(() => null) : null
+  // Obec (ne část obce) – do poptávky a do textového filtru, když místo neznáme
+  const cityName = obecHit ? (obecHit.parent ?? obecHit.obec) : city
+  // Stejnojmenná místa (Bystřice, Střítež, Žižkov…) – nabídnout upřesnění
+  const sameName = obecHit ? (await findObecAll(obecHit.obec, { parts: true }).catch(() => [])) : []
+  const chooserOptions: { okres: string; label: string }[] = []
+  if (sameName.length > 1) {
+    for (const o of sameName) {
+      if (chooserOptions.some((x) => x.okres === o.okres)) continue
+      chooserOptions.push({ okres: o.okres, label: o.parent ? `část obce ${o.parent}` : `okres ${o.okres}` })
+    }
+  }
+  const ambiguous = chooserOptions.length > 1
+  const currentChoice = okres && chooserOptions.some((x) => x.okres === okres) ? okres : null
+  const cityLabel = !obecHit ? city
+    : obecHit.parent ? `${obecHit.obec} (${obecHit.parent})`
+    : ambiguous ? `${obecHit.obec} (okres ${obecHit.okres})` : obecHit.obec
 
   const subIds = (subcats ?? '').split(',').filter(Boolean)
 
@@ -165,7 +177,9 @@ async function ServiceList({
     }
   }
 
-  if (cityName) {
+  // Hledání v okolí (Matej 20. 10. 2026): známé místo = výběr podle vzdálenosti níž v kódu, ne podle
+  // názvu obce na kartě. Textový filtr zůstává jen pro místo, které neznáme.
+  if (cityName && !obecHit) {
     const { data: provRows } = await supabase.from('profiles').select('id').ilike('city', `%${cityName}%`)
     const provIds = (provRows ?? []).map((p: any) => p.id)
     if (provIds.length > 0) {
@@ -220,7 +234,8 @@ async function ServiceList({
   // nad minimální cenou z úkonů. V SQL řadíme jen podle data, cenu doženeme po dotažení úkonů.
   query = query.order('created_at', { ascending: false })
 
-  const { data: services } = await query.limit(60)
+  // V okolí se vybírá až v kódu → načíst víc karet (při stovkách karet převést na dotaz v DB, PostGIS)
+  const { data: services } = await query.limit(obecHit ? 1000 : 60)
 
   // ── Poskytovatelé ve výsledcích (brána předplatného zrušena 20. 10. 2026, model §18) ──
   const candidateProviderIds = Array.from(
@@ -336,30 +351,46 @@ async function ServiceList({
   // Karta u poskytovatele: od adresy provozovny (když má souřadnice), jinak od obce karty.
   // Výchozí bod = obec rozpoznaná výš (bez diakritiky, s malou chybou)
   const cityRow = obecHit ? { latitude: obecHit.latitude, longitude: obecHit.longitude } : null
-  const distanceOf = new Map<string, number>()
+  const distanceOf = new Map<string, number>()   // na kartě: provozovna, u výjezdu obec karty
+  const placeDist = new Map<string, number>()    // od adresy provozovny
+  const cityDist = new Map<string, number>()     // od obce karty (výjezd, dojezd)
   if (cityRow) {
+    // Karta bez souřadnic obce → souřadnice podle názvu obce z číselníku
+    const coordsByName = await obceCoordsByName().catch(() => new Map<string, { latitude: number; longitude: number }>())
     for (const s of sorted as any[]) {
-      const usePlace = s.location_type !== 'u_zakaznika' && s.address_lat != null && s.address_lng != null
-      const lat = usePlace ? s.address_lat : s.city_lat
-      const lng = usePlace ? s.address_lng : s.city_lng
-      if (lat == null || lng == null) continue
-      distanceOf.set(s.id, haversineKm(cityRow.latitude, cityRow.longitude, Number(lat), Number(lng)))
+      let cLat = s.city_lat, cLng = s.city_lng
+      if ((cLat == null || cLng == null) && s.city) {
+        const c = coordsByName.get(normalizeText(String(s.city).trim()))
+        if (c) { cLat = c.latitude; cLng = c.longitude }
+      }
+      const dPlace = s.address_lat != null && s.address_lng != null
+        ? haversineKm(cityRow.latitude, cityRow.longitude, Number(s.address_lat), Number(s.address_lng)) : null
+      const dCity = cLat != null && cLng != null
+        ? haversineKm(cityRow.latitude, cityRow.longitude, Number(cLat), Number(cLng)) : null
+      if (dPlace != null) placeDist.set(s.id, dPlace)
+      if (dCity != null) cityDist.set(s.id, dCity)
+      const shown = s.location_type !== 'u_zakaznika' ? (dPlace ?? dCity) : (dCity ?? dPlace)
+      if (shown != null) distanceOf.set(s.id, shown)
     }
-  }
-  const maxKm = Number(vzdalenost)
-  if (cityRow && [5, 10, 25, 50].includes(maxKm)) {
-    sorted = sorted.filter((s) => (distanceOf.get(s.id) ?? Infinity) <= maxKm)
-  }
 
-  // ── Filtr „Jen kdo za mnou přijede“ (dojezd poskytovatele) ──
-  if (dosah === '1' && city) {
-    if (cityRow) {
+    const maxKm = Number(vzdalenost)
+    if ([5, 10, 25, 50].includes(maxKm)) {
+      sorted = sorted.filter((s) => (distanceOf.get(s.id) ?? Infinity) <= maxKm)
+    } else if (vzdalenost !== 'cr') {
+      // „V okolí“ (výchozí): služba u poskytovatele do 15 km, výjezd tam, kam poskytovatel jezdí
       sorted = sorted.filter((s: any) => {
-        if (s.location_type === 'u_poskytovatele') return false
-        if (!s.radius_km || s.city_lat == null || s.city_lng == null) return false
-        const dist = haversineKm(cityRow.latitude, cityRow.longitude, s.city_lat, s.city_lng)
-        return dist <= s.radius_km
+        const lt = s.location_type
+        const placeKm = placeDist.get(s.id) ?? (lt === 'u_poskytovatele' ? cityDist.get(s.id) : undefined)
+        const atPlace = lt !== 'u_zakaznika' && (placeKm ?? Infinity) <= NEARBY_PLACE_KM
+        const travels = lt !== 'u_poskytovatele' && (cityDist.get(s.id) ?? Infinity) <= (s.radius_km ?? NEARBY_DEFAULT_RADIUS_KM)
+        return atPlace || travels
       })
+    }
+
+    // ── Filtr „Jen kdo za mnou přijede“ (dojezd poskytovatele) ──
+    if (dosah === '1') {
+      sorted = sorted.filter((s: any) =>
+        s.location_type !== 'u_poskytovatele' && !!s.radius_km && (cityDist.get(s.id) ?? Infinity) <= s.radius_km)
     }
   }
 
@@ -543,7 +574,12 @@ async function ServiceList({
     const params = new URLSearchParams()
     const hledane = q || category
     if (hledane) params.set('category', hledane)
-    if (city) params.set('city', city)
+    if (cityName) params.set('city', cityName)
+    // V okolí nic → nabídnout celou ČR se stejnými filtry
+    const wholeCzHref = obecHit && vzdalenost !== 'cr'
+      ? `/marketplace?${new URLSearchParams(Object.entries({ category, city, okres, q, sort, priceMin, priceMax, minRating, subcats, dosah, volno, vzdalenost: 'cr' })
+          .filter((e): e is [string, string] => !!e[1])).toString()}`
+      : null
     const poptavkaHref = `/poptavky/nova${params.toString() ? `?${params.toString()}` : ''}`
     const categorySlug = params.get('category')
     let hledanyObor: string | undefined
@@ -561,6 +597,7 @@ async function ServiceList({
       <div className="flex flex-col gap-6 lg:flex-row">
       <aside className="lg:w-64 lg:shrink-0">{sidebar}</aside>
       <div className="min-w-0 flex-1 space-y-4">
+        {obecHit && ambiguous && <ObecChooser obec={obecHit.obec} options={chooserOptions} current={currentChoice} />}
         <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white py-14 text-center">
           <h3 className="mb-2 text-xl font-bold text-slate-800">Zatím tu nikoho nemáme</h3>
           <p className="mb-6 max-w-sm text-sm leading-relaxed text-slate-500">
@@ -573,6 +610,11 @@ async function ServiceList({
           >
             <Send className="h-4 w-4" /> Zanechat poptávku
           </Link>
+          {wholeCzHref && (
+            <Link href={wholeCzHref} className="mt-4 text-sm font-semibold text-emerald-700 hover:underline">
+              V okolí místa {cityLabel} nic není – hledat v celé ČR
+            </Link>
+          )}
         </div>
 
         <ProviderInvite category={hledanyObor} city={hledaneMesto} />
@@ -652,7 +694,7 @@ async function ServiceList({
 
   return (
     <div className="space-y-9">
-      {obecHit && okresy.length > 1 && <ObecChooser obec={obecHit.obec} okresy={okresy} current={okres && okresy.includes(okres) ? okres : null} />}
+      {obecHit && ambiguous && <ObecChooser obec={obecHit.obec} options={chooserOptions} current={currentChoice} />}
       {flash.length >= 2 && (
         <MarketCarousel title="Bleskové termíny" icon={<Zap className="h-6 w-6 fill-orange-400 text-orange-500" />}
           subtitle={city ? 'Volné termíny ve vašem okolí' : 'Nejbližší volné termíny'} count={flash.length}>
@@ -674,7 +716,7 @@ async function ServiceList({
           </h2>
           <p className="text-sm text-slate-500">
             Nalezeno <strong className="text-slate-800">{sorted.length}</strong> {sorted.length === 1 ? 'nabídka' : sorted.length < 5 ? 'nabídky' : 'nabídek'}
-            {cityRow && <> · vzdálenosti vzdušnou čarou od obce {cityLabel}</>}
+            {cityRow && <> · {vzdalenost === 'cr' ? 'celá ČR' : [5, 10, 25, 50].includes(Number(vzdalenost)) ? `do ${vzdalenost} km` : 'v okolí'} · vzdušnou čarou od místa {cityLabel}</>}
           </p>
           {fuzzyUsed && (
             <p className="w-full text-sm text-amber-700">Nic přesně neodpovídá „{q}“ – ukazujeme podobné výsledky.</p>

@@ -51,3 +51,8 @@ export function formatKm(km: number): string {
   if (km < 1) return 'do 1 km'
   return km < 10 ? `${km.toLocaleString('cs-CZ', { maximumFractionDigits: 1 })} km` : `${Math.round(km)} km`
 }
+
+/** Hledání „V okolí“ v marketplace (Matej 20. 10. 2026): služba u poskytovatele do 15 km od zákazníka */
+export const NEARBY_PLACE_KM = 15
+/** …výjezd podle dojezdu poskytovatele (`services.radius_km`); když ho karta nemá, tolik km */
+export const NEARBY_DEFAULT_RADIUS_KM = 25

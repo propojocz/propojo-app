@@ -65,7 +65,15 @@ export default function FilterBar({ currentCity, currentSort = 'volno', currentQ
         if (!obec) throw new Error('bez obce')
         // Okres kvůli stejnojmenným obcím, když ho Mapy.com vrátí („okres Vsetín“)
         const okresRaw: string | null = ((item?.regionalStructure ?? []).find((r: any) => typeof r?.name === 'string' && /^okres /i.test(r.name))?.name) ?? null
-        updateParams({ city: obec, okres: okresRaw ? okresRaw.replace(/^okres\s+/i, '') : null })
+        const okres = okresRaw ? okresRaw.replace(/^okres\s+/i, '') : null
+        // Ve městě i část obce (Žižkov, Poruba) – jen když ji známe, jinak obec
+        const part: string | null = (item?.regionalStructure ?? []).find((r: any) => r?.type === 'regional.municipality_part' && r?.name && r.name !== obec)?.name ?? null
+        let city = obec
+        if (part) {
+          const known = await fetch(`/api/obce?q=${encodeURIComponent(part)}&casti=1`).then((r) => r.json()).catch(() => null)
+          if ((known?.obce ?? []).some((o: any) => o?.obec === part && o?.parent === obec)) city = part
+        }
+        updateParams({ city, okres })
       } catch {
         setLocError('Obec se nepodařilo určit – napište ji prosím.')
       } finally {
@@ -103,7 +111,8 @@ export default function FilterBar({ currentCity, currentSort = 'volno', currentQ
           {/* Město s našeptáváním obcí + Filtry (mobil) */}
           <div className="flex gap-2.5 lg:w-72">
             <SearchAutocomplete
-              key={currentCity ?? ''}
+              syncValue
+              parts
               mode="obce"
               defaultValue={currentCity}
               placeholder="Město…"

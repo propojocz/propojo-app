@@ -357,7 +357,7 @@ export default function ServiceCard({
             <MapPin className="h-3 w-3 shrink-0 text-slate-400" />
             <span className="truncate">{service.city}</span>
             {distanceKm != null && (
-              <span className="shrink-0 font-semibold text-slate-700" title={`Vzdušnou čarou${distanceFrom ? ` od obce ${distanceFrom}` : ''}`}>
+              <span className="shrink-0 font-semibold text-slate-700" title={`Vzdušnou čarou${distanceFrom ? ` od místa ${distanceFrom}` : ''}`}>
                 · {formatKm(distanceKm)}
               </span>
             )}

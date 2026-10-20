@@ -9,7 +9,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { Search, MapPin, Tag, Layers, Loader2, X } from 'lucide-react'
 
 type OborItem = { type: 'category' | 'subcategory'; value: string; label: string }
-type ObecItem = { obec: string; okres: string; psc: string; latitude: number; longitude: number }
+type ObecItem = { obec: string; okres: string; psc: string; latitude: number; longitude: number; parent?: string | null }
 
 export default function SearchAutocomplete({
   mode,
@@ -19,6 +19,8 @@ export default function SearchAutocomplete({
   onPickObec,
   onFreeText,
   className = '',
+  syncValue = false,
+  parts = false,
 }: {
   mode: 'obory' | 'obce'
   defaultValue?: string
@@ -27,6 +29,10 @@ export default function SearchAutocomplete({
   onPickObec?: (item: ObecItem) => void
   onFreeText: (text: string) => void
   className?: string
+  /** Převzít novou hodnotu zvenku (např. „Použít moji polohu“), když pole zrovna nepíše uživatel */
+  syncValue?: boolean
+  /** mode="obce": nabízet i části obcí a městské části (jen hledání v marketplace) */
+  parts?: boolean
 }) {
   const [value, setValue] = useState(defaultValue)
   const [obory, setObory] = useState<OborItem[]>([])
@@ -37,6 +43,11 @@ export default function SearchAutocomplete({
   const boxRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const freeTextRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (syncValue && document.activeElement !== inputRef.current) setValue(defaultValue)
+  }, [syncValue, defaultValue])
 
   // Zavření při kliknutí mimo
   useEffect(() => {
@@ -57,7 +68,7 @@ export default function SearchAutocomplete({
         setObory(data.obory ?? [])
         setOpen((data.obory ?? []).length > 0)
       } else {
-        const res = await fetch(`/api/obce?q=${encodeURIComponent(q)}`)
+        const res = await fetch(`/api/obce?q=${encodeURIComponent(q)}${parts ? '&casti=1' : ''}`)
         const data = await res.json()
         setObce(data.obce ?? [])
         setOpen((data.obce ?? []).length > 0)
@@ -67,7 +78,7 @@ export default function SearchAutocomplete({
     }
     setLoading(false)
     setActive(-1)
-  }, [mode])
+  }, [mode, parts])
 
   const handleChange = (v: string) => {
     setValue(v)
@@ -115,6 +126,7 @@ export default function SearchAutocomplete({
         ? <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         : <MapPin className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />}
       <input
+        ref={inputRef}
         type="text"
         value={value}
         placeholder={placeholder}
@@ -149,14 +161,14 @@ export default function SearchAutocomplete({
               ))
             : obce.map((item, i) => (
                 <button
-                  key={`${item.obec}-${item.psc}`}
+                  key={`${item.obec}-${item.okres}-${item.parent ?? ''}-${i}`}
                   onClick={() => pickObec(item)}
                   onMouseEnter={() => setActive(i)}
                   className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors ${active === i ? 'bg-emerald-50' : 'hover:bg-slate-50'}`}
                 >
                   <MapPin className="h-4 w-4 shrink-0 text-slate-400" />
                   <span className="font-medium text-slate-700">{item.obec}</span>
-                  <span className="ml-auto text-xs text-slate-400">{item.okres}</span>
+                  <span className="ml-auto text-xs text-slate-400">{item.parent ? `část obce ${item.parent}` : item.okres}</span>
                 </button>
               ))}
         </div>

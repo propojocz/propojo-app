@@ -15,6 +15,7 @@ import {
   Banknote,
 } from 'lucide-react'
 import { CategoryIcon } from '@/lib/categoryIcons'
+import { NEARBY_PLACE_KM } from '@/lib/geo'
 
 interface Subcategory {
   id: string
@@ -339,15 +340,16 @@ export default function FilterSidebar({
     </div>
   )
 
-  // M2 (20. 10. 2026): vzdálenost vzdušnou čarou od obce z hledání + dojezd poskytovatele
+  // M2 (20. 10. 2026): hledání v okolí obce z hledání (Matej: kadeřník do 15 km, výjezd podle dojezdu)
   const renderRange = () => currentCity ? (
     <div className="space-y-1">
       {[
-        { value: '', label: 'Kdekoli' },
+        { value: '', label: 'V okolí (doporučeno)' },
         { value: '5', label: 'Do 5 km' },
         { value: '10', label: 'Do 10 km' },
         { value: '25', label: 'Do 25 km' },
         { value: '50', label: 'Do 50 km' },
+        { value: 'cr', label: 'Celá ČR' },
       ].map((opt) => {
         const on = (currentVzdalenost ?? '') === opt.value
         return (
@@ -359,7 +361,9 @@ export default function FilterSidebar({
           </button>
         )
       })}
-      <p className="px-3 pb-1 text-[11px] text-slate-400">Vzdušnou čarou od obce {currentCity}.</p>
+      <p className="px-3 pb-1 text-[11px] leading-snug text-slate-400">
+        Vzdušnou čarou od místa {currentCity}. V okolí = služby u poskytovatele do {NEARBY_PLACE_KM} km a výjezdy, kam poskytovatel jezdí.
+      </p>
       <label className="flex cursor-pointer items-center gap-2 rounded-lg border-t border-slate-100 px-3 pt-2.5 pb-2 text-sm text-slate-600 hover:bg-slate-50">
         <input
           type="checkbox"
@@ -387,7 +391,7 @@ export default function FilterSidebar({
     { id: 'category', label: 'Kategorie', value: activeCategoryName ?? 'Všechny', icon: SlidersHorizontal, content: renderCategories() },
     { id: 'price', label: 'Cena', value: priceLabel, icon: Banknote, content: renderPrice() },
     { id: 'rating', label: 'Hodnocení', value: ratingLabel, icon: Star, content: renderRating() },
-    { id: 'range', label: 'Vzdálenost', value: [currentVzdalenost ? `Do ${currentVzdalenost} km` : '', currentDosah === '1' ? 'Přijede za mnou' : ''].filter(Boolean).join(' · ') || 'Kdekoli', icon: MapPin, content: renderRange() },
+    { id: 'range', label: 'Vzdálenost', value: [currentVzdalenost === 'cr' ? 'Celá ČR' : currentVzdalenost ? `Do ${currentVzdalenost} km` : currentCity ? 'V okolí' : '', currentDosah === '1' ? 'Přijede za mnou' : ''].filter(Boolean).join(' · ') || 'Kdekoli', icon: MapPin, content: renderRange() },
   ]
 
   return (

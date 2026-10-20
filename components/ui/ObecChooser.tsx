@@ -6,7 +6,12 @@
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { MapPin } from 'lucide-react'
 
-export default function ObecChooser({ obec, okresy, current }: { obec: string; okresy: string[]; current: string | null }) {
+export default function ObecChooser({ obec, options, current }: {
+  obec: string
+  /** okres = hodnota do ?okres=, label = „okres Vsetín“ / „část obce Praha“ */
+  options: { okres: string; label: string }[]
+  current: string | null
+}) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -21,12 +26,12 @@ export default function ObecChooser({ obec, okresy, current }: { obec: string; o
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
       <MapPin className="h-4 w-4 shrink-0 text-amber-600" />
       <span>{obec} je v ČR víckrát{current ? '' : ' – myslíte'}:</span>
-      {okresy.map((o) => (
-        <button key={o} type="button" onClick={() => pick(o)}
+      {options.map((o) => (
+        <button key={o.okres} type="button" onClick={() => pick(o.okres)}
           className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition ${
-            current === o ? 'border-amber-500 bg-amber-500 text-white' : 'border-amber-300 bg-white text-amber-800 hover:border-amber-500'
+            current === o.okres ? 'border-amber-500 bg-amber-500 text-white' : 'border-amber-300 bg-white text-amber-800 hover:border-amber-500'
           }`}>
-          okres {o}
+          {o.label}
         </button>
       ))}
     </div>

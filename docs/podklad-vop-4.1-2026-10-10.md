@@ -98,7 +98,9 @@ Popsat hlavní parametry v pořadí významu a proč jsou důležité:
 - **Marketplace při hledání:**
   1. shoda se zadáním (shoda v názvu, oboru a ceníku Nabídky váží víc než zmínka v popisu; Nabídky z kategorie, ke které hledaný výraz patří, jdou dopředu);
   2. reálná dostupnost („Nejdřív volno“, výchozí řazení);
-  3. vzdálenost (vzdušnou čarou od obce, kterou zákazník zadal; od 20. 10. 2026 i samostatné řazení „Nejblíž“ a filtr do 5 / 10 / 25 / 50 km).
+  3. vzdálenost (vzdušnou čarou od obce nebo části obce, kterou zákazník zadal; od 20. 10. 2026 i samostatné řazení „Nejblíž“ a filtr do 5 / 10 / 25 / 50 km).
+
+  Které Nabídky se při zadané obci vůbec zobrazí (od 20. 10. 2026, výchozí „V okolí“): služba u Poskytovatele, jejíž provozovna je do 15 km od zadaného místa, a výjezd, pokud zadané místo leží v dojezdu, který Poskytovatel u Nabídky nastavil (bez nastaveného dojezdu 25 km). Zákazník může zvolit do 5 / 10 / 25 / 50 km nebo celou ČR. Pravidlo je stejné pro všechny Poskytovatele (P2B – parametr zobrazení).
 
   Zákazník může přepnout na řazení podle ceny nebo hodnocení.
 - **Nástěnka poptávek pro Poskytovatele:** shoda oboru a dosah Nabídky, pak vzdálenost, pak čas zadání. Filtr vzdálenosti.

@@ -1,6 +1,7 @@
 // app/api/obce/route.ts
 // Našeptávač obcí: /api/obce?q=val → obce začínající na "val" (+ okres kvůli duplicitám).
 // Od 20. 10. 2026 bez diakritiky a s malou chybou („roznov“, „Rožnof“) – lib/obce.ts.
+// `&casti=1` (jen marketplace): i části obcí a městské části (Praha 3, Žižkov, Brno-Židenice).
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
   if (q.length < 2) return NextResponse.json({ obce: [] })
 
   try {
-    return NextResponse.json({ obce: await searchObce(q, 7) })
+    return NextResponse.json({ obce: await searchObce(q, 7, { parts: searchParams.get('casti') === '1' }) })
   } catch (error: any) {
     console.error('[api/obce]', error)
     return NextResponse.json({ obce: [], error: error?.message ?? 'chyba' })
