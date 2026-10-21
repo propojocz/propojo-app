@@ -83,24 +83,33 @@ export default function BookingNoShow({
     try {
       const pos = await position()
       let photoPath: string | null = null
+      // Fotka je nepovinná: když nejde zpracovat (např. formát HEIC) nebo nahrát, příjezd se zapíše bez ní
+      let photoFailed = false
       if (photo) {
-        const target = await checkInPhotoTarget(orderId)
-        if (target.success) {
-          const prepared = await resizeImage(photo, 1600, 0.8)
-          const { error: upErr } = await createClient().storage.from('check-in-photos')
-            .uploadToSignedUrl(target.path, target.token, prepared.blob, { contentType: prepared.contentType })
-          if (!upErr) photoPath = target.path
-          else setInfo('Fotku se nepodařilo nahrát – příjezd zaznamenáme bez ní.')
+        try {
+          const target = await checkInPhotoTarget(orderId)
+          if (target.success) {
+            const prepared = await resizeImage(photo, 1600, 0.8)
+            const { error: upErr } = await createClient().storage.from('check-in-photos')
+              .uploadToSignedUrl(target.path, target.token, prepared.blob, { contentType: prepared.contentType })
+            if (!upErr) photoPath = target.path
+            else photoFailed = true
+          } else photoFailed = true
+        } catch {
+          photoFailed = true
         }
       }
       const res = await checkIn(orderId, { ...pos, photoPath })
       if (!res.success) { setError(res.error); return }
       setPhoto(null)
       if (fileRef.current) fileRef.current.value = ''
-      setInfo(res.valid
+      setInfo((res.valid
         ? `Příjezd zaznamenán${res.distanceM != null ? ` – ${res.distanceM.toLocaleString('cs-CZ')} m od adresy` : ''}.`
         : `Záznam je uložený, ale nesplňuje podmínky platného příjezdu: ${issuesText(res.issues, res.distanceM)}.`)
+        + (photoFailed ? ' Fotku se nepodařilo nahrát – příjezd je zapsaný bez ní.' : ''))
       router.refresh()
+    } catch {
+      setError('Příjezd se nepodařilo zaznamenat. Zkuste to prosím znovu.')
     } finally {
       setBusy(false)
     }

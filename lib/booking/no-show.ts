@@ -146,7 +146,7 @@ export async function recordCheckIn(
   input: { permission: 'granted' | 'denied' | 'unavailable'; lat: number | null; lng: number | null; accuracyM: number | null; photoPath: string | null },
   now = new Date(),
 ): Promise<{ ok: true; evaluation: CheckInEvaluation } | { ok: false; error: string }> {
-  if (!canCheckInNow(order, now)) return { ok: false, error: 'Příjezd teď zaznamenat nejde – jen od 30 minut před začátkem do konce okna příjezdu.' }
+  if (!canCheckInNow(order, now)) return { ok: false, error: 'Příjezd teď zaznamenat nejde – jen od 30 minut před začátkem okna příjezdu do 15 minut po jeho konci.' }
   const { count } = await db.from('check_ins').select('id', { count: 'exact', head: true }).eq('order_id', order.id)
   if ((count ?? 0) >= MAX_CHECK_INS_PER_ORDER) return { ok: false, error: 'Příjezd už je zaznamenaný.' }
 
@@ -190,19 +190,27 @@ export async function recordCheckIn(
     .single()
   if (error || !row) {
     console.error('[no-show] check-in:', error?.message)
+    // Fotka bez záznamu by v úložišti zůstala navždy (mazání jde podle záznamů)
+    if (photoPath) await db.storage.from(CHECK_IN_BUCKET).remove([photoPath])
     return { ok: false, error: 'Příjezd se nepodařilo uložit. Zkuste to prosím znovu.' }
   }
   await logOrderEvent(db, order.id, 'check_in_recorded', { type: 'provider', id: order.provider_id }, {
     check_in_id: (row as { id: string }).id, valid: evaluation.valid, issues: evaluation.issues, distance_m: evaluation.distanceM, photo: !!photoPath,
   })
-  await notify({
-    userId: order.customer_id,
-    type: 'status_change',
-    orderId: order.id,
-    actorId: order.provider_id,
-    title: 'Poskytovatel je na místě',
-    preview: `${nazev(order)} · poskytovatel zaznamenal příjezd na vaši adresu.`,
-  })
+  // Zákazníkovi jen první platný příjezd (neplatné pokusy, např. daleko od adresy, by ho mátly)
+  if (evaluation.valid) {
+    const { count: validCount } = await db.from('check_ins').select('id', { count: 'exact', head: true }).eq('order_id', order.id).eq('is_valid', true)
+    if ((validCount ?? 0) <= 1) {
+      await notify({
+        userId: order.customer_id,
+        type: 'status_change',
+        orderId: order.id,
+        actorId: order.provider_id,
+        title: 'Poskytovatel je na místě',
+        preview: `${nazev(order)} · poskytovatel zaznamenal příjezd na vaši adresu.`,
+      })
+    }
+  }
   return { ok: true, evaluation }
 }
 
