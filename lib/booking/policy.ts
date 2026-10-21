@@ -86,6 +86,11 @@ export interface BookingPolicy {
   checkIn: {
     appliesTo: readonly OfferKind[]
     earliestMinutesBeforeStart: number
+    /**
+     * Rezerva po konci okna příjezdu (zácpa, zdržení – Matej 21. 10. 2026). Check-in v rezervě se zapíše
+     * jako „pozdě“: je to doklad pro rozpor, ale automatické vrácení peněz zákazníkovi neblokuje.
+     */
+    graceMinutesAfterEnd?: number
     maxDistanceM: number
     maxAccuracyM: number
   }
@@ -98,7 +103,7 @@ export interface BookingPolicy {
 }
 
 export const BOOKING_POLICY: BookingPolicy = {
-  version: '2026-10-13-v4',
+  version: '2026-10-21-v5',
   currency: 'czk',
   minChargeHalere: 20000, // 200 Kč
   maxAgreedChargeHalere: 500000, // 5 000 Kč pro všechny (Matej 13. 10. 2026)
@@ -133,6 +138,7 @@ export const BOOKING_POLICY: BookingPolicy = {
   checkIn: {
     appliesTo: ['B'],
     earliestMinutesBeforeStart: 30,
+    graceMinutesAfterEnd: 15,
     maxDistanceM: 500,
     maxAccuracyM: 200, // parametr k potvrzení
   },

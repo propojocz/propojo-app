@@ -19,7 +19,9 @@ import BookingAfterPayment, { type RefundView } from '@/components/ui/BookingAft
 import { customerCancelOutcome, noAutoRefundText, providerCancelCheck, withdrawalInfo } from '@/lib/booking/cancellation'
 import { cancellationCostHalere, orderRefunds, refundableHalere } from '@/lib/booking/refunds'
 import { canDeclareCannotKeep, openRescheduleOf } from '@/lib/booking/reschedule'
-import { datum, datumCas, terminDlouze } from '@/lib/format'
+import BookingNoShow, { type NoShowView } from '@/components/ui/BookingNoShow'
+import { canCheckInNow, canReportNoShowNow, checkInPhotoUrls, checkInsOf, checkInWindow, noShowReportOf, noShowReportWindowOf, noShowResponseOf } from '@/lib/booking/no-show'
+import { cas, datum, datumCas, terminDlouze } from '@/lib/format'
 
 interface Props { params: { id: string }; searchParams: { platba?: string; rezervovat?: string } }
 
@@ -252,10 +254,41 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
     providerRefundMaxKc: number
     cancelCost: { commissionKc: number; stripeFeeKc: number | null } | null
   } | null = null
+  // Vrstva 5: check-in u výjezdu, nahlášení nedostavení a reakce
+  let noShowView: NoShowView | null = null
   if ((order as any).confirmed_at && v2BookingState) {
     const db = adminDb()
     const bo = await loadBookingOrder(db, order.id)
     if (bo) {
+      const nowMs = Date.now()
+      const report = await noShowReportOf(db, bo.id)
+      const response = report ? await noShowResponseOf(db, report.id) : null
+      const cis = await checkInsOf(db, bo.id)
+      const photoUrls = await checkInPhotoUrls(db, cis.map((c) => c.photo_path).filter((p): p is string => !!p))
+      const ciWindow = checkInWindow(bo)
+      const repWindow = noShowReportWindowOf(bo)
+      noShowView = {
+        checkIn: isProvider && ciWindow && bo.booking_state === 'confirmed' && nowMs <= ciWindow.closesAt.getTime()
+          ? { canNow: canCheckInNow(bo), opensText: datumCas(ciWindow.opensAt), closesText: cas(ciWindow.closesAt), windowEndText: cas(ciWindow.windowEnd) }
+          : null,
+        checkIns: cis.map((c) => ({
+          id: c.id, atText: datumCas(c.recorded_at), valid: c.is_valid, issues: c.issues ?? [], distanceM: c.distance_m,
+          photoUrl: c.photo_path ? photoUrls[c.photo_path] ?? null : null,
+        })),
+        report: !isProvider && repWindow && canReportNoShowNow(bo, !!report)
+          ? { canNow: true, untilText: datumCas(repWindow.closesAt) }
+          : null,
+        reported: report
+          ? {
+              atText: datumCas(report.reported_at),
+              note: report.customer_note,
+              deadlineText: report.response_deadline_at ? datumCas(report.response_deadline_at) : null,
+              open: !report.resolved_at,
+              outcome: report.outcome,
+              response: response ? { agree: response.response === 'agree', note: response.provider_note, atText: datumCas(response.responded_at) } : null,
+            }
+          : null,
+      }
       const refunds = (await orderRefunds(db, order.id)).map((r) => ({
         id: r.id, amountKc: r.amount_halere / 100, status: r.status, createdText: datumCas(r.created_at),
       }))
@@ -473,6 +506,16 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
           initialFrom={(order as any).pref_date_from ?? null}
           initialTo={(order as any).pref_date_to ?? null}
           initialTimePref={(order as any).pref_time ?? null}
+        />
+      )}
+
+      {/* Vrstva 5: příjezd a nedostavení – časově citlivé, proto nad detailem */}
+      {noShowView && (
+        <BookingNoShow
+          orderId={order.id}
+          isProvider={isProvider}
+          amountKc={Number((order as any).charge_halere ?? 0) / 100}
+          view={noShowView}
         />
       )}
 

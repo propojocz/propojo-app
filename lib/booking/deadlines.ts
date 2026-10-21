@@ -25,6 +25,7 @@ import {
 } from './payments'
 import { retryQueuedRefunds } from './refunds'
 import { retryWithdrawalConfirmations } from './cancellation'
+import { tickNoShows } from './no-show'
 import { tickReschedules } from './reschedule'
 
 const HOUR = 3_600_000
@@ -143,7 +144,7 @@ export async function remindUnconfirmedBookings(db: Db, now = new Date()): Promi
 
 /** Celý pětiminutový běh. */
 export async function runBookingTick(db: Db) {
-  const [propadle, pripominky, zamky, platby, refundy, odstoupeni, terminy] = await Promise.allSettled([
+  const [propadle, pripominky, zamky, platby, refundy, odstoupeni, terminy, nedostaveni] = await Promise.allSettled([
     expireUnconfirmedBookings(db),
     remindUnconfirmedBookings(db),
     // Opuštěné zámky přímé rezervace (zákazník neprošel shrnutím) – nic není předautorizováno.
@@ -153,6 +154,8 @@ export async function runBookingTick(db: Db) {
     retryQueuedRefunds(db),
     retryWithdrawalConfirmations(db),
     tickReschedules(db),
+    // Vrstva 5: nedostavení poskytovatele (výzvy, připomínky, konec lhůty) a mazání polohy z check-inu
+    tickNoShows(db),
   ])
   const val = <T,>(r: PromiseSettledResult<T>) => (r.status === 'fulfilled' ? r.value : { chyba: String(r.reason) })
   return {
@@ -163,5 +166,6 @@ export async function runBookingTick(db: Db) {
     refundy: val(refundy),
     odstoupeni: val(odstoupeni),
     terminy: val(terminy),
+    nedostaveni: val(nedostaveni),
   }
 }

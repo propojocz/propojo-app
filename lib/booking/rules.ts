@@ -281,6 +281,7 @@ export function rescheduleEvent(kind: RescheduleKind, resolution: RescheduleReso
 export type CheckInIssue =
   | 'not_applicable'
   | 'outside_time_window'
+  | 'late' // v rezervě po konci okna příjezdu – evidence, ale ne platný check-in
   | 'no_location'
   | 'low_accuracy'
   | 'no_target_address'
@@ -330,7 +331,9 @@ export function evaluateCheckIn(input: CheckInInput, policy: BookingPolicy = BOO
   const issues: CheckInIssue[] = []
   const earliest = input.windowStart.getTime() - policy.checkIn.earliestMinutesBeforeStart * 60 * 1000
   const at = input.recordedAt.getTime()
-  if (at < earliest || at > input.windowEnd.getTime()) issues.push('outside_time_window')
+  const latest = input.windowEnd.getTime() + (policy.checkIn.graceMinutesAfterEnd ?? 0) * 60 * 1000
+  if (at < earliest || at > latest) issues.push('outside_time_window')
+  else if (at > input.windowEnd.getTime()) issues.push('late')
 
   const hasPosition = input.permission === 'granted' && input.lat !== null && input.lng !== null
   if (!hasPosition) issues.push('no_location')

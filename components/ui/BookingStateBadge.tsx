@@ -107,6 +107,12 @@ function texty(
           ? { tone: 'off', title: 'Rezervace zrušena – nový termín nepřijat', text: `Původní termín jste nemohli dodržet a zákazník nový ${why}. Vrací se mu celá částka, stav vidíte níže.` }
           : { tone: 'off', title: 'Rezervace zrušena', text: `Poskytovatel nemohl dodržet původní termín a nový jste ${f.cancelReason === 'reschedule_rejected' ? 'odmítli' : 'včas nepřijali'}. Vrací se vám celá částka – stav vidíte níže.` }
       }
+      if (f.cancelReason === 'no_show_agreed' || f.cancelReason === 'no_show_no_response') {
+        const proc = f.cancelReason === 'no_show_agreed' ? 'uznal' : 'se ve lhůtě nevyjádřil'
+        return isProvider
+          ? { tone: 'off', title: 'Rezervace skončila – nedostavení', text: `Nahlášení jste ${f.cancelReason === 'no_show_agreed' ? 'uznali' : 'nechali bez vyjádření'}. Zákazníkovi se z vašeho Stripe účtu vrací celá částka, stav vidíte níže.` }
+          : { tone: 'off', title: 'Rezervace skončila – nedostavení', text: `Poskytovatel nahlášení ${proc}. Vrací se vám celá zaplacená částka – stav vidíte níže.` }
+      }
       if (f.cancelReason === 'customer_cancelled') {
         return isProvider
           ? { tone: 'off', title: 'Zákazník rezervaci zrušil', text: 'Zrušil ji včas, proto se mu z vašeho Stripe účtu vrací celá zaplacená částka. Termín je znovu volný.' }
@@ -116,9 +122,13 @@ function texty(
         ? { tone: 'off', title: 'Rezervace zrušena', text: 'Platba byla stržena. Stav vrácení peněz zákazníkovi vidíte níže.' }
         : { tone: 'off', title: 'Rezervace zrušena', text: 'Stav vrácení peněz uvidíte níže, jakmile ho Stripe zpracuje.' }
     case 'no_show_reported':
-      return { tone: 'warn', title: 'Nahlášeno nedostavení', text: 'Čeká se na vyjádření poskytovatele.' }
+      return isProvider
+        ? { tone: 'warn', title: 'Zákazník hlásí, že jste se nedostavili', text: 'Vyjádřete se do 72 hodin od oznámení – jinak se zákazníkovi automaticky vrátí celá částka.' }
+        : { tone: 'warn', title: 'Nahlásili jste nedostavení', text: 'Čeká se na vyjádření poskytovatele (72 hodin).' }
     case 'no_show_disputed':
-      return { tone: 'warn', title: 'Nedostavení je rozporováno', text: 'Peníze se automaticky nepohybují.' }
+      return isProvider
+        ? { tone: 'warn', title: 'Nedostavení – bez dohody', text: 'Peníze se automaticky nehýbou. Zákazník může nárok uplatnit přímo u vás.' }
+        : { tone: 'warn', title: 'Nedostavení – bez dohody', text: 'Peníze se automaticky nehýbou. Nárok uplatněte přímo u poskytovatele – Propojo nerozhoduje, kdo má pravdu.' }
     default:
       return null
   }

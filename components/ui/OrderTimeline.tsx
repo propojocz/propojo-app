@@ -350,6 +350,11 @@ function zruseniNadpis(v2: V2Info | null, isCustomer: boolean): { nadpis: string
       const proc = v2.cancelReason === 'reschedule_rejected' ? 'odmítnut' : 'nepřijat včas'
       return { nadpis: `Zrušeno – nový termín ${proc}`, popis: isCustomer ? 'Vrací se vám celá částka.' : 'Zákazníkovi se vrací celá částka.' }
     }
+    case 'no_show_agreed':
+    case 'no_show_no_response': {
+      const proc = v2.cancelReason === 'no_show_agreed' ? 'poskytovatel uznal' : 'poskytovatel se nevyjádřil'
+      return { nadpis: `Nedostavení – ${proc}`, popis: isCustomer ? 'Vrací se vám celá částka.' : 'Zákazníkovi se vrací celá částka.' }
+    }
     default:
       return { nadpis: 'Rezervace zrušena', popis: null }
   }
@@ -414,12 +419,28 @@ function v2Kroky(state: string, createdAt: string, scheduledAt: string | null, i
     return kroky
   }
 
+  const nedostaveni = state === 'no_show_reported' || state === 'no_show_disputed'
   kroky.push({
     nadpis: v2?.arrivalWindow ? 'Výjezd' : 'Termín služby',
     cas: potvrzeno ? fmt(scheduledAt) : null,
-    popis: potvrzeno ? terminPopis(v2, isCustomer) : null,
-    stav: potvrzeno ? 'ted' : 'ceka',
+    popis: potvrzeno && !nedostaveni ? terminPopis(v2, isCustomer) : null,
+    stav: nedostaveni ? 'hotovo' : potvrzeno ? 'ted' : 'ceka',
   })
+  // Vrstva 5: nahlášené nedostavení poskytovatele
+  if (state === 'no_show_reported') {
+    kroky.push({
+      nadpis: 'Nahlášeno nedostavení',
+      popis: isCustomer ? 'Čeká se na vyjádření poskytovatele (72 hodin).' : 'Vyjádřete se k nahlášení – podrobnosti výše.',
+      stav: 'ted',
+    })
+  }
+  if (state === 'no_show_disputed') {
+    kroky.push({
+      nadpis: 'Nedostavení – bez dohody',
+      popis: 'Peníze se automaticky nehýbou. Nárok se řeší přímo mezi zákazníkem a poskytovatelem.',
+      stav: 'hotovo',
+    })
+  }
   return kroky
 }
 

@@ -41,6 +41,7 @@ import { terminDlouze, jeNaCtvrthodinu } from '@/lib/format'
 import { runAutoRefund, runProviderRefund } from '@/lib/booking/refunds'
 import { alertIfCustomerCancelsOften } from '@/lib/booking/alerts'
 import { openRescheduleOf, proposeCannotKeep, resolveReschedule } from '@/lib/booking/reschedule'
+import { checkInPhotoUploadUrl, recordCheckIn, reportProviderNoShow, respondToNoShow } from '@/lib/booking/no-show'
 import {
   WITHDRAWAL_DAYS,
   customerCancelOutcome,
@@ -767,4 +768,51 @@ export async function refundByProvider(orderId: string, amountKc: number): Promi
   })
   revalidateOrder(orderId)
   return { success: true }
+}
+
+// ─── Nedostavení poskytovatele a check-in (vrstva 5 – AUTOREF-003, model §9) ─────
+
+export async function reportNoShow(orderId: string, note?: string | null): Promise<Result> {
+  const ctx = await loadForUser(orderId)
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  const { db, order, by } = ctx
+  if (by !== 'customer') return { success: false, error: 'Nedostavení hlásí zákazník.' }
+  const res = await reportProviderNoShow(db, order, note ?? null)
+  revalidateOrder(orderId)
+  return res.ok ? { success: true } : { success: false, error: res.error }
+}
+
+export async function answerNoShow(orderId: string, agree: boolean, note?: string | null): Promise<Result> {
+  const ctx = await loadForUser(orderId)
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  const { db, order, by } = ctx
+  if (by !== 'provider') return { success: false, error: 'K nahlášení se vyjadřuje poskytovatel.' }
+  const res = await respondToNoShow(db, order, agree ? 'agree' : 'dispute', note ?? null)
+  revalidateOrder(orderId)
+  return res.ok ? { success: true } : { success: false, error: res.error }
+}
+
+/** Odkaz k nahrání fotky z check-inu (fotka jde z prohlížeče rovnou do soukromého úložiště) */
+export async function checkInPhotoTarget(orderId: string): Promise<{ success: true; path: string; token: string } | { success: false; error: string }> {
+  const ctx = await loadForUser(orderId)
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  if (ctx.by !== 'provider') return { success: false, error: 'Příjezd zaznamenává poskytovatel.' }
+  const res = await checkInPhotoUploadUrl(ctx.db, ctx.order)
+  return res.ok ? { success: true, path: res.path, token: res.token } : { success: false, error: res.error }
+}
+
+export async function checkIn(
+  orderId: string,
+  input: { permission: 'granted' | 'denied' | 'unavailable'; lat: number | null; lng: number | null; accuracyM: number | null; photoPath: string | null },
+): Promise<{ success: true; valid: boolean; issues: string[]; distanceM: number | null } | { success: false; error: string }> {
+  const ctx = await loadForUser(orderId)
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  const { db, order, by } = ctx
+  if (by !== 'provider') return { success: false, error: 'Příjezd zaznamenává poskytovatel.' }
+  const permission = input.permission === 'granted' || input.permission === 'denied' ? input.permission : 'unavailable'
+  const res = await recordCheckIn(db, order, { ...input, permission })
+  revalidateOrder(orderId)
+  return res.ok
+    ? { success: true, valid: res.evaluation.valid, issues: res.evaluation.issues, distanceM: res.evaluation.distanceM }
+    : { success: false, error: res.error }
 }

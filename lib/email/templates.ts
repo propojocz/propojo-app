@@ -901,3 +901,106 @@ export function rescheduleProposedEmail(data: {
     `),
   }
 }
+
+// ════════════════════════════════════════════════════════════
+//  NEDOSTAVENÍ POSKYTOVATELE (model v2, vrstva 5, AUTOREF-003)
+// ════════════════════════════════════════════════════════════
+
+/** Text od uživatele do HTML e-mailu */
+function escText(s: string | null | undefined): string | null {
+  if (!s) return null
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+/** Zákazník nahlásil nedostavení → POSKYTOVATELI (systémová výzva, od ní běží lhůta; i připomínka) */
+export function noShowReportedEmail(data: {
+  serviceTitle: string
+  termText: string | null
+  customerNote: string | null
+  deadlineText: string
+  amountText: string | null
+  reminder?: boolean
+  orderUrl: string
+}): { subject: string; html: string } {
+  const castka = data.amountText ? `celá zaplacená částka ${data.amountText}` : 'celá zaplacená částka'
+  return {
+    subject: `${data.reminder ? 'Připomínka: ' : ''}Zákazník hlásí, že jste se nedostavili: ${data.serviceTitle}`,
+    html: emailWrapper(`
+      ${heading(
+        data.reminder ? 'Připomínka: vyjádřete se k nahlášení' : 'Zákazník hlásí, že jste se nedostavili',
+        `Vyjádřete se prosím do ${data.deadlineText}.`,
+      )}
+
+      ${detailBox([
+        ['Služba', data.serviceTitle],
+        ['Termín', data.termText],
+        ['Zpráva od zákazníka', escText(data.customerNote)],
+        ['Vyjádřete se do', data.deadlineText],
+      ])}
+
+      ${noteBox(`Když s nahlášením souhlasíte nebo se do ${data.deadlineText} nevyjádříte, zákazníkovi se z vašeho Stripe účtu automaticky vrátí ${castka} (podle pokynu, který jste odsouhlasili). Když nesouhlasíte, klikněte na „Nesouhlasím“ a napište proč – peníze se pak automaticky nehýbou. Propojo nerozhoduje, kdo má pravdu.`, 'warn')}
+
+      ${button('Vyjádřit se', data.orderUrl)}
+    `),
+  }
+}
+
+/** Poskytovatel nahlášení rozporoval (nebo nereagoval, ale má platný check-in) → ZÁKAZNÍKOVI */
+export function noShowDisputedEmail(data: {
+  serviceTitle: string
+  termText: string | null
+  providerNote: string | null
+  byCheckIn?: boolean
+  orderUrl: string
+}): { subject: string; html: string } {
+  return {
+    subject: `Poskytovatel s nahlášením nesouhlasí: ${data.serviceTitle}`,
+    html: emailWrapper(`
+      ${heading(
+        data.byCheckIn ? 'Peníze se automaticky nevrací' : 'Poskytovatel s nahlášením nesouhlasí',
+        data.byCheckIn
+          ? 'Poskytovatel se k nahlášení nevyjádřil, ale před ním zaznamenal příjezd na místo (check-in).'
+          : 'Poskytovatel uvádí, že se dostavil nebo že služba neproběhla z jiného důvodu.',
+      )}
+
+      ${detailBox([
+        ['Služba', data.serviceTitle],
+        ['Termín', data.termText],
+        ['Vyjádření poskytovatele', escText(data.providerNote)],
+      ])}
+
+      ${noteBox('Propojo nerozhoduje, kdo má pravdu, a peníze se proto automaticky nevrací. Svůj nárok uplatněte přímo u poskytovatele – jeho kontakt najdete v objednávce.', 'info')}
+
+      ${button('Zobrazit objednávku', data.orderUrl)}
+    `),
+  }
+}
+
+/** Nedostavení uznáno / bez reakce → vrácení peněz → ZÁKAZNÍKOVI */
+export function noShowRefundEmail(data: {
+  serviceTitle: string
+  termText: string | null
+  agreed: boolean
+  amountText: string | null
+  orderUrl: string
+}): { subject: string; html: string } {
+  return {
+    subject: `Vracíme vám peníze: ${data.serviceTitle}`,
+    html: emailWrapper(`
+      ${heading(
+        data.agreed ? 'Poskytovatel nahlášení uznal' : 'Poskytovatel se včas nevyjádřil',
+        'Vrácení celé zaplacené částky jsme zadali do platební brány Stripe. Na účtu se obvykle objeví do několika pracovních dnů – podle vaší banky.',
+      )}
+
+      ${detailBox([
+        ['Služba', data.serviceTitle],
+        ['Termín', data.termText],
+        ['Vrací se', data.amountText],
+      ])}
+
+      ${noteBox('Peníze se vrací z účtu poskytovatele, kam jste platili. Propojo platby nedrží. Kdyby vrácení neproběhlo, dáme vám vědět.', 'info')}
+
+      ${button('Zobrazit objednávku', data.orderUrl)}
+    `),
+  }
+}
