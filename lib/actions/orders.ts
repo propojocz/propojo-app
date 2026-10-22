@@ -634,6 +634,8 @@ export async function setOrderAddress(
     console.error('[setOrderAddress]', error)
     return { success: false, error: 'Adresu se nepodařilo uložit.' }
   }
+  // Vrstva 6: doprava spočítaná k předchozí adrese neplatí (samostatně – sloupce nemusí existovat)
+  await (admin.from('orders') as any).update({ travel_km: null, travel_fee_halere: null, travel_estimated: null }).eq('id', orderId)
 
   revalidatePath(`/dashboard/objednavky/${orderId}`)
   return { success: true, id: orderId }

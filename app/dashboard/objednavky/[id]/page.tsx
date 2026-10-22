@@ -20,6 +20,8 @@ import { customerCancelOutcome, noAutoRefundText, providerCancelCheck, withdrawa
 import { cancellationCostHalere, orderRefunds, refundableHalere } from '@/lib/booking/refunds'
 import { canDeclareCannotKeep, openRescheduleOf } from '@/lib/booking/reschedule'
 import BookingNoShow, { type NoShowView } from '@/components/ui/BookingNoShow'
+import BookingOnSite, { type OnSiteView } from '@/components/ui/BookingOnSite'
+import { canUploadQuoteProof, notReachedStateOf, quoteProofsOf, quoteProofUrls } from '@/lib/booking/on-site'
 import { canCheckInNow, canReportNoShowNow, checkInPhotoUrls, checkInsOf, checkInWindow, noShowReportOf, noShowReportWindowOf, noShowResponseOf } from '@/lib/booking/no-show'
 import { cas, datum, datumCas, terminDlouze } from '@/lib/format'
 
@@ -256,6 +258,8 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
   } | null = null
   // Vrstva 5: check-in u výjezdu, nahlášení nedostavení a reakce
   let noShowView: NoShowView | null = null
+  // Vrstva 6: výjezd na místě – zákazník nezastižen, doklad Závazné nabídky
+  let onSiteView: OnSiteView | null = null
   if ((order as any).confirmed_at && v2BookingState) {
     const db = adminDb()
     const bo = await loadBookingOrder(db, order.id)
@@ -265,6 +269,27 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
       const response = report ? await noShowResponseOf(db, report.id) : null
       const cis = await checkInsOf(db, bo.id)
       const photoUrls = await checkInPhotoUrls(db, cis.map((c) => c.photo_path).filter((p): p is string => !!p))
+      if (bo.offer_kind === 'B') {
+        const nr = await notReachedStateOf(db, bo)
+        const proofs = await quoteProofsOf(db, bo.id)
+        const urls = await quoteProofUrls(db, proofs.map((p) => p.storage_path))
+        onSiteView = {
+          notReached: nr
+            ? {
+                canContact: isProvider && nr.canContact,
+                canMark: isProvider && nr.canMark,
+                markFromText: nr.markFrom ? cas(nr.markFrom) : null,
+                contactTexts: nr.contactAttempts.map((t) => datumCas(t)),
+                notReachedText: nr.notReachedAt ? datumCas(nr.notReachedAt) : null,
+              }
+            : null,
+          proofs: proofs.map((p) => ({
+            id: p.id, url: urls[p.storage_path] ?? null, isPdf: p.mime_type === 'application/pdf',
+            name: p.file_name || (p.mime_type === 'application/pdf' ? 'Nabídka.pdf' : 'Foto nabídky'), atText: datumCas(p.uploaded_at),
+          })),
+          canUploadProof: isProvider && canUploadQuoteProof(bo),
+        }
+      }
       const ciWindow = checkInWindow(bo)
       const repWindow = noShowReportWindowOf(bo)
       noShowView = {
@@ -518,6 +543,7 @@ export default async function OrderDetailPage({ params, searchParams }: Props) {
           view={noShowView}
         />
       )}
+      {onSiteView && <BookingOnSite orderId={order.id} isProvider={isProvider} view={onSiteView} />}
 
       <OrderDetailClient
         order={order}

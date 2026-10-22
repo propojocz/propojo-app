@@ -52,6 +52,12 @@ export async function sendBookingConfirmedEmail(db: Db, order: BookingOrder): Pr
           : terminDlouze(order.scheduled_at))
       : null
     const deductible = (o?.service_items?.quote_fee_deductible ?? o?.quote_fee_deductible) === true
+    // Vrstva 6: z toho doprava podle km (samostatný dotaz – sloupce nemusí existovat)
+    const { data: tr } = await db.from('orders').select('travel_km, travel_fee_halere, travel_estimated').eq('id', order.id).maybeSingle()
+    const t = tr as { travel_km: number | null; travel_fee_halere: number | null; travel_estimated: boolean | null } | null
+    const travelNote = t?.travel_fee_halere
+      ? ` (z toho doprava ${(t.travel_fee_halere / 100).toLocaleString('cs-CZ')} Kč, ${Number(t.travel_km ?? 0).toLocaleString('cs-CZ')} km${t.travel_estimated ? ' – odhad' : ''})`
+      : ''
 
     const rules = [
       'Když poskytovatel rezervaci zruší, nedorazí, nebo nemůže dodržet termín a nový termín odmítnete, vrátí se vám celá zaplacená částka automaticky.',
@@ -76,7 +82,7 @@ export async function sendBookingConfirmedEmail(db: Db, order: BookingOrder): Pr
       termText,
       placeText,
       paymentLabel: paymentLabel(kind),
-      amountText: `${(Number(order.charge_halere ?? 0) / 100).toLocaleString('cs-CZ')} Kč`,
+      amountText: `${(Number(order.charge_halere ?? 0) / 100).toLocaleString('cs-CZ')} Kč${travelNote}`,
       paymentMeaning: paymentMeaning(kind, deductible),
       cancellationRules: rules,
       withdrawalText,

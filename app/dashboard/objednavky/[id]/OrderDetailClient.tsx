@@ -789,6 +789,13 @@ export default function OrderDetailClient({
               <div>
                 <p className="text-sm text-slate-600">{isModelB ? 'Cena výjezdu' : 'Rezervační poplatek'}</p>
                 <p className="text-2xl font-black text-slate-900">{kc(chargeKc)}</p>
+                {/* Vrstva 6: z toho doprava podle km */}
+                {isModelB && Number((order as any).travel_fee_halere ?? 0) > 0 && (
+                  <p className="text-xs text-slate-500">
+                    z toho doprava {kc(Number((order as any).travel_fee_halere) / 100)} · {Number((order as any).travel_km ?? 0).toLocaleString('cs-CZ')} km
+                    {(order as any).travel_estimated ? ' (odhad)' : ''}
+                  </p>
+                )}
               </div>
             </div>
             <div className="mt-4 flex items-start gap-3 border-t border-emerald-200/70 pt-4">

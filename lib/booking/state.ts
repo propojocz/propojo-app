@@ -269,6 +269,8 @@ export const ORDER_EVENT_TYPES = [
   'booking_confirmation_sent', // potvrzení rezervace e-mailem (VOP 8.3)
   'capture_amount_mismatch', // stržená částka ≠ blokovaná (úkon ve Stripe Dashboardu)
   'reschedule_reminder_sent',
+  'contact_attempt', // výjezd: poskytovatel je na místě a zákazníka nezastihl – zpráva do chatu (vrstva 6)
+  'customer_not_reached', // výjezd: „Zákazník nezastižen“ po platném příjezdu, pokusu o kontakt a 15 min čekání
 ] as const
 
 export type OrderEventType = (typeof ORDER_EVENT_TYPES)[number]

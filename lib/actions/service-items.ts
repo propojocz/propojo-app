@@ -395,6 +395,15 @@ function chargeCapError(norm: ItemParsed): string | null {
   const maxKc = BOOKING_POLICY.maxAgreedChargeHalere / 100
   if (Number(norm.deposit_amount ?? 0) > maxKc) return `Rezervační poplatek může být nejvýš ${maxKc.toLocaleString('cs-CZ')} Kč.`
   if (Number(norm.quote_fee ?? 0) > maxKc) return `Cena výjezdu může být nejvýš ${maxKc.toLocaleString('cs-CZ')} Kč.`
+  // Vrstva 6: výjezd se platí přes Propojo → aspoň minimální částka (200 Kč); „zdarma“ už nejde
+  const minKc = BOOKING_POLICY.minChargeHalere / 100
+  if (norm.payment_model === 'B' && Number(norm.quote_fee ?? 0) < minKc) {
+    return `Cena výjezdu musí být aspoň ${minKc.toLocaleString('cs-CZ')} Kč – zákazník ji platí předem přes Propojo.`
+  }
+  // Doprava podle km: rozumný strop ceny za km
+  if (norm.payment_model === 'B' && Number(norm.price_per_km ?? 0) > 200) {
+    return 'Cena za km může být nejvýš 200 Kč.'
+  }
   return null
 }
 

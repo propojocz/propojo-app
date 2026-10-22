@@ -224,6 +224,10 @@ export default function OrderItemModal({
   // (price_per_km / free_km zůstávají v DB jen jako legacy).
   const isV2 = !!(item as any).offer_kind
   const quoteDays = Number(q.quote_days ?? 0)
+  // Vrstva 6: 0 = nabídku dodá ihned na místě (null = neuvedeno)
+  const quoteNow = q.quote_days === 0
+  const perKm = Number(q.price_per_km ?? 0) > 0
+  const freeKm = Math.max(0, Math.floor(Number(q.free_km ?? 0) || 0))
 
   // Vhodná okna: budoucí a dost dlouhá na délku úkonu.
   const fitSlots: SlotOption[] = isModelB
@@ -712,7 +716,7 @@ export default function OrderItemModal({
                   </p>
                 )}
 
-                {isModelB && (quoteFee > 0 || quoteDays > 0) && (
+                {isModelB && (quoteFee > 0 || quoteDays > 0 || quoteNow) && (
                   <div className="mt-2 space-y-1 border-t border-slate-200 pt-2 text-xs leading-relaxed text-slate-600">
                     {quoteFee > 0 && (
                       <p className="flex items-start gap-1.5">
@@ -721,7 +725,10 @@ export default function OrderItemModal({
                           // Model v2: Cena výjezdu je samostatná placená služba včetně dopravy, ne záloha.
                           <span>
                             Cena výjezdu <strong className="text-slate-900">{quoteFee.toLocaleString('cs-CZ')} Kč</strong> zahrnuje
-                            cestu, prohlídku na místě a nacenění.
+                            {perKm ? ' prohlídku na místě a nacenění.' : ' cestu, prohlídku na místě a nacenění.'}
+                            {perKm && (
+                              <> Doprava {freeKm > 0 ? `zdarma do ${freeKm} km, dál ` : ''}<strong className="text-slate-900">{Number(q.price_per_km).toLocaleString('cs-CZ')} Kč/km</strong> (silnicí, jednou cestou) – přesnou částku uvidíte před platbou podle vaší adresy.</>
+                            )}
                             {(item as any).quote_fee_deductible === true
                               ? ' Když přijmete nabídku poskytovatele, odečte vám ji z ceny zakázky.'
                               : ' Do ceny zakázky se nezapočítává.'}
@@ -734,10 +741,12 @@ export default function OrderItemModal({
                         )}
                       </p>
                     )}
-                    {quoteDays > 0 && (
+                    {(quoteDays > 0 || quoteNow) && (
                       <p className="flex items-start gap-1.5">
                         <CalendarDays className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
-                        <span>Nabídku dodá do <strong className="text-slate-900">{quoteDays} dnů</strong> od prohlídky.</span>
+                        {quoteNow
+                          ? <span>Nabídku dodá <strong className="text-slate-900">ihned na místě</strong>.</span>
+                          : <span>Nabídku dodá do <strong className="text-slate-900">{quoteDays} {quoteDays === 1 ? 'dne' : 'dnů'}</strong> od prohlídky.</span>}
                       </p>
                     )}
                   </div>

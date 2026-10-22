@@ -211,6 +211,8 @@ export default function ServiceItemEditor({
 
   const zpusob = zpusobZHodnot(v)
   const jeNaceneni = zpusob === 'naceneni'
+  // Vrstva 6: doprava u výjezdu – v ceně, nebo podle km (silnicí, jednou cestou)
+  const [dopravaKm, setDopravaKm] = useState(() => Number(v.price_per_km ?? 0) > 0)
   const jePevna = zpusob === 'pevna'
   const jeVyrobek = v.item_type === 'product'
   // Dvoukrokový výběr u výrobku: způsob prodeje → jednotky, které k němu patří.
@@ -832,10 +834,11 @@ export default function ServiceItemEditor({
               </p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-600">Za nacenění (Kč)</label>
-                  <input type="number" min={0} value={v.quote_fee ?? ''} onChange={e => set('quote_fee', numOrNull(e.target.value))}
-                    placeholder="0 = zdarma"
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Cena výjezdu (Kč)</label>
+                  <input type="number" min={200} value={v.quote_fee ?? ''} onChange={e => set('quote_fee', numOrNull(e.target.value))}
+                    placeholder="např. 490"
                     className="w-full rounded-xl border-[1.5px] border-slate-200 px-3 py-2.5 outline-none focus:border-emerald-500" />
+                  <p className="mt-1 text-[11px] leading-snug text-slate-400">Cesta, prohlídka a nacenění. Zákazník ji platí předem přes Propojo, nejméně 200 Kč.</p>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-600">Prohlídka (min)</label>
@@ -843,18 +846,43 @@ export default function ServiceItemEditor({
                     placeholder="60"
                     className="w-full rounded-xl border-[1.5px] border-slate-200 px-3 py-2.5 outline-none focus:border-emerald-500" />
                 </div>
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-600">Doprava zdarma do (km)</label>
-                  <input type="number" min={0} value={v.free_km ?? ''} onChange={e => set('free_km', numOrNull(e.target.value))}
-                    placeholder="10"
-                    className="w-full rounded-xl border-[1.5px] border-slate-200 px-3 py-2.5 outline-none focus:border-emerald-500" />
+              </div>
+              {/* Doprava: v ceně, nebo podle km (vrstva 6) */}
+              <div>
+                <p className="mb-1.5 text-xs font-semibold text-slate-600">Doprava</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {([[false, 'V ceně výjezdu'], [true, 'Podle km']] as const).map(([km, popis]) => (
+                    <button key={popis} type="button"
+                      onClick={() => { setDopravaKm(km); if (!km) { set('price_per_km', null); set('free_km', null) } }}
+                      className={`rounded-xl border-[1.5px] px-2 py-2 text-center text-[12.5px] font-bold transition ${
+                        dopravaKm === km ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300'
+                      }`}>
+                      {popis}
+                    </button>
+                  ))}
                 </div>
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-600">Dál pak (Kč/km)</label>
-                  <input type="number" min={0} value={v.price_per_km ?? ''} onChange={e => set('price_per_km', numOrNull(e.target.value))}
-                    placeholder="12"
-                    className="w-full rounded-xl border-[1.5px] border-slate-200 px-3 py-2.5 outline-none focus:border-emerald-500" />
-                </div>
+                {dopravaKm && (
+                  <>
+                    <div className="mt-2 grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-slate-600">Zdarma do (km)</label>
+                        <input type="number" min={0} value={v.free_km ?? ''} onChange={e => set('free_km', numOrNull(e.target.value))}
+                          placeholder="10"
+                          className="w-full rounded-xl border-[1.5px] border-slate-200 px-3 py-2.5 outline-none focus:border-emerald-500" />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-slate-600">Dál pak (Kč za km)</label>
+                        <input type="number" min={1} max={200} value={v.price_per_km ?? ''} onChange={e => set('price_per_km', numOrNull(e.target.value))}
+                          placeholder="12"
+                          className="w-full rounded-xl border-[1.5px] border-slate-200 px-3 py-2.5 outline-none focus:border-emerald-500" />
+                      </div>
+                    </div>
+                    <p className="mt-1.5 rounded-lg bg-slate-50 px-3 py-2 text-[11.5px] leading-relaxed text-slate-500">
+                      Km spočítáme sami: silniční vzdálenost <strong>jednou cestou</strong> od adresy karty (nebo z vašeho profilu) k adrese zákazníka.
+                      Zákazník před platbou uvidí rozpis „Cena výjezdu + doprava = celkem“ a zaplatí to najednou. Celkem nejvýš 5 000 Kč.
+                    </p>
+                  </>
+                )}
               </div>
               <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700">
                 <input
@@ -871,10 +899,17 @@ export default function ServiceItemEditor({
                 </span>
               </label>
               <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Nabídku dodám do (dnů)</label>
-                <input type="number" min={0} value={v.quote_days ?? ''} onChange={e => set('quote_days', numOrNull(e.target.value))}
-                  placeholder="3"
-                  className="w-full rounded-xl border-[1.5px] border-slate-200 px-3 py-2.5 outline-none focus:border-emerald-500" />
+                <p className="mb-1.5 text-xs font-semibold text-slate-600">Nabídku dodám</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {([[0, 'Ihned na místě'], [1, 'Do 1 dne'], [2, 'Do 2 dnů'], [3, 'Do 3 dnů'], [5, 'Do 5 dnů'], [7, 'Do 7 dnů']] as const).map(([d, popis]) => (
+                    <button key={d} type="button" onClick={() => set('quote_days', d)}
+                      className={`rounded-xl border-[1.5px] px-2.5 py-1.5 text-[12.5px] font-bold transition ${
+                        v.quote_days === d ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300'
+                      }`}>
+                      {popis}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           )}

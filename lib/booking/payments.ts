@@ -480,6 +480,8 @@ export async function createBookingCheckoutSession(args: {
   offerKind: OfferKind
   itemName: string
   commission: CommissionBreakdown
+  /** Stripe pošle zákazníkovi vlastní potvrzení o platbě (jménem poskytovatele) – nezávislý doklad, vrstva 6 */
+  receiptEmail?: string | null
 }): Promise<{ session: Stripe.Checkout.Session; holdUntil: Date }> {
   const policy = BOOKING_POLICY
   const expiresAt = Math.floor(Date.now() / 1000) + policy.checkoutTtlMinutes * 60
@@ -502,6 +504,7 @@ export async function createBookingCheckoutSession(args: {
         capture_method: 'manual',
         application_fee_amount: args.commission.applicationFeeHalere,
         metadata,
+        ...(args.receiptEmail ? { receipt_email: args.receiptEmail } : {}),
       },
       expires_at: expiresAt,
       success_url: `${APP_URL}/dashboard/objednavky/${args.orderId}?platba=uspech`,

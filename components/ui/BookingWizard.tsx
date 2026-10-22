@@ -12,7 +12,9 @@ import { useRouter } from 'next/navigation'
 import { AlertTriangle, CalendarDays, Coins, Info, Loader2, MapPin, ShieldCheck, User, X } from 'lucide-react'
 import AddressInput from '@/components/ui/AddressInput'
 import ServiceMap from '@/components/ui/ServiceMap'
-import { getBookingRecap, startBookingPayment, type BookingRecap } from '@/lib/actions/booking'
+import { getBookingRecap, getTravelQuote, startBookingPayment, type BookingRecap } from '@/lib/actions/booking'
+import type { TravelQuote } from '@/lib/booking/travel'
+import { submitLabel } from '@/lib/booking/texts'
 import { acceptProposal } from '@/lib/actions/time-proposals'
 import { setOrderAddress } from '@/lib/actions/orders'
 import { releaseUnpaidReservation } from '@/lib/actions/reservation-release'
@@ -46,12 +48,17 @@ export default function BookingWizard({
   // Odpočet zámku přímé rezervace
   const [now, setNow] = useState(() => Date.now())
 
+  // Vrstva 6: doprava podle km k vybrané adrese (přepočet při změně adresy)
+  const [travel, setTravel] = useState<TravelQuote | null>(null)
+  const [travelBusy, setTravelBusy] = useState(false)
+
   useEffect(() => {
     let cancelled = false
     getBookingRecap(orderId, proposal?.starts_at ?? null).then((res) => {
       if (cancelled) return
       if (!res.success) { setLoadError(res.error); return }
       setRecap(res.recap)
+      setTravel(res.recap.travel)
       const a = res.recap.address ?? res.recap.suggestedAddress
       // Bez adresy: předvyplnit obec, o které se jednalo – zákazník doplní ulici a číslo
       setAddrText(a?.text ?? (res.recap.cityHint ? `${res.recap.cityHint}, ` : ''))
@@ -66,6 +73,22 @@ export default function BookingWizard({
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [recap?.holdExpiresAt, proposal])
+
+  // Doprava podle km: přepočítat, když se změní souřadnice adresy (nebo po přepočtu na serveru – travelRun)
+  const needsTravel = !!recap?.travelTerms
+  const [travelRun, setTravelRun] = useState(0)
+  useEffect(() => {
+    if (!needsTravel || addrCoords.lat == null || addrCoords.lng == null) { setTravel(null); setTravelBusy(false); return }
+    let cancelled = false
+    setTravelBusy(true)
+    getTravelQuote(orderId, addrCoords.lat, addrCoords.lng)
+      .then((res) => { if (!cancelled) setTravel(res.success ? res.travel : null) })
+      .catch(() => { if (!cancelled) setTravel(null) })
+      .finally(() => { if (!cancelled) setTravelBusy(false) })
+    return () => { cancelled = true }
+  }, [needsTravel, orderId, addrCoords.lat, addrCoords.lng, travelRun])
+  const totalKc = recap ? recap.chargeKc + (travel ? travel.feeHalere / 100 : 0) : 0
+  const travelMissing = needsTravel && (!travel || travelBusy)
 
   // Pojistka: automatické potvrzení jen u adresy v místě, se kterým poskytovatel počítal.
   const placeOk = recap ? isPlaceKnown(recap.knownPlace, addrCoords.lat, addrCoords.lng) : true
@@ -104,13 +127,15 @@ export default function BookingWizard({
   const pay = async () => {
     if (!recap) return
     if (recap.consentText && !consent) { setError('Pro pokračování prosím zaškrtněte políčko.'); return }
+    // Doprava musí být spočítaná dřív, než se přijme termín nebo uloží adresa
+    if (needsTravel && (!travel || travelBusy)) { setError('Vyberte prosím adresu ze seznamu – podle ní se spočítá doprava.'); return }
     setBusy(true); setError('')
     if (!(await saveAddressIfNeeded())) { setBusy(false); return }
     if (proposal) {
       const acc = await acceptProposal(orderId, proposal.starts_at)
       if (!acc.success) { setError(acc.error); setBusy(false); return }
     }
-    const res = await startBookingPayment(orderId, consent)
+    const res = await startBookingPayment(orderId, consent, travel ? travel.feeHalere : null)
     if (res.success) {
       window.location.href = res.url
       return
@@ -121,6 +146,8 @@ export default function BookingWizard({
     }
     setError(res.error)
     setBusy(false)
+    // Doprava se mohla na serveru přepočítat – ukázat aktuální částku
+    if (needsTravel) setTravelRun((n) => n + 1)
     router.refresh()
   }
 
@@ -266,6 +293,31 @@ export default function BookingWizard({
                     {recap.chargeKc.toLocaleString('cs-CZ')} Kč
                   </span>
                 </div>
+                {/* Vrstva 6: doprava podle km jednou cestou – rozpis Cena výjezdu + doprava = celkem */}
+                {needsTravel && (
+                  <div className="mt-1 space-y-0.5 text-sm text-slate-700">
+                    <div className="flex items-baseline justify-between">
+                      <span>
+                        Doprava
+                        {travel && <span className="text-slate-500"> · {travel.km.toLocaleString('cs-CZ')} km{travel.estimated ? ' (odhad)' : ''}{travel.billableKm > 0 && recap.travelTerms ? `, ${travel.billableKm} km × ${recap.travelTerms.pricePerKmKc.toLocaleString('cs-CZ')} Kč` : ''}</span>}
+                      </span>
+                      <span className="font-semibold">
+                        {travelBusy ? <Loader2 className="inline h-4 w-4 animate-spin" /> : travel ? `${(travel.feeHalere / 100).toLocaleString('cs-CZ')} Kč` : '—'}
+                      </span>
+                    </div>
+                    {travel && (
+                      <div className="flex items-baseline justify-between border-t border-emerald-100 pt-0.5">
+                        <span className="font-semibold">Celkem</span>
+                        <span className="text-lg font-black text-slate-900">{totalKc.toLocaleString('cs-CZ')} Kč</span>
+                      </div>
+                    )}
+                    <p className="text-xs text-slate-500">
+                      {recap.travelTermsText ? `${recap.travelTermsText.charAt(0).toUpperCase()}${recap.travelTermsText.slice(1)}` : ''} – silniční vzdálenost jednou cestou k vaší adrese.
+                      {travel?.estimated ? ' Trasu teď nejde spočítat, proto je to odhad ze vzdušné vzdálenosti – zaplatíte přesně tuto částku.' : ''}
+                      {!travel && !travelBusy ? ' Doprava se spočítá po výběru adresy ze seznamu.' : ''}
+                    </p>
+                  </div>
+                )}
                 {recap.restOnSite && (
                   <p className="mt-0.5 text-sm text-slate-700">
                     <strong>{recap.chargeKc.toLocaleString('cs-CZ')} Kč teď</strong>, zbytek{' '}
@@ -332,10 +384,10 @@ export default function BookingWizard({
         {/* Tlačítko */}
         {recap && !loadError && !holdExpired && (
           <div className="border-t border-slate-100 px-5 py-3">
-            <button type="button" onClick={pay} disabled={busy} className="btn-primary w-full justify-center disabled:opacity-60">
+            <button type="button" onClick={pay} disabled={busy || travelMissing} className="btn-primary w-full justify-center disabled:opacity-60">
               {busy
                 ? <><Loader2 className="h-4 w-4 animate-spin" /> Otevírám platbu…</>
-                : <><ShieldCheck className="h-4 w-4" /> {recap.submitLabel}</>}
+                : <><ShieldCheck className="h-4 w-4" /> {needsTravel ? (travel ? submitLabel(totalKc) : 'Vyberte adresu – spočítáme dopravu') : recap.submitLabel}</>}
             </button>
           </div>
         )}

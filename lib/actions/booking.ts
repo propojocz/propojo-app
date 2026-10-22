@@ -42,6 +42,8 @@ import { runAutoRefund, runProviderRefund } from '@/lib/booking/refunds'
 import { alertIfCustomerCancelsOften } from '@/lib/booking/alerts'
 import { openRescheduleOf, proposeCannotKeep, resolveReschedule } from '@/lib/booking/reschedule'
 import { checkInPhotoUploadUrl, recordCheckIn, reportProviderNoShow, respondToNoShow } from '@/lib/booking/no-show'
+import { travelQuoteFor, travelSetupOf, travelTermsText, type TravelQuote, type TravelTerms } from '@/lib/booking/travel'
+import { contactCustomerOnSite, markCustomerNotReached, quoteProofUploadUrl, recordQuoteProof } from '@/lib/booking/on-site'
 import {
   WITHDRAWAL_DAYS,
   customerCancelOutcome,
@@ -428,6 +430,11 @@ export type BookingRecap = {
   placeText: string | null
   /** Kontakt poskytovatele – zákazník ho poprvé vidí tady (model §15) */
   provider: { id: string; name: string; phone: string | null; email: string | null }
+  /** Vrstva 6: výjezd s dopravou podle km (null = doprava v Ceně výjezdu nebo upravená cena) */
+  travelTerms: TravelTerms | null
+  travelTermsText: string | null
+  /** Doprava k už uložené adrese (průvodce ji přepočítá při změně adresy přes getTravelQuote) */
+  travel: TravelQuote | null
 }
 
 type RecapResult = { success: true; recap: BookingRecap } | { success: false; error: string }
@@ -538,6 +545,12 @@ export async function getBookingRecap(
   // Zámek termínu drží jen přímá rezervace před zahájením platby.
   const holdExpiresAt = order.booking_state === null && order.hold_expires_at ? order.hold_expires_at : null
 
+  // Vrstva 6: doprava podle km (jen výjezd s cenou z nabídky, ne upravená cena)
+  const travelSetup = charge.offerKind === 'B' && agreedChargeHalere == null ? await travelSetupOf(db, orderId) : null
+  const travel = travelSetup && o.location_lat != null && o.location_lng != null
+    ? await travelQuoteFor(db, orderId, { lat: Number(o.location_lat), lng: Number(o.location_lng) })
+    : null
+
   return {
     success: true,
     recap: {
@@ -590,8 +603,19 @@ export async function getBookingRecap(
         phone: o.services?.phone || pr?.phone || null,
         email,
       },
+      travelTerms: travelSetup?.terms ?? null,
+      travelTermsText: travelSetup ? travelTermsText(travelSetup.terms) : null,
+      travel,
     },
   }
+}
+
+/** Vrstva 6: doprava k adrese, kterou zákazník právě vybral ve shrnutí (ještě neuložené) */
+export async function getTravelQuote(orderId: string, lat: number, lng: number): Promise<{ success: true; travel: TravelQuote | null } | { success: false; error: string }> {
+  const ctx = await loadForUser(orderId)
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  if (ctx.by !== 'customer') return { success: false, error: 'Dopravu počítá shrnutí zákazníka.' }
+  return { success: true, travel: await travelQuoteFor(ctx.db, orderId, { lat: Number(lat), lng: Number(lng) }) }
 }
 
 /**
@@ -602,6 +626,8 @@ export async function getBookingRecap(
 export async function startBookingPayment(
   orderId: string,
   consent: boolean,
+  /** Vrstva 6: doprava, kterou zákazník viděl ve shrnutí (haléře) – musí sedět s výpočtem na serveru */
+  expectedTravelHalere: number | null = null,
 ): Promise<{ success: true; url: string } | { success: false; error: string }> {
   const ctx = await loadForUser(orderId)
   if (!ctx.ok) return { success: false, error: ctx.error }
@@ -614,6 +640,29 @@ export async function startBookingPayment(
   const checkbox = recapCheckbox(kind, order.scheduled_at)
   if (checkbox && !consent) {
     return { success: false, error: 'Pro pokračování prosím zaškrtněte políčko ve shrnutí.' }
+  }
+
+  // Vrstva 6: doprava podle km – spočítat k uložené adrese, porovnat s tím, co zákazník viděl, a uložit
+  // (po zablokování platby se nemění). U ceny upravené poskytovatelem se nepočítá.
+  let travel: TravelQuote | null = null
+  if (kind === 'B' && (row as any)?.agreed_charge_halere == null && (await travelSetupOf(db, orderId))) {
+    const { data: loc } = await db.from('orders').select('location_lat, location_lng').eq('id', orderId).maybeSingle()
+    const l = loc as { location_lat: number | null; location_lng: number | null } | null
+    travel = await travelQuoteFor(db, orderId, { lat: l?.location_lat ?? null, lng: l?.location_lng ?? null })
+    if (!travel) return { success: false, error: 'Vyberte prosím adresu ze seznamu – podle ní se spočítá doprava.' }
+    if (expectedTravelHalere == null || travel.feeHalere !== expectedTravelHalere) {
+      return { success: false, error: `Doprava se přepočítala na ${(travel.feeHalere / 100).toLocaleString('cs-CZ')} Kč. Zkontrolujte prosím částku ve shrnutí a zaplaťte znovu.` }
+    }
+    const { error: tErr } = await db.from('orders').update({
+      travel_km: travel.km, travel_fee_halere: travel.feeHalere, travel_estimated: travel.estimated,
+    }).eq('id', orderId)
+    if (tErr) {
+      console.error('[booking] doprava:', tErr.message)
+      return { success: false, error: 'Dopravu se nepodařilo uložit. Zkuste to prosím znovu.' }
+    }
+  } else if (kind === 'B') {
+    // Doprava se nepočítá (v ceně / upravená cena) → starý výpočet z dřívějšího pokusu smazat
+    await db.from('orders').update({ travel_km: null, travel_fee_halere: null, travel_estimated: null }).eq('id', orderId)
   }
 
   const h = headers()
@@ -648,6 +697,8 @@ export async function startBookingPayment(
     auto_confirm: await shouldAutoConfirm(db, order),
     // Výjezd: slib odečíst Cenu výjezdu z ceny zakázky, jak ho zákazník viděl (VOP 11.6)
     quote_fee_deductible: kind === 'B' ? ((row as any)?.service_items?.quote_fee_deductible ?? (row as any)?.quote_fee_deductible) === true : null,
+    // Vrstva 6: doprava, kterou zákazník viděl a odsouhlasil
+    travel: travel ? { km: travel.km, billable_km: travel.billableKm, fee_halere: travel.feeHalere, estimated: travel.estimated, terms: travel.terms } : null,
     ip,
     user_agent: userAgent,
   })
@@ -815,4 +866,41 @@ export async function checkIn(
   return res.ok
     ? { success: true, valid: res.evaluation.valid, issues: res.evaluation.issues, distanceM: res.evaluation.distanceM }
     : { success: false, error: res.error }
+}
+
+// ─── Výjezd na místě (vrstva 6): nezastižen, doklad Závazné nabídky ──────────
+
+export async function contactCustomerFromSite(orderId: string): Promise<Result> {
+  const ctx = await loadForUser(orderId)
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  if (ctx.by !== 'provider') return { success: false, error: 'Zprávu posílá poskytovatel.' }
+  const res = await contactCustomerOnSite(ctx.db, ctx.order)
+  revalidateOrder(orderId)
+  return res.ok ? { success: true } : { success: false, error: res.error }
+}
+
+export async function customerNotReached(orderId: string): Promise<Result> {
+  const ctx = await loadForUser(orderId)
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  if (ctx.by !== 'provider') return { success: false, error: 'Zaznamenává poskytovatel.' }
+  const res = await markCustomerNotReached(ctx.db, ctx.order)
+  revalidateOrder(orderId)
+  return res.ok ? { success: true } : { success: false, error: res.error }
+}
+
+export async function quoteProofTarget(orderId: string, mimeType: string): Promise<{ success: true; path: string; token: string } | { success: false; error: string }> {
+  const ctx = await loadForUser(orderId)
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  if (ctx.by !== 'provider') return { success: false, error: 'Nabídku nahrává poskytovatel.' }
+  const res = await quoteProofUploadUrl(ctx.db, ctx.order, mimeType)
+  return res.ok ? { success: true, path: res.path, token: res.token } : { success: false, error: res.error }
+}
+
+export async function saveQuoteProof(orderId: string, path: string, mimeType: string, fileName: string | null): Promise<Result> {
+  const ctx = await loadForUser(orderId)
+  if (!ctx.ok) return { success: false, error: ctx.error }
+  if (ctx.by !== 'provider') return { success: false, error: 'Nabídku nahrává poskytovatel.' }
+  const res = await recordQuoteProof(ctx.db, ctx.order, { path, mimeType, fileName })
+  revalidateOrder(orderId)
+  return res.ok ? { success: true } : { success: false, error: res.error }
 }

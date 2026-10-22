@@ -12,6 +12,7 @@ import { stripe } from '@/lib/stripe'
 import { policySnapshot } from '@/lib/booking/policy'
 import { RECAP_DOCUMENT_VERSION, serviceNeedsEarlyRequest } from '@/lib/booking/texts'
 import { bookingBufferMs } from '@/lib/booking/rules'
+import { travelSetupOf } from '@/lib/booking/travel'
 import {
   adminDb,
   applyTransition,
@@ -172,8 +173,17 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
   // Cena, kterou poskytovatel u této objednávky upravil a zákazník přijal s termínem (jinak cena z nabídky).
   const { data: agreedRow } = await db.from('orders').select('agreed_charge_halere').eq('id', orderId).maybeSingle()
   const agreedChargeHalere = (agreedRow as { agreed_charge_halere: number | null } | null)?.agreed_charge_halere ?? null
+  // Vrstva 6: doprava podle km se spočítá a uloží ve shrnutí (startBookingPayment) – bez ní neplatit.
+  // Samostatný dotaz: chyba (např. sloupec ještě není) nesmí shodit načtení upravené ceny výše.
+  const { data: travelRow } = await db.from('orders').select('travel_fee_halere').eq('id', orderId).maybeSingle()
+  // Doprava se přičte jen u položky, která ji opravdu počítá podle km (poskytovatel mohl mezitím přepnout „V ceně“)
+  const travelSetup = item.offer_kind === 'B' && agreedChargeHalere == null ? await travelSetupOf(db, orderId) : null
+  const travelFeeHalere = travelSetup ? ((travelRow as { travel_fee_halere: number | null } | null)?.travel_fee_halere ?? null) : null
+  if (travelSetup && travelFeeHalere == null) {
+    return { success: false, error: 'Otevřete prosím znovu shrnutí – je potřeba spočítat dopravu k vaší adrese.' }
+  }
   const check = await checkNewBooking(db, {
-    item: { ...item, agreed_charge_halere: agreedChargeHalere },
+    item: { ...item, agreed_charge_halere: agreedChargeHalere, travel_fee_halere: travelFeeHalere },
     providerId: order.provider_id,
     start,
     end,
@@ -247,6 +257,7 @@ export async function createDepositCheckout(orderId: string): Promise<Result> {
       offerKind: check.offerKind,
       itemName: nazev,
       commission: check.commission,
+      receiptEmail: user.email ?? null,
     })
     if (!session.url) return { success: false, error: 'Nepodařilo se vytvořit platbu.' }
 

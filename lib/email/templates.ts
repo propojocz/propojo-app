@@ -1004,3 +1004,30 @@ export function noShowRefundEmail(data: {
     `),
   }
 }
+
+/** Výjezd: poskytovatel zákazníka na adrese nezastihl → ZÁKAZNÍKOVI (vrstva 6, model §9) */
+export function customerNotReachedEmail(data: {
+  serviceTitle: string
+  termText: string | null
+  arrivedText: string | null
+  contactText: string | null
+  orderUrl: string
+}): { subject: string; html: string } {
+  return {
+    subject: `Poskytovatel vás nezastihl: ${data.serviceTitle}`,
+    html: emailWrapper(`
+      ${heading('Poskytovatel vás na adrese nezastihl', 'Podle záznamu v Propoju dorazil na vaši adresu, pokusil se vás kontaktovat a počkal.')}
+
+      ${detailBox([
+        ['Služba', data.serviceTitle],
+        ['Termín', data.termText],
+        ['Příjezd zaznamenán', data.arrivedText],
+        ['Zpráva „Nemůžu vás zastihnout“', data.contactText],
+      ])}
+
+      ${noteBox('Zaplacená Cena výjezdu se automaticky nevrací. Pokud máte za to, že vám část nebo celá částka náleží (například jste byli na místě nebo jste výjezd předem rušili), obraťte se přímo na poskytovatele – jeho kontakt najdete v objednávce. Propojo nerozhoduje, kdo má pravdu.', 'info')}
+
+      ${button('Zobrazit objednávku', data.orderUrl)}
+    `),
+  }
+}

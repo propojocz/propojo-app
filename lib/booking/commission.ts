@@ -74,6 +74,8 @@ export interface ChargeableItem {
   deposit_type?: string | null
   /** Cena upravená poskytovatelem u konkrétní objednávky a přijatá zákazníkem (v haléřích); má přednost */
   agreed_charge_halere?: number | null
+  /** Vrstva 6: doprava podle km u výjezdu (haléře), připočte se k Ceně výjezdu; u upravené ceny ne */
+  travel_fee_halere?: number | null
 }
 
 export type BookingChargeResult =
@@ -119,10 +121,17 @@ export function bookingCharge(item: ChargeableItem, policy: BookingPolicy = BOOK
         : 'U této položky není nastavený Rezervační poplatek.',
     }
   }
-  if (Math.round(kc * 100) > policy.maxAgreedChargeHalere) {
-    return { ok: false, error: `Částka placená přes Propojo může být nejvýš ${(policy.maxAgreedChargeHalere / 100).toLocaleString('cs-CZ')} Kč.` }
+  const travel = item.offer_kind === 'B' ? Math.max(0, Math.round(Number(item.travel_fee_halere ?? 0)) || 0) : 0
+  const total = Math.round(kc * 100) + travel
+  if (total > policy.maxAgreedChargeHalere) {
+    return {
+      ok: false,
+      error: travel > 0
+        ? `Cena výjezdu včetně dopravy by byla ${(total / 100).toLocaleString('cs-CZ')} Kč – přes Propojo jde zaplatit nejvýš ${(policy.maxAgreedChargeHalere / 100).toLocaleString('cs-CZ')} Kč. Domluvte se prosím s poskytovatelem ve zprávách.`
+        : `Částka placená přes Propojo může být nejvýš ${(policy.maxAgreedChargeHalere / 100).toLocaleString('cs-CZ')} Kč.`,
+    }
   }
-  const result = computeCommission(Math.round(kc * 100), policy.commission, policy.minChargeHalere)
+  const result = computeCommission(total, policy.commission, policy.minChargeHalere)
   if (!result.ok) return result
   return { ok: true, offerKind: item.offer_kind, commission: result.commission }
 }

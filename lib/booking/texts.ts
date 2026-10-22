@@ -8,7 +8,7 @@
 import { BOOKING_POLICY, type OfferKind } from './policy'
 
 /** Verze znění rekapitulace a souhlasu. Při každé změně textů zvýšit. */
-export const RECAP_DOCUMENT_VERSION = 'recap-2026-10-15-v8'
+export const RECAP_DOCUMENT_VERSION = 'recap-2026-10-22-v9' // + doprava podle km u výjezdu
 
 // Podle pracovních VOP (v4.1, 3. 10. 2026), čl. 9:
 //  A služba – zákazník může od Rezervační smlouvy odstoupit do 14 dnů. U termínu do 14 dní navíc výslovná

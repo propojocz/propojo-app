@@ -13,6 +13,8 @@ type PaymentItem = {
   deposit_type?: string | null
   deposit_amount?: number | null
   quote_fee?: number | null
+  /** Vrstva 6: doprava podle km u výjezdu */
+  price_per_km?: number | null
 }
 
 export type ItemPaymentDisplay = {
@@ -33,9 +35,10 @@ export function getItemPaymentDisplay(item: PaymentItem, quantity = 1): ItemPaym
 
   if (item.payment_model === 'B') {
     const fee = Number(item.quote_fee ?? 0)
+    const perKm = Number(item.price_per_km ?? 0) > 0
     return {
       action: 'Objednat nacenění',
-      detail: fee > 0 ? `nacenění ${money(fee)}` : 'nacenění zdarma',
+      detail: fee > 0 ? `výjezd ${money(fee)}${perKm ? ' + doprava podle km' : ' vč. dopravy'}` : 'nacenění zdarma',
       total: fee > 0 ? fee : 0,
       upfront: fee > 0 ? fee : 0,
       later: null,
