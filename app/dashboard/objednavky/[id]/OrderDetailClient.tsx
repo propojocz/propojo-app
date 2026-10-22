@@ -814,6 +814,13 @@ export default function OrderDetailClient({
                     {isProvider ? `Zákazníkovi vráceno ${kc(refundedKc)}.` : `Vráceno vám ${kc(refundedKc)}.`}
                   </p>
                 )}
+                {refundedKc > 0 && (
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {isProvider
+                      ? 'Zákazníkovi se částka na kartě objeví obvykle do 5–10 pracovních dnů, podle jeho banky.'
+                      : 'Na kartě se částka objeví obvykle do 5–10 pracovních dnů, podle vaší banky.'}
+                  </p>
+                )}
               </div>
             </div>
           </div>

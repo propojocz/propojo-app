@@ -277,22 +277,26 @@ export async function resolveReschedule(
 }
 
 /** Cron: vypršelé návrhy → zrušení + refund; připomínky zákazníkovi */
-export async function tickReschedules(db: Db, now = new Date()): Promise<{ expired: number; reminded: number }> {
+export async function tickReschedules(db: Db, now = new Date()): Promise<{ open: number; expired: number; reminded: number; error?: string }> {
   let expired = 0
   let reminded = 0
-  const { data } = await db
+  let note: string | undefined
+  const { data, error } = await db
     .from('order_reschedules')
     .select('id, order_id, expires_at, created_at, proposed_start')
     .eq('kind', 'cannot_keep_original')
     .eq('status', 'open')
     .limit(100)
+  // Diagnostika v odpovědi cronu (22. 10. 2026: na produkci vypršelý návrh nezpracován) – kolik otevřených vidí
+  if (error) return { open: -1, expired, reminded, error: error.message }
   for (const r of (data ?? []) as Array<{ id: string; order_id: string; expires_at: string; created_at: string; proposed_start: string }>) {
     const order = await loadBookingOrder(db, r.order_id)
-    if (!order) continue
+    if (!order) { note = 'objednávka nenalezena'; continue }
     const expiresAt = new Date(r.expires_at)
     if (expiresAt.getTime() <= now.getTime()) {
       const res = await resolveReschedule(db, order, 'expired')
       if (res.ok) expired++
+      else note = res.error
       continue
     }
     const remindAt = rescheduleReminderAt(new Date(r.created_at), expiresAt)
@@ -310,6 +314,6 @@ export async function tickReschedules(db: Db, now = new Date()): Promise<{ expir
     await logOrderEvent(db, order.id, 'reschedule_reminder_sent', { type: 'system' }, { reschedule_id: r.id })
     reminded++
   }
-  return { expired, reminded }
+  return { open: (data ?? []).length, expired, reminded, ...(note ? { error: note } : {}) }
 }
 
