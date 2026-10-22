@@ -6,6 +6,9 @@ import { NextResponse } from 'next/server'
 import { sendTomorrowReminders } from '@/lib/actions/reminders'
 
 export const dynamic = 'force-dynamic'
+// Bez cache odpovědí databáze (viz booking-tick, 22. 10. 2026)
+export const fetchCache = 'force-no-store'
+export const revalidate = 0
 export const maxDuration = 60
 
 export async function GET(request: Request) {
