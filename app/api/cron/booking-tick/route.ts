@@ -8,6 +8,10 @@ import { adminDb } from '@/lib/booking/payments'
 import { runBookingTick } from '@/lib/booking/deadlines'
 
 export const dynamic = 'force-dynamic'
+// Žádná cache odpovědí databáze (22. 10. 2026: cron na produkci viděl staré „nic otevřeného“) –
+// každý běh musí číst aktuální stav, i když fetch volá knihovna Supabase.
+export const fetchCache = 'force-no-store'
+export const revalidate = 0
 export const maxDuration = 60
 
 /**

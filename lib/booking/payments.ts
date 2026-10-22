@@ -47,7 +47,11 @@ export const BOOKING_KIND = 'booking_v2'
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
 
 export function adminDb() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+  // Stav rezervací a peněz se nikdy nesmí číst z cache Next.js (22. 10. 2026: cron na produkci
+  // dostával zapamatovanou odpověď a neviděl vypršelé lhůty)
+  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+    global: { fetch: (input, init) => fetch(input, { ...init, cache: 'no-store' }) },
+  })
 }
 
 export type Db = ReturnType<typeof adminDb>
