@@ -8,6 +8,13 @@ import { CATEGORY_META } from '@/types/database'
 
 export default function NabidkyPage() {
   const [services, setServices] = useState<any[]>([])
+  // Názvy kategorií (místo technického kódu „zahrada“)
+  const [catNames, setCatNames] = useState<Record<string, string>>({})
+  useEffect(() => {
+    fetch('/api/categories').then(r => r.json())
+      .then(d => setCatNames(Object.fromEntries((d.categories ?? []).map((c: any) => [c.slug, c.name]))))
+      .catch(() => {})
+  }, [])
   const [loading, setLoading] = useState(true)
   const [actionId, setActionId] = useState<string | null>(null)
   // Brána předplatného zrušena (20. 10. 2026, model §18) – nabídky se zobrazují vždy, varování se neukazuje.
@@ -131,7 +138,7 @@ export default function NabidkyPage() {
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
-                    <p className="text-sm text-slate-500">{CATEGORY_META[s.category as keyof typeof CATEGORY_META]?.label ?? s.category} · {priceText(s)} · {s.city}</p>
+                    <p className="text-sm text-slate-500">{s.subtitle || catNames[s.category] || CATEGORY_META[s.category as keyof typeof CATEGORY_META]?.label || s.category} · {priceText(s)} · {s.city}</p>
                     <span className="flex items-center gap-1 text-xs text-slate-400">
                       <BarChart2 className="h-3.5 w-3.5" />
                       {s.view_count ?? 0} zobrazení

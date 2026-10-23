@@ -184,8 +184,9 @@ export default async function ServiceDetailPage({ params }: Props) {
 
   // Podkategorie
   const { data: subcatLinks } = await supabase
-    .from('service_subcategories').select('subcategories(name)').eq('service_id', s.id)
+    .from('service_subcategories').select('subcategories(name, retired)').eq('service_id', s.id)
   const subcatNames = (subcatLinks ?? [])
+    .filter((r: any) => r.subcategories && r.subcategories.retired !== true)
     .map((r: any) => r.subcategories?.name)
     .filter(Boolean) as string[]
 

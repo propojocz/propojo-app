@@ -156,7 +156,7 @@ export default function SearchAutocomplete({
                     ? <Tag className="h-4 w-4 shrink-0 text-emerald-600" />
                     : <Layers className="h-4 w-4 shrink-0 text-slate-400" />}
                   <span className="font-medium text-slate-700">{item.label}</span>
-                  <span className="ml-auto text-xs text-slate-400">{item.type === 'category' ? 'obor' : 'úkon'}</span>
+                  <span className="ml-auto text-xs text-slate-400">{item.type === 'category' ? 'kategorie' : 'profese'}</span>
                 </button>
               ))
             : obce.map((item, i) => (

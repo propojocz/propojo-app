@@ -25,7 +25,7 @@ import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { CheckCircle2, AlertCircle, Loader2, ChevronRight, ChevronDown, Store, Home, Eye, ListChecks, CalendarDays, Plus, Sparkles, Search } from 'lucide-react'
 import { createService, updateService } from '@/lib/actions/services'
-import { expandSearch, normalizeText } from '@/lib/search'
+import { matchProfessions } from '@/lib/professions'
 import { createOwnSubcategory } from '@/lib/actions/subcategories'
 import type { Service, ServiceItem } from '@/types/database'
 import { createClient, getBrowserUser } from '@/lib/supabase/client'
@@ -41,7 +41,7 @@ import { CategoryIcon } from '@/lib/categoryIcons'
 import type { ServiceTypeOption } from '@/components/ui/ServiceItemEditor'
 
 const schema = z.object({
-  title: z.string().min(3, 'Napište, jak se chcete zobrazovat (aspoň 3 znaky)').max(100),
+  title: z.string().min(3, 'Napište název nabídky (aspoň 3 znaky)').max(100),
   subtitle: z.string().max(80).nullable().optional(),
   // Popis už NENÍ povinný. Kdo ho nevyplní, dostane větu složenou z oboru
   // a města — prázdná karta by na detailu vypadala opuštěně.
@@ -71,7 +71,7 @@ type FormValues = z.infer<typeof schema>
 
 interface Category {
   id: string; slug: string; name: string; icon: string; color: string
-  subcategories: { id: string; slug: string; name: string; service_types: { id: string; name: string }[] }[]
+  subcategories: { id: string; slug: string; name: string; synonyms?: string[] | null; service_types: { id: string; name: string }[] }[]
 }
 
 interface Props {
@@ -98,8 +98,6 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
   const [oborQ, setOborQ] = useState('')
   // Celá mřížka kategorií (volná ruka) – po výběru oboru se sbalí
   const [vsechnyKategorie, setVsechnyKategorie] = useState(false)
-  // Název karty se předvyplní z profilu; pole se otevře na „Změnit“
-  const [upravaNazvu, setUpravaNazvu] = useState(mode === 'edit')
   // Vlastní podkategorie („Nevidím svou službu")
   const [ownSubOpen, setOwnSubOpen] = useState(false)
   const [ownSubName, setOwnSubName] = useState('')
@@ -197,13 +195,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
           setValue('city_lng', Number((data as any).address_lng))
         }
       }
-      // Název karty = jméno firmy / vaše jméno z profilu (obor se ukáže pod ním)
-      const jmeno = (data as any)?.company_name || (data as any)?.display_name || (data as any)?.full_name || ''
-      if (mode === 'create' && jmeno && !(watch('title') ?? '').trim()) {
-        setValue('title', String(jmeno).slice(0, 100), { shouldValidate: true })
-      } else if (mode === 'create' && !jmeno) {
-        setUpravaNazvu(true)
-      }
+
     }
     load()
   }, [])
@@ -226,73 +218,53 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
 
   const activeCat = categories.find(c => c.slug === selectedCategory)
 
-  // „Co nabízíte?“ – obory ze všech kategorií podle textu (bez diakritiky)
-  const oborHits = (() => {
-    const q = normalizeText(oborQ.trim())
-    if (q.length < 2) return []
-    // Každé slovo zkrácené o koncovku („pergola“ najde „pergoly“, „kadernik“ „kadeřnictví“)
-    const stems = q.split(/\s+/).filter(Boolean).map(w => (w.length >= 5 ? w.slice(0, w.length - 2) : w))
-    const hit = (name: string) => { const n = normalizeText(name); return stems.every(st => n.includes(st)) }
-    const all = categories.flatMap(c => c.subcategories.map(s => ({ cat: c, sub: s })))
-    let found = all.filter(x => hit(x.sub.name) || hit(x.cat.name))
-    // Nic přesně? Příbuzná slova z chytrého hledání („elektrikář“ → elektroinstalace, zásuvky…)
-    if (found.length === 0) {
-      const pats = expandSearch(oborQ).map(normalizeText)
-      found = all.filter(x => pats.some(pt => normalizeText(x.sub.name).includes(pt)))
-    }
-    return found
-      .sort((a, b) => Number(normalizeText(b.sub.name).startsWith(q)) - Number(normalizeText(a.sub.name).startsWith(q)))
-      .slice(0, 8)
-  })()
-  const pickObor = (catSlug: string, subId: string) => {
-    if (selectedCategory !== catSlug) {
-      // Karta = jedna kategorie; jiná kategorie začíná s novým výběrem oborů
-      setValue('category', catSlug, { shouldValidate: true })
-      setValue('subcategory_ids', [subId])
-      setValue('subcategory_id', subId)
+  // ── PROFESE (23. 10. 2026, Matej: lidé hledají „malíř“, „barber“, „advokát“) ──
+  // Podkategorie = profese. Nabídka má 1 hlavní profesi (určuje kategorii karty) a nejvýš 2 další,
+  // klidně z jiné kategorie (hodinový manžel + malíř). Vybírá se jedním polem s našeptávačem.
+  const MAX_PROFESI = 3
+  const allProfs = categories.flatMap(c => c.subcategories.map(sub => ({ ...sub, catSlug: c.slug, catName: c.name })))
+  const profById = (id: string) => allProfs.find(p => p.id === id)
+  const oborHits = matchProfessions(oborQ, allProfs, 8)
+  const setProfese = (ids: string[]) => {
+    setValue('subcategory_ids', ids)
+    setValue('subcategory_id', ids[0] ?? '')
+    // Kategorie karty = kategorie hlavní profese
+    const main = ids[0] ? (profById(ids[0])?.catSlug ?? (ownSubs.find(o => o.id === ids[0]) ? selectedCategory : '')) : ''
+    if ((main ?? '') !== (selectedCategory ?? '')) {
+      setValue('category', main ?? '', { shouldValidate: true })
       setValue('service_type', '')
-    } else if (!selectedSubIds.includes(subId)) {
-      const next = [...selectedSubIds, subId]
-      setValue('subcategory_ids', next)
-      setValue('subcategory_id', next[0] ?? '')
     }
+  }
+  const pickObor = (_catSlug: string, subId: string) => {
+    if (!selectedSubIds.includes(subId) && selectedSubIds.length < MAX_PROFESI) setProfese([...selectedSubIds, subId])
     setOborQ('')
-    setVsechnyKategorie(false)
   }
   const toggleSub = (id: string) => {
-    const exists = selectedSubIds.includes(id)
-    const next = exists ? selectedSubIds.filter(x => x !== id) : [...selectedSubIds, id]
-    setValue('subcategory_ids', next)
-    setValue('subcategory_id', next[0] ?? '')
+    if (selectedSubIds.includes(id)) setProfese(selectedSubIds.filter(x => x !== id))
+    else if (selectedSubIds.length < MAX_PROFESI) setProfese([...selectedSubIds, id])
   }
+  // Procházení seznamu (volná ruka) – kategorie, ve které se právě listuje
+  const [browseCat, setBrowseCat] = useState<string | null>(null)
+  const browseCategory = categories.find(c => c.slug === (browseCat ?? selectedCategory))
 
-  // Podkategorie vybrané na kartě → skupiny v ceníku. Systémové i vlastní.
-  const subcatsForPriceList = [
-    ...(activeCat?.subcategories ?? [])
-      .filter(sub => selectedSubIds.includes(sub.id))
-      .map(sub => ({ id: sub.id, name: sub.name, isOwn: false })),
-    ...ownSubs
-      .filter(o => selectedSubIds.includes(o.id))
-      .map(o => ({ id: o.id, name: o.name, isOwn: true })),
-  ]
+  // Ceník: jeden seznam, úkony se přiřadí hlavní profesi (kvůli hledání)
+  const subcatsForPriceList = selectedSubIds[0]
+    ? [{ id: selectedSubIds[0], name: profById(selectedSubIds[0])?.name ?? ownSubs.find(o => o.id === selectedSubIds[0])?.name ?? '', isOwn: !profById(selectedSubIds[0]) }]
+    : []
 
-  // Typy služeb nabídnuté z vybraných podkategorií — vstup do ceníku (našeptávač názvu).
-  const serviceTypesForItems: ServiceTypeOption[] = (activeCat?.subcategories ?? [])
-    .filter(sub => selectedSubIds.includes(sub.id))
-    .flatMap(sub => sub.service_types ?? [])
+  // Běžné úkony vybraných profesí – nabídnou se v ceníku jedním klepnutím
+  const serviceTypesForItems: ServiceTypeOption[] = selectedSubIds
+    .flatMap(id => profById(id)?.service_types ?? [])
     .map(st => ({ id: st.id, name: st.name }))
 
-  // Názvy vybraných podkategorií — používá je náhled, souhrn i doplňování textů.
-  const previewSubNames = [
-    ...(activeCat?.subcategories ?? [])
-      .filter(sub => selectedSubIds.includes(sub.id))
-      .map(sub => sub.name),
-    ...ownSubs.filter(o => selectedSubIds.includes(o.id)).map(o => o.name),
-  ]
+  // Názvy vybraných profesí — náhled, souhrn a řádek pod názvem
+  const previewSubNames = selectedSubIds
+    .map(id => profById(id)?.name ?? ownSubs.find(o => o.id === id)?.name ?? '')
+    .filter(Boolean)
   const hlavniObor = previewSubNames[0] ?? activeCat?.name ?? ''
 
-  // Podtitul se skládá z vybraných oborů: „Kadeřnictví · Barber". Poskytovatel
-  // nemá vymýšlet marketingovou větu — appka ví, co dělá, z toho, co naklikal.
+  // Řádek pod názvem = profese: „Malíř a natěrač · Hodinový manžel“. Poskytovatel
+  // nemá vymýšlet marketingovou větu — appka ví, co dělá, z toho, co vybral.
   const podtitulZOboru = previewSubNames.slice(0, 3).join(' · ')
   // Přepsal si ho ručně? Pak platí jeho verze.
   const vlastniPodtitul = (watch('subtitle') ?? '').trim()
@@ -301,7 +273,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
   // Vytvoří se jako NESCHVÁLENÁ: na kartě funguje hned, do zákaznického
   // vyhledávání spadne, až ji projdeme v adminu.
   const saveOwnSub = async () => {
-    const cat = activeCat
+    const cat = browseCategory
     if (!cat) { setOwnSubErr('Vyberte nejdřív kategorii.'); return }
     const name = ownSubName.trim()
     if (name.length < 3) { setOwnSubErr('Napište název — aspoň tři znaky.'); return }
@@ -314,9 +286,13 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
 
     // Rovnou ji zaškrtneme, ať nemusí klikat dvakrát.
     setOwnSubs(prev => prev.some(o => o.id === res.id) ? prev : [...prev, { id: res.id, name: res.name }])
-    const next = selectedSubIds.includes(res.id) ? selectedSubIds : [...selectedSubIds, res.id]
-    setValue('subcategory_ids', next)
-    setValue('subcategory_id', next[0] ?? '')
+    if (!selectedSubIds.includes(res.id) && selectedSubIds.length < MAX_PROFESI) {
+      const next = [...selectedSubIds, res.id]
+      setValue('subcategory_ids', next)
+      setValue('subcategory_id', next[0] ?? '')
+      // Vlastní profese jako první → kategorie karty = kategorie, ve které vznikla
+      if (next.length === 1) setValue('category', cat.slug, { shouldValidate: true })
+    }
     setOwnSubName(''); setOwnSubOpen(false)
   }
 
@@ -468,7 +444,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
         <ServiceCard
           service={previewService}
           categoryName={activeCat?.name}
-          subcatNames={previewSubNames}
+          subcatNames={activeItems.slice(0, 3).map(i => i.name)}
           preview
         />
       </div>
@@ -501,199 +477,148 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
         {/* ══ KROK 1 — CO NABÍZÍTE ══ */}
         <div className={krok === 1 ? 'space-y-6' : 'hidden'}>
 
-        {/* 1. CO NABÍZÍTE — jedno pole najde obor i kategorii; mřížka kategorií jako volná ruka */}
-        <div className="space-y-3">
-          <label className="form-label">Co nabízíte? *</label>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text" value={oborQ} onChange={e => setOborQ(e.target.value)}
-              placeholder={selectedSubIds.length > 0 ? 'Přidat další obor – např. zámková dlažba…' : 'Napište, co děláte – např. stavba pergol, střih, malování…'}
-              className="form-input pl-9"
-              autoComplete="off"
-            />
-            {oborQ.trim().length >= 2 && (
-              <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
-                {oborHits.length > 0 ? oborHits.map(({ cat, sub }) => (
-                  <button key={sub.id} type="button" onClick={() => pickObor(cat.slug, sub.id)}
-                    className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm hover:bg-emerald-50">
-                    <CategoryIcon slug={cat.slug} boxed className="h-3.5 w-3.5" boxClassName="h-7 w-7 shrink-0 rounded-lg" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block font-semibold text-slate-800">{sub.name}</span>
-                      <span className="block truncate text-xs text-slate-400">{cat.name}</span>
-                    </span>
-                    {selectedSubIds.includes(sub.id) && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />}
-                  </button>
-                )) : (
-                  <p className="px-3 py-2.5 text-xs leading-relaxed text-slate-500">
-                    Nic takového v seznamu nemáme. Vyberte níže kategorii a přidejte vlastní obor („Nevidím svou službu“).
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-          {loadingCats ? (
+        {/* 1. VAŠE PROFESE — jedno pole s našeptávačem (i podle příbuzných slov), seznam jako volná ruka */}
+        <div className="space-y-2.5">
+          <label className="form-label" htmlFor="profese-hledani">Vaše profese *</label>
+
+          {/* Vybrané profese */}
+          {selectedSubIds.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {selectedSubIds.map((id, i) => {
+                const p = profById(id)
+                const own = !p ? ownSubs.find(o => o.id === id) : null
+                return (
+                  <span key={id} className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-semibold ${i === 0 ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'}`}>
+                    {p ? <CategoryIcon slug={p.catSlug} className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5 text-amber-500" />}
+                    {p?.name ?? own?.name ?? 'Profese'}
+                    {i === 0 && selectedSubIds.length > 1 && <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">hlavní</span>}
+                    <button type="button" onClick={() => toggleSub(id)} aria-label="Odebrat" className="ml-0.5 text-slate-400 hover:text-red-500">×</button>
+                  </span>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Hledání */}
+          {selectedSubIds.length < MAX_PROFESI && (
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                id="profese-hledani"
+                type="text" value={oborQ} onChange={e => setOborQ(e.target.value)}
+                placeholder={selectedSubIds.length > 0 ? 'Děláte i něco dalšího? Přidejte (nepovinné)…' : 'Napište, co děláte – např. kosmetička, malíř, advokát, barber…'}
+                className="form-input pl-9"
+                autoComplete="off"
+              />
+              {oborQ.trim().length >= 2 && (
+                <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+                  {oborHits.length > 0 ? oborHits.map(p => (
+                    <button key={p.id} type="button" onClick={() => pickObor(p.catSlug, p.id)}
+                      className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm hover:bg-emerald-50">
+                      <CategoryIcon slug={p.catSlug} boxed className="h-3.5 w-3.5" boxClassName="h-7 w-7 shrink-0 rounded-lg" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-semibold text-slate-800">{p.name}</span>
+                        <span className="block truncate text-xs text-slate-400">{p.catName}</span>
+                      </span>
+                      {selectedSubIds.includes(p.id) && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />}
+                    </button>
+                  )) : (
+                    <button type="button" onClick={() => { setBrowseCat(selectedCategory || null); setVsechnyKategorie(true); setOborQ('') }}
+                      className="block w-full px-3 py-2.5 text-left text-xs leading-relaxed text-slate-500 hover:bg-slate-50">
+                      Tuhle profesi v seznamu nemáme. <strong className="text-emerald-700">Vyberte kategorii a přidejte vlastní →</strong>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          <p className="text-xs text-slate-400">
+            {selectedSubIds.length === 0
+              ? 'Podle profese vás zákazníci najdou. Co přesně děláte a za kolik, napíšete v dalším kroku do ceníku.'
+              : selectedSubIds.length < MAX_PROFESI
+                ? 'Hotovo – můžete pokračovat. Další profese je nepovinná (nejvýš tři).'
+                : 'Máte tři profese, víc jich nabídka mít nemůže.'}
+          </p>
+
+          {/* Volná ruka: procházet seznam profesí */}
+          {!vsechnyKategorie ? (
+            <button type="button" onClick={() => { setBrowseCat(selectedCategory || null); setVsechnyKategorie(true) }}
+              className="text-xs font-semibold text-emerald-700 underline hover:text-emerald-800">
+              Procházet seznam profesí
+            </button>
+          ) : loadingCats ? (
             <div className="flex items-center gap-2 text-sm text-slate-400">
-              <Loader2 className="h-4 w-4 animate-spin" /> Načítám kategorie…
+              <Loader2 className="h-4 w-4 animate-spin" /> Načítám…
             </div>
           ) : (
-            <>
-              {(!selectedCategory || vsechnyKategorie) ? (
-              <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2">
+            <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-slate-500">Vyberte kategorii a v ní svou profesi</p>
+                <button type="button" onClick={() => setVsechnyKategorie(false)} className="text-xs text-slate-400 underline hover:text-slate-600">Zavřít</button>
+              </div>
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-1.5">
                 {categories.map(cat => {
-                  const isSelected = selectedCategory === cat.slug
+                  const on = browseCategory?.slug === cat.slug
                   return (
-                    <button
-                      key={cat.slug}
-                      type="button"
-                      onClick={() => {
-                        setValue('category', cat.slug, { shouldValidate: true })
-                        setValue('subcategory_id', '')
-                        setValue('subcategory_ids', [])
-                        setValue('service_type', '')
-                      }}
-                      className={`flex min-h-[88px] min-w-0 items-center gap-2.5 rounded-xl border-2 px-3 py-3 text-left text-sm transition-all ${
-                        isSelected
-                          ? 'border-emerald-500 bg-emerald-50 font-semibold text-emerald-700'
-                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                      }`}
-                      style={isSelected ? { borderColor: cat.color, backgroundColor: `${cat.color}10`, color: cat.color } : {}}
-                    >
-                      <CategoryIcon slug={cat.slug} boxed className="h-4 w-4" boxClassName="h-9 w-9 shrink-0 rounded-xl" />
+                    <button key={cat.slug} type="button" onClick={() => setBrowseCat(cat.slug)}
+                      className={`flex min-w-0 items-center gap-2 rounded-xl border px-2.5 py-2 text-left text-xs transition ${on ? 'border-emerald-500 bg-white font-semibold text-emerald-800' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
+                      <CategoryIcon slug={cat.slug} boxed className="h-3.5 w-3.5" boxClassName="h-7 w-7 shrink-0 rounded-lg" />
                       <span className="min-w-0 break-words leading-snug">{cat.name}</span>
                     </button>
                   )
                 })}
               </div>
-              ) : activeCat ? (
-                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                  <CategoryIcon slug={activeCat.slug} boxed className="h-3.5 w-3.5" boxClassName="h-7 w-7 shrink-0 rounded-lg" />
-                  <span className="min-w-0 flex-1 text-sm font-semibold text-slate-700">{activeCat.name}</span>
-                  <button type="button" onClick={() => setVsechnyKategorie(true)} className="text-xs font-bold text-emerald-600 underline hover:text-emerald-700">
-                    Jiná kategorie
+              {browseCategory && (
+                <div className="flex flex-wrap gap-2">
+                  {browseCategory.subcategories.map(sub => {
+                    const isSelected = selectedSubIds.includes(sub.id)
+                    return (
+                      <button key={sub.id} type="button" onClick={() => toggleSub(sub.id)}
+                        disabled={!isSelected && selectedSubIds.length >= MAX_PROFESI}
+                        className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm transition disabled:opacity-40 ${isSelected ? 'border-emerald-500 bg-emerald-50 font-semibold text-emerald-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
+                        <span className={`flex h-3.5 w-3.5 items-center justify-center rounded border ${isSelected ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300'}`}>
+                          {isSelected && <span className="text-[9px] leading-none">✓</span>}
+                        </span>
+                        {sub.name}
+                      </button>
+                    )
+                  })}
+                  <button type="button" onClick={() => { setOwnSubOpen(v => !v); setOwnSubErr('') }}
+                    className="flex items-center gap-1.5 rounded-xl border border-dashed border-slate-300 px-3 py-1.5 text-sm text-slate-500 transition hover:border-emerald-400 hover:text-emerald-700">
+                    <Plus className="h-3.5 w-3.5" /> Nevidím svou profesi
                   </button>
                 </div>
-              ) : null}
-              {!selectedCategory && (
-                <p className="text-xs text-slate-400">Nebo vyberte kategorii a v ní obory – zakliknout jde i víc.</p>
               )}
-
-              <AnimatePresence>
-                {activeCat && (
-                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
-                    <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-                      <ChevronRight className="h-3 w-3" /> Obory – zaškrtnuté uvidí zákazník na kartě, přidat jde i další
-                      <InfoTip align="left">
-                        Podle vybraných oborů se vám <strong>v ceníku nabídnou konkrétní
-                        úkony</strong> z našeho katalogu — nemusíte je vypisovat ručně.
-                        Zákazníkovi se z nich zároveň složí štítky na kartě.
-                      </InfoTip>
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {activeCat.subcategories.map(sub => {
-                        const isSelected = selectedSubIds.includes(sub.id)
-                        return (
-                          <button
-                            key={sub.id}
-                            type="button"
-                            onClick={() => toggleSub(sub.id)}
-                            className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm transition-all ${
-                              isSelected
-                                ? 'border-emerald-500 bg-emerald-50 font-semibold text-emerald-700'
-                                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                            }`}
-                          >
-                            <span className={`flex h-3.5 w-3.5 items-center justify-center rounded border ${isSelected ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300'}`}>
-                              {isSelected && <span className="text-[9px] leading-none">✓</span>}
-                            </span>
-                            {sub.name}
-                          </button>
-                        )
-                      })}
-
-                      {/* Vlastní podkategorie přidané v tomhle sezení */}
-                      {ownSubs.map(o => {
-                        const isSelected = selectedSubIds.includes(o.id)
-                        return (
-                          <button
-                            key={o.id}
-                            type="button"
-                            onClick={() => toggleSub(o.id)}
-                            title="Vaše vlastní — zákazníci ji ve vyhledávání uvidí po schválení"
-                            className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm transition-all ${
-                              isSelected
-                                ? 'border-amber-400 bg-amber-50 font-semibold text-amber-800'
-                                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                            }`}
-                          >
-                            <span className={`flex h-3.5 w-3.5 items-center justify-center rounded border ${isSelected ? 'border-amber-500 bg-amber-500 text-white' : 'border-slate-300'}`}>
-                              {isSelected && <span className="text-[9px] leading-none">✓</span>}
-                            </span>
-                            {o.name}
-                            <Sparkles className="h-3 w-3 text-amber-500" />
-                          </button>
-                        )
-                      })}
-
-                      {/* Nevidím svou službu */}
-                      <button
-                        type="button"
-                        onClick={() => { setOwnSubOpen(v => !v); setOwnSubErr('') }}
-                        className="flex items-center gap-1.5 rounded-xl border border-dashed border-slate-300 px-3 py-1.5 text-sm text-slate-500 transition-all hover:border-emerald-400 hover:text-emerald-700"
-                      >
-                        <Plus className="h-3.5 w-3.5" /> Nevidím svou službu
-                      </button>
-                    </div>
-
-                    {/* Formulář vlastní podkategorie */}
-                    <AnimatePresence>
-                      {ownSubOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="mt-2.5 overflow-hidden"
-                        >
-                          <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
-                            <p className="text-xs leading-relaxed text-amber-900">
-                              <strong>Napište službu odborně</strong> — tak, jak ji zná zákazník.
-                              Hned si ji dáte do nabídky a můžete přijímat objednávky. Ve vyhledávání
-                              se ukáže, jakmile ji zařadíme mezi ostatní.
-                            </p>
-                            <div className="mt-2 flex gap-2">
-                              <input
-                                value={ownSubName}
-                                onChange={e => { setOwnSubName(e.target.value); setOwnSubErr('') }}
-                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveOwnSub() } }}
-                                maxLength={60}
-                                placeholder="např. Renovace parket"
-                                className="form-input flex-1 bg-white"
-                                autoFocus
-                              />
-                              <button
-                                type="button"
-                                onClick={saveOwnSub}
-                                disabled={ownSubSaving || ownSubName.trim().length < 3}
-                                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50"
-                              >
-                                {ownSubSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                                Přidat
-                              </button>
-                            </div>
-                            {ownSubErr && <p className="mt-1.5 text-xs font-semibold text-red-600">{ownSubErr}</p>}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </>
+              {ownSubOpen && browseCategory && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+                  <p className="text-xs leading-relaxed text-amber-900">
+                    Napište profesi tak, jak ji zná zákazník (např. „Hodinář“). Hned ji můžete používat,
+                    ve vyhledávání se ukáže po schválení.
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      value={ownSubName}
+                      onChange={e => { setOwnSubName(e.target.value); setOwnSubErr('') }}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveOwnSub() } }}
+                      maxLength={60}
+                      placeholder={`Profese v kategorii ${browseCategory.name}`}
+                      className="form-input min-w-0 flex-1 bg-white"
+                      autoFocus
+                    />
+                    <button type="button" onClick={saveOwnSub} disabled={ownSubSaving || ownSubName.trim().length < 3}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50">
+                      {ownSubSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Přidat
+                    </button>
+                  </div>
+                  {ownSubErr && <p className="mt-1.5 text-xs font-semibold text-red-600">{ownSubErr}</p>}
+                </div>
+              )}
+            </div>
           )}
-          {errors.category && <p className="form-error">{errors.category.message}</p>}
+          {errors.category && <p className="form-error">Vyberte prosím svou profesi.</p>}
         </div>
 
-        {/* 3. KDE PŮSOBÍTE */}
+        {/* 2. KDE PŮSOBÍTE */}
         <div className="space-y-3">
           <label className="form-label flex items-center justify-between gap-1">
             <span>Kde působíte? *</span>
@@ -863,28 +788,33 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
           </AnimatePresence>
         </div>
 
-        {/* Název karty – předvyplněný jménem z profilu, obor se ukáže pod ním (nepíše se znovu) */}
+        {/* 3. NÁZEV NABÍDKY – píše poskytovatel jednou; návrhy na jedno klepnutí (23. 10. 2026) */}
         <div className="space-y-1.5">
-          {!upravaNazvu && (watch('title') ?? '').trim().length >= 3 ? (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Název na kartě</p>
-                <p className="truncate text-sm font-semibold text-slate-800">{watch('title')}</p>
+          <label className="form-label flex items-center justify-between" htmlFor="nazev-nabidky">
+            <span>Název nabídky *</span>
+            <span className="text-xs font-normal text-slate-400">{wTitle.length} / 100</span>
+          </label>
+          <input id="nazev-nabidky" {...f('title')} maxLength={100}
+            placeholder={hlavniObor ? `např. ${hlavniObor} ${profile?.full_name ?? 'Jan Novák'}` : 'např. Malířství Novák, Salon Bella'}
+            className={`form-input ${errors.title ? 'form-input-error' : ''}`} />
+          {(() => {
+            const navrhy = [
+              profile?.company_name,
+              hlavniObor && (profile?.display_name || profile?.full_name) ? `${hlavniObor.split(' / ')[0]} ${profile?.display_name || profile?.full_name}` : null,
+            ].filter((x, i, a): x is string => !!x && a.indexOf(x) === i && x !== wTitle.trim())
+            return navrhy.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-slate-400">Použít:</span>
+                {navrhy.map(n => (
+                  <button key={n} type="button" onClick={() => setValue('title', n.slice(0, 100), { shouldValidate: true })}
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:border-emerald-400 hover:text-emerald-700">
+                    {n}
+                  </button>
+                ))}
               </div>
-              <button type="button" onClick={() => setUpravaNazvu(true)} className="shrink-0 text-xs font-bold text-emerald-600 underline hover:text-emerald-700">
-                Změnit
-              </button>
-            </div>
-          ) : (
-            <>
-              <label className="form-label flex items-center justify-between">
-                <span>Název na kartě *</span>
-                <span className="text-xs font-normal text-slate-400">{wTitle.length} / 100</span>
-              </label>
-              <input {...f('title')} maxLength={100} placeholder="např. Truhlářství Novák, Salon Bella nebo vaše jméno" className={`form-input ${errors.title ? 'form-input-error' : ''}`} />
-              <p className="text-xs text-slate-400">Kdo jste – firma, salon nebo vaše jméno. Co děláte, se ukáže pod názvem z oborů.</p>
-            </>
-          )}
+            ) : null
+          })()}
+          <p className="text-xs text-slate-400">Takhle se karta jmenuje v seznamu. Pod názvem se automaticky ukáže vaše profese.</p>
           {errors.title && <p className="form-error">{errors.title.message}</p>}
         </div>
 
@@ -1025,7 +955,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
                   <ListChecks className="h-4 w-4 text-emerald-600" /> Služby a ceny
                 </label>
                 <p className="text-xs text-slate-400">
-                  Podle oborů, které jste vybrali, jsme vám připravili skupiny. Doplňte cenu a délku — a kde nabízíte víc variant, přidejte další úkon.
+                  Napište, co přesně děláte a za kolik. Běžné služby vaší profese stačí vybrat klepnutím.
                 </p>
               </div>
 
@@ -1040,6 +970,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
                   serviceTypes={serviceTypesForItems}
                   subcategories={subcatsForPriceList}
                   onChanged={loadItems}
+                  flat
                 />
               )}
 

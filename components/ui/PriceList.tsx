@@ -40,6 +40,11 @@ interface Props {
   subcategories?: PriceListSubcategory[]
   /** Zavolá se po každé změně ceníku, ať si rodič načte aktuální položky. */
   onChanged?: () => void
+  /**
+   * Jeden seznam bez skupin (profese, 23. 10. 2026): služby si poskytovatel píše sám,
+   * běžné úkony jeho profese se nabídnou jedním klepnutím. Nové úkony patří hlavní profesi.
+   */
+  flat?: boolean
 }
 
 // Řádek → hodnoty pro editor.
@@ -123,7 +128,7 @@ type EditorState =
 type Busy = { id: string; action: 'toggle' | 'delete' | 'move' } | null
 
 export default function PriceList({
-  serviceId, items, serviceTypes, subcategories = [], onChanged,
+  serviceId, items, serviceTypes, subcategories = [], onChanged, flat = false,
 }: Props) {
   const [editor, setEditor] = useState<EditorState>({ kind: 'closed' })
   const [saving, setSaving] = useState(false)
@@ -227,7 +232,7 @@ export default function PriceList({
   }
 
   // ── Žádné podkategorie na kartě ──
-  if (subcategories.length === 0 && sorted.length === 0) {
+  if (!flat && subcategories.length === 0 && sorted.length === 0) {
     return (
       <div className="rounded-2xl border-2 border-dashed border-amber-200 bg-amber-50/60 px-5 py-8 text-center">
         <p className="text-sm font-semibold text-slate-700">Vyberte nejdřív podkategorie</p>
@@ -319,6 +324,72 @@ export default function PriceList({
   // Které vybrané služby nemají ani jeden úkon → nejde z nich objednat.
   const prazdneSkupiny = subcategories.filter(sub => itemsOf(sub.id).length === 0)
 
+  // ── Jeden seznam (profese) ──
+  const mainSub = subcategories[0] ?? null
+  const usedNames = new Set(sorted.map((i) => i.name.trim().toLowerCase()))
+  const navrhy = serviceTypes
+    .filter((st, i, a) => !usedNames.has(st.name.trim().toLowerCase()) && a.findIndex((x) => x.name === st.name) === i)
+    .slice(0, 10)
+  const openNew = (name: string) => {
+    setError(null)
+    setEditor({ kind: 'new', subcategoryId: mainSub?.id ?? null, subcategoryName: mainSub?.name ?? null, prefillName: name })
+  }
+  const flatSection = (
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/70 px-4 py-2.5">
+        <Tag className="h-4 w-4 shrink-0 text-emerald-600" />
+        <p className="min-w-0 flex-1 truncate text-sm font-bold text-slate-800">Vaše služby a ceny</p>
+        <span className="shrink-0 text-xs text-slate-400">
+          {sorted.length === 0 ? 'zatím nic' : `${sorted.length} ${sorted.length === 1 ? 'služba' : sorted.length < 5 ? 'služby' : 'služeb'}`}
+        </span>
+      </div>
+      {sorted.length > 0 && <ul className="divide-y divide-slate-100">{sorted.map(renderItem)}</ul>}
+      <AnimatePresence>
+        {editor.kind === 'new' && (
+          <div className="border-t border-slate-100 p-3">
+            <ServiceItemEditor
+              key="new-flat"
+              initial={{ subcategory_id: mainSub?.id ?? null, name: editor.prefillName, deposit_amount: vychoziZaloha }}
+              subcategoryName={mainSub?.name ?? null}
+              serviceTypes={serviceTypes}
+              saving={saving}
+              onSave={handleSave}
+              onCancel={() => { setEditor({ kind: 'closed' }); setError(null) }}
+            />
+          </div>
+        )}
+      </AnimatePresence>
+      {editor.kind !== 'new' && (
+        <div className="space-y-2.5 border-t border-dashed border-slate-200 p-3">
+          {navrhy.length > 0 && (
+            <div>
+              <p className="mb-1.5 text-xs text-slate-500">
+                {sorted.length === 0 ? 'Co děláte? Klepněte na službu, nebo napište vlastní:' : 'Přidat další:'}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {navrhy.map((st) => (
+                  <button key={st.id} type="button" onClick={() => openNew(st.name)}
+                    className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-800">
+                    <Plus className="h-3 w-3" /> {st.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <button type="button" onClick={() => openNew('')}
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-2.5 text-sm font-bold text-emerald-800 transition hover:bg-emerald-50">
+            <Plus className="h-4 w-4" /> {sorted.length === 0 ? 'Napsat vlastní službu' : 'Přidat jinou službu'}
+          </button>
+          {sorted.length === 0 && (
+            <p className="text-xs leading-relaxed text-slate-400">
+              U každé služby zadáte cenu (nebo „dohodou“) a délku. Bez aspoň jedné služby se u vás nedá objednat.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+
   return (
     <div className="space-y-4">
       {error && (
@@ -372,6 +443,7 @@ export default function PriceList({
         )}
       </div>
 
+      {flat ? flatSection : (<>
       {/* ── SKUPINY PODLE PODKATEGORIÍ ── */}
       {subcategories.map((sub) => {
         const groupItems = itemsOf(sub.id)
@@ -488,6 +560,8 @@ export default function PriceList({
           </p>
         </div>
       )}
+
+      </>)}
 
       {/* Editor úpravy — mimo skupiny, ať se neplete s přidáváním */}
       <AnimatePresence>

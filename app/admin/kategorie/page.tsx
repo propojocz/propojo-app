@@ -26,6 +26,9 @@ export default async function AdminKategoriePage() {
     // podkategorie navržené poskytovateli, které čekají na schválení.
     admin.from('subcategories')
       .select('id, category_id, slug, name, is_approved, created_by, suggested_note')
+      // Profese (23. 10. 2026): vyřazené obory se neukazují
+      .eq('retired', false)
+      .order('sort_order', { nullsFirst: false })
       .order('name'),
     admin.from('service_types').select('id, subcategory_id, name').order('name'),
     admin.from('services').select('id, category'),

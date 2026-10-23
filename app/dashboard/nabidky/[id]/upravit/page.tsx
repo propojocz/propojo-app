@@ -31,9 +31,10 @@ export default async function UpravitSluzbuPage({ params }: Props) {
   // Načti vybrané podkategorie (pro předvyplnění)
   const { data: subLinks } = await supabase
     .from('service_subcategories')
-    .select('subcategory_id')
+    .select('subcategory_id, subcategories(retired)')
     .eq('service_id', params.id)
-  const subcategoryIds = (subLinks ?? []).map((r: any) => r.subcategory_id)
+  // Vyřazené obory (před profesemi, 23. 10. 2026) se nepředvyplňují
+  const subcategoryIds = (subLinks ?? []).filter((r: any) => r.subcategories?.retired !== true).map((r: any) => r.subcategory_id)
 
   // Připrav data pro formulář (ServiceForm čte initialData)
   const initialData = { ...service, subcategory_id: subcategoryIds[0] ?? null, subcategory_ids: subcategoryIds }

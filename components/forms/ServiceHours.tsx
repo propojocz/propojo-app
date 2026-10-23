@@ -317,9 +317,9 @@ export default function ServiceHours({
       )}
 
       {/* ── Doplňkové nastavení kalendáře ── */}
-      {(isTravelCard || hasOtherCards) && (
+      {hasOtherCards && (
         <div className="mt-5 space-y-4 border-t border-slate-200 pt-4">
-          {isTravelCard && (
+          {false && isTravelCard && ( /* Rezerva na přejezd zrušena (Matej 23. 10. 2026) – hodnota v DB zůstává */
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-1.5 text-sm font-bold text-slate-800">

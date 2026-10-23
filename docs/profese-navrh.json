@@ -1,0 +1,2033 @@
+[
+  {
+    "slug": "krasa",
+    "name": "Krása a péče o tělo",
+    "profese": [
+      {
+        "name": "Kadeřník / kadeřnice",
+        "syn": [
+          "kadeřnictví",
+          "střih",
+          "stříhání",
+          "barvení vlasů",
+          "melír",
+          "foukaná",
+          "účes",
+          "dětský střih"
+        ],
+        "nahrazuje": [
+          "Kadeřnictví",
+          "Dětský střih"
+        ]
+      },
+      {
+        "name": "Barber",
+        "syn": [
+          "holič",
+          "barbershop",
+          "pánský střih",
+          "vousy",
+          "holení",
+          "úprava vousů"
+        ],
+        "nahrazuje": [
+          "Barber",
+          "Barbershop a pánské střihy"
+        ]
+      },
+      {
+        "name": "Kosmetička",
+        "syn": [
+          "kosmetika",
+          "pleť",
+          "čištění pleti",
+          "ošetření pleti",
+          "kosmetický salon"
+        ],
+        "nahrazuje": [
+          "Kosmetička",
+          "Kosmetika a pleťová péče"
+        ]
+      },
+      {
+        "name": "Manikérka a nehtová designérka",
+        "syn": [
+          "manikúra",
+          "nehty",
+          "gelové nehty",
+          "gel lak",
+          "modeláž nehtů",
+          "nehtové studio"
+        ],
+        "nahrazuje": [
+          "Manikúra a nehtový design",
+          "Manikúra a pedikúra"
+        ]
+      },
+      {
+        "name": "Pedikérka",
+        "syn": [
+          "pedikúra",
+          "péče o nohy",
+          "mokrá pedikúra"
+        ],
+        "nahrazuje": [
+          "Pedikúra"
+        ]
+      },
+      {
+        "name": "Řasy a obočí",
+        "syn": [
+          "prodlužování řas",
+          "laminace řas",
+          "laminace obočí",
+          "lash",
+          "úprava obočí",
+          "barvení obočí"
+        ],
+        "nahrazuje": [
+          "Řasy a obočí"
+        ]
+      },
+      {
+        "name": "Vizážistka",
+        "syn": [
+          "make-up",
+          "líčení",
+          "svatební líčení",
+          "svatební účes",
+          "líčení na ples"
+        ],
+        "nahrazuje": [
+          "Vizážistika a svatební líčení",
+          "Svatební make-up a účes"
+        ]
+      },
+      {
+        "name": "Permanentní make-up",
+        "syn": [
+          "PMU",
+          "microblading",
+          "pudrové obočí",
+          "tetování obočí",
+          "rty",
+          "linky"
+        ],
+        "nahrazuje": [
+          "Permanentní make-up"
+        ]
+      },
+      {
+        "name": "Depilace",
+        "syn": [
+          "epilace",
+          "voskování",
+          "cukrová pasta",
+          "laserová epilace"
+        ],
+        "nahrazuje": [
+          "Depilace"
+        ]
+      },
+      {
+        "name": "Tatér",
+        "syn": [
+          "tetování",
+          "tattoo",
+          "tetovací studio"
+        ],
+        "nahrazuje": [
+          "Tetování",
+          "Tatér"
+        ]
+      },
+      {
+        "name": "Piercing",
+        "syn": [
+          "propichování",
+          "piercer",
+          "náušnice"
+        ],
+        "nahrazuje": [
+          "Piercing"
+        ]
+      },
+      {
+        "name": "Solárium a samoopalování",
+        "syn": [
+          "solárium",
+          "opalování",
+          "spray tan"
+        ],
+        "nahrazuje": [
+          "Solárium a samoopalování"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "zdravi",
+    "name": "Zdraví, wellness a sport",
+    "profese": [
+      {
+        "name": "Masér / masérka",
+        "syn": [
+          "masáž",
+          "masáže",
+          "relaxační masáž",
+          "sportovní masáž",
+          "lymfatická masáž",
+          "thajská masáž"
+        ],
+        "nahrazuje": [
+          "Masáže",
+          "Lymfatické masáže"
+        ]
+      },
+      {
+        "name": "Fyzioterapeut",
+        "syn": [
+          "fyzioterapie",
+          "rehabilitace",
+          "bolest zad",
+          "fyzio"
+        ],
+        "nahrazuje": [
+          "Fyzioterapie"
+        ]
+      },
+      {
+        "name": "Osobní trenér",
+        "syn": [
+          "trenér",
+          "fitness",
+          "cvičení",
+          "posilování",
+          "skupinové lekce",
+          "kruhový trénink"
+        ],
+        "nahrazuje": [
+          "Osobní trenér",
+          "Skupinové lekce"
+        ]
+      },
+      {
+        "name": "Lektor jógy a pilates",
+        "syn": [
+          "jóga",
+          "pilates",
+          "lekce jógy"
+        ],
+        "nahrazuje": [
+          "Jóga",
+          "Jóga a pilates",
+          "Pilates"
+        ]
+      },
+      {
+        "name": "Výživový poradce",
+        "syn": [
+          "výživa",
+          "jídelníček",
+          "hubnutí",
+          "nutriční terapeut"
+        ],
+        "nahrazuje": [
+          "Výživové poradenství",
+          "Výživový poradce"
+        ]
+      },
+      {
+        "name": "Psycholog a kouč",
+        "syn": [
+          "psychoterapie",
+          "terapeut",
+          "koučink",
+          "osobní rozvoj",
+          "poradenství"
+        ],
+        "nahrazuje": [
+          "Psychologické poradenství",
+          "Koučink a osobní rozvoj"
+        ]
+      },
+      {
+        "name": "Instruktor plavání",
+        "syn": [
+          "plavání",
+          "výuka plavání",
+          "plavecký kurz"
+        ],
+        "nahrazuje": [
+          "Plavecký instruktor",
+          "Výuka plavání"
+        ]
+      },
+      {
+        "name": "Instruktor lyžování a snowboardu",
+        "syn": [
+          "lyžování",
+          "snowboard",
+          "lyžařská škola"
+        ],
+        "nahrazuje": [
+          "Lyžařská a snowboardová výuka"
+        ]
+      },
+      {
+        "name": "Trenér bojových sportů",
+        "syn": [
+          "box",
+          "kickbox",
+          "MMA",
+          "sebeobrana",
+          "judo",
+          "karate"
+        ],
+        "nahrazuje": [
+          "Bojové sporty"
+        ]
+      },
+      {
+        "name": "Trenér tenisu",
+        "syn": [
+          "tenis",
+          "lekce tenisu"
+        ],
+        "nahrazuje": [
+          "Tenis"
+        ]
+      },
+      {
+        "name": "Porodní asistentka a dula",
+        "syn": [
+          "porodní asistence",
+          "dula",
+          "péče o miminko",
+          "šestinedělí"
+        ],
+        "nahrazuje": [
+          "Porodní asistence a péče o miminko"
+        ]
+      },
+      {
+        "name": "Sauna a wellness",
+        "syn": [
+          "sauna",
+          "wellness",
+          "vířivka"
+        ],
+        "nahrazuje": [
+          "Sauna a wellness"
+        ]
+      },
+      {
+        "name": "Cykloservis",
+        "syn": [
+          "servis kol",
+          "oprava kola",
+          "kolo",
+          "elektrokolo"
+        ],
+        "nahrazuje": [
+          "Servis kol"
+        ]
+      },
+      {
+        "name": "Servis lyží a snowboardů",
+        "syn": [
+          "broušení lyží",
+          "voskování lyží",
+          "servis snowboardu"
+        ],
+        "nahrazuje": [
+          "Servis lyží a snowboardů"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "remesla",
+    "name": "Stavba, rekonstrukce a řemesla",
+    "profese": [
+      {
+        "name": "Malíř a natěrač",
+        "syn": [
+          "malování",
+          "malíř pokojů",
+          "natírání",
+          "natěrač",
+          "lakýrník",
+          "štukování",
+          "tapetování",
+          "malířství"
+        ],
+        "nahrazuje": [
+          "Malíř a lakýrník",
+          "Malířství a natěračství"
+        ]
+      },
+      {
+        "name": "Elektrikář",
+        "syn": [
+          "elektro",
+          "elektroinstalace",
+          "zásuvky",
+          "jističe",
+          "rozvaděč",
+          "revize elektro",
+          "hromosvod"
+        ],
+        "nahrazuje": [
+          "Elektrikář",
+          "Elektrikářství",
+          "Elektro",
+          "Hromosvod"
+        ]
+      },
+      {
+        "name": "Instalatér",
+        "syn": [
+          "vodoinstalace",
+          "voda",
+          "kohoutek",
+          "baterie",
+          "odpad",
+          "bojler",
+          "WC",
+          "instalatérství"
+        ],
+        "nahrazuje": [
+          "Instalatér",
+          "Instalatérství"
+        ]
+      },
+      {
+        "name": "Topenář",
+        "syn": [
+          "topení",
+          "kotel",
+          "radiátory",
+          "tepelné čerpadlo",
+          "podlahové topení",
+          "topenářství"
+        ],
+        "nahrazuje": [
+          "Topenář a kotle",
+          "Topenářství",
+          "Kotel",
+          "Tepelné čerpadla"
+        ]
+      },
+      {
+        "name": "Plynař",
+        "syn": [
+          "plyn",
+          "plynové spotřebiče",
+          "revize plynu"
+        ],
+        "nahrazuje": [
+          "Plynař"
+        ]
+      },
+      {
+        "name": "Podlahář",
+        "syn": [
+          "podlahy",
+          "plovoucí podlaha",
+          "vinyl",
+          "parkety",
+          "linoleum",
+          "broušení parket",
+          "pokládka podlah"
+        ],
+        "nahrazuje": [
+          "Podlahář",
+          "Pokládka podlah"
+        ]
+      },
+      {
+        "name": "Obkladač",
+        "syn": [
+          "obklady",
+          "dlažba",
+          "dlaždič",
+          "koupelna"
+        ],
+        "nahrazuje": [
+          "Obkladač",
+          "Obklady a dlažby"
+        ]
+      },
+      {
+        "name": "Zedník",
+        "syn": [
+          "zednické práce",
+          "omítky",
+          "zdění",
+          "betonáž",
+          "základy",
+          "hrubá stavba",
+          "bourání",
+          "bourací práce"
+        ],
+        "nahrazuje": [
+          "Zedník",
+          "Zednické práce",
+          "Hrubá stavba",
+          "Základy a betonáž",
+          "Bourací práce"
+        ]
+      },
+      {
+        "name": "Sádrokartonář",
+        "syn": [
+          "sádrokarton",
+          "SDK",
+          "podhledy",
+          "příčky"
+        ],
+        "nahrazuje": [
+          "Sádrokartonář",
+          "Sádrokartony"
+        ]
+      },
+      {
+        "name": "Tesař",
+        "syn": [
+          "tesařství",
+          "krov",
+          "krovy",
+          "dřevostavba",
+          "dřevěné konstrukce"
+        ],
+        "nahrazuje": [
+          "Tesařství",
+          "Tesař / truhlář"
+        ]
+      },
+      {
+        "name": "Truhlář",
+        "syn": [
+          "truhlářství",
+          "nábytek na míru",
+          "kuchyňská linka",
+          "vestavěné skříně",
+          "schodiště",
+          "dřevěné schody"
+        ],
+        "nahrazuje": [
+          "Truhlářství a nábytek na míru",
+          "Schodiště"
+        ]
+      },
+      {
+        "name": "Pokrývač",
+        "syn": [
+          "střecha",
+          "střechy",
+          "krytina",
+          "oprava střechy",
+          "střešní okna"
+        ],
+        "nahrazuje": [
+          "Pokrývač"
+        ]
+      },
+      {
+        "name": "Klempíř",
+        "syn": [
+          "okapy",
+          "oplechování",
+          "klempířství",
+          "žlaby"
+        ],
+        "nahrazuje": [
+          "Klempíř"
+        ]
+      },
+      {
+        "name": "Fasády a zateplení",
+        "syn": [
+          "fasáda",
+          "fasádník",
+          "zateplení",
+          "omítka fasády",
+          "kontaktní zateplení"
+        ],
+        "nahrazuje": [
+          "Fasádník",
+          "Zateplení"
+        ]
+      },
+      {
+        "name": "Zámečník a svářeč",
+        "syn": [
+          "zámečnictví",
+          "svařování",
+          "kovovýroba",
+          "zábradlí",
+          "vrata",
+          "brány",
+          "otevírání zámků"
+        ],
+        "nahrazuje": [
+          "Zámečník",
+          "Zámečnictví",
+          "Svařování a kovovýroba",
+          "Vrata a brány"
+        ]
+      },
+      {
+        "name": "Okna a dveře",
+        "syn": [
+          "plastová okna",
+          "výměna oken",
+          "montáž dveří",
+          "seřízení oken"
+        ],
+        "nahrazuje": [
+          "Okna a dveře"
+        ]
+      },
+      {
+        "name": "Sklenář",
+        "syn": [
+          "sklo",
+          "zasklení",
+          "sklenářství",
+          "zrcadla"
+        ],
+        "nahrazuje": [
+          "Sklenář",
+          "Sklenářství"
+        ]
+      },
+      {
+        "name": "Kominík",
+        "syn": [
+          "komín",
+          "čištění komína",
+          "revize komína"
+        ],
+        "nahrazuje": [
+          "Kominík"
+        ]
+      },
+      {
+        "name": "Kamnář",
+        "syn": [
+          "krby",
+          "kamna",
+          "krbová vložka",
+          "kachlová kamna"
+        ],
+        "nahrazuje": [
+          "Krby a kamna"
+        ]
+      },
+      {
+        "name": "Klimatizace a vzduchotechnika",
+        "syn": [
+          "klimatizace",
+          "rekuperace",
+          "vzduchotechnika",
+          "montáž klimatizace"
+        ],
+        "nahrazuje": [
+          "Klimatizace a vzduchotechnika"
+        ]
+      },
+      {
+        "name": "Rekonstrukce na klíč",
+        "syn": [
+          "rekonstrukce bytu",
+          "rekonstrukce koupelny",
+          "rekonstrukce kuchyně",
+          "stavební firma"
+        ],
+        "nahrazuje": [
+          "Rekonstrukce bytu",
+          "Rekonstrukce koupelny",
+          "Rekonstrukce kuchyně",
+          "Rekonstrukce na klíč"
+        ]
+      },
+      {
+        "name": "Projektant a stavební dozor",
+        "syn": [
+          "projekt",
+          "projektová dokumentace",
+          "stavební povolení",
+          "statik",
+          "CAD",
+          "technický dozor"
+        ],
+        "nahrazuje": [
+          "Projektant",
+          "CAD konstruktér",
+          "Stavební dozor",
+          "Projektová dokumentace"
+        ]
+      },
+      {
+        "name": "Geodet",
+        "syn": [
+          "zaměření",
+          "vytyčení",
+          "geometrický plán",
+          "geodetické práce"
+        ],
+        "nahrazuje": [
+          "Geodet",
+          "Geodetické práce"
+        ]
+      },
+      {
+        "name": "Energetický specialista",
+        "syn": [
+          "PENB",
+          "energetický štítek",
+          "energetický audit"
+        ],
+        "nahrazuje": [
+          "Energetický specialista (PENB)",
+          "Energetické štítky a audity"
+        ]
+      },
+      {
+        "name": "Studnař",
+        "syn": [
+          "studna",
+          "vrt",
+          "vrtání studny"
+        ],
+        "nahrazuje": [
+          "Studny a vrty"
+        ]
+      },
+      {
+        "name": "Revizní technik",
+        "syn": [
+          "revize",
+          "kontrola",
+          "požární zařízení",
+          "hydranty",
+          "výtahy"
+        ],
+        "nahrazuje": [
+          "Revize a kontroly",
+          "Požárně bezpečnostní zařízení",
+          "Hydrant",
+          "Výtah"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "dum-a-byt",
+    "name": "Dům a byt",
+    "profese": [
+      {
+        "name": "Hodinový manžel",
+        "syn": [
+          "drobné opravy",
+          "údržba",
+          "pověšení",
+          "vrtání",
+          "opravy v domácnosti"
+        ],
+        "nahrazuje": [
+          "Hodinový manžel",
+          "Drobné opravy"
+        ]
+      },
+      {
+        "name": "Montáž nábytku",
+        "syn": [
+          "skládání nábytku",
+          "IKEA",
+          "montáž kuchyně",
+          "sestavení nábytku"
+        ],
+        "nahrazuje": [
+          "Montáž nábytku",
+          "Montáž nábytku při stěhování"
+        ]
+      },
+      {
+        "name": "Opravář spotřebičů",
+        "syn": [
+          "pračka",
+          "myčka",
+          "lednice",
+          "sporák",
+          "servis spotřebičů"
+        ],
+        "nahrazuje": [
+          "Opravy spotřebičů",
+          "Oprava domácích spotřebičů"
+        ]
+      },
+      {
+        "name": "Čalouník",
+        "syn": [
+          "čalounictví",
+          "přečalounění",
+          "sedačka",
+          "potahy"
+        ],
+        "nahrazuje": [
+          "Čalounictví"
+        ]
+      },
+      {
+        "name": "Čištění odpadů a kanalizace",
+        "syn": [
+          "ucpaný odpad",
+          "krtkování",
+          "kanalizace",
+          "kamera do potrubí"
+        ],
+        "nahrazuje": [
+          "Čištění odpadů a kanalizace"
+        ]
+      },
+      {
+        "name": "Deratizace a dezinsekce",
+        "syn": [
+          "škůdci",
+          "štěnice",
+          "švábi",
+          "myši",
+          "dezinfekce"
+        ],
+        "nahrazuje": [
+          "Deratizace, dezinfekce a dezinsekce",
+          "Dezinfekce a dezinsekce"
+        ]
+      },
+      {
+        "name": "Žaluzie a stínicí technika",
+        "syn": [
+          "žaluzie",
+          "rolety",
+          "markýzy",
+          "sítě proti hmyzu"
+        ],
+        "nahrazuje": [
+          "Stínicí technika a žaluzie"
+        ]
+      },
+      {
+        "name": "Zabezpečení a kamery",
+        "syn": [
+          "alarm",
+          "kamerový systém",
+          "zabezpečení domu",
+          "přístupový systém"
+        ],
+        "nahrazuje": [
+          "Zabezpečení a kamerové systémy",
+          "Kamery a zabezpečení"
+        ]
+      },
+      {
+        "name": "Chytrá domácnost",
+        "syn": [
+          "smart home",
+          "automatizace domu",
+          "chytré osvětlení"
+        ],
+        "nahrazuje": [
+          "Chytrá domácnost (smart home)",
+          "Smart home instalace"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "zahrada",
+    "name": "Zahrada a exteriér",
+    "profese": [
+      {
+        "name": "Zahradník",
+        "syn": [
+          "zahrada",
+          "údržba zahrady",
+          "sekání trávy",
+          "stříhání keřů",
+          "pokládka trávníku",
+          "trávník",
+          "zahradnické práce"
+        ],
+        "nahrazuje": [
+          "Zahradník",
+          "Zahradnické práce",
+          "Sekání trávy",
+          "Sekání trávy a údržba trávníku",
+          "Pokládka trávníku",
+          "sekání keře"
+        ]
+      },
+      {
+        "name": "Arborista",
+        "syn": [
+          "kácení stromů",
+          "prořez stromů",
+          "řez stromů",
+          "rizikové kácení",
+          "frézování pařezů"
+        ],
+        "nahrazuje": [
+          "Kácení stromů a arboristika",
+          "Kácení a prořez stromů",
+          "Řez stromů a keřů"
+        ]
+      },
+      {
+        "name": "Pergoly a altány",
+        "syn": [
+          "pergola",
+          "altán",
+          "zastřešení terasy",
+          "stavba pergoly",
+          "terasa"
+        ],
+        "nahrazuje": [
+          "Pergoly a altány",
+          "Stavba pergoly"
+        ]
+      },
+      {
+        "name": "Zahradní architekt",
+        "syn": [
+          "návrh zahrady",
+          "zahradní architektura",
+          "výsadba"
+        ],
+        "nahrazuje": [
+          "Zahradní architektura"
+        ]
+      },
+      {
+        "name": "Zámková dlažba",
+        "syn": [
+          "dlažba",
+          "pokládka dlažby",
+          "chodník",
+          "příjezdová cesta"
+        ],
+        "nahrazuje": [
+          "Zámková dlažba"
+        ]
+      },
+      {
+        "name": "Ploty a oplocení",
+        "syn": [
+          "plot",
+          "oplocení",
+          "pletivo",
+          "podezdívka"
+        ],
+        "nahrazuje": [
+          "Ploty a oplocení"
+        ]
+      },
+      {
+        "name": "Bazény a jezírka",
+        "syn": [
+          "bazén",
+          "jezírko",
+          "servis bazénu",
+          "zahradní jezírko"
+        ],
+        "nahrazuje": [
+          "Bazény a jezírka"
+        ]
+      },
+      {
+        "name": "Závlahy",
+        "syn": [
+          "závlahový systém",
+          "automatická závlaha",
+          "kapková závlaha"
+        ],
+        "nahrazuje": [
+          "Závlahové systémy"
+        ]
+      },
+      {
+        "name": "Čištění okapů, fasád a střech",
+        "syn": [
+          "čištění okapů",
+          "mytí fasády",
+          "tlakové mytí",
+          "mytí teras",
+          "mytí střechy"
+        ],
+        "nahrazuje": [
+          "Čištění okapů",
+          "Mytí fasád a teras",
+          "Tlakové mytí střech"
+        ]
+      },
+      {
+        "name": "Zimní údržba",
+        "syn": [
+          "odklízení sněhu",
+          "posyp",
+          "shrnování sněhu"
+        ],
+        "nahrazuje": [
+          "Zimní údržba"
+        ]
+      },
+      {
+        "name": "Servis zahradní techniky",
+        "syn": [
+          "sekačka",
+          "křovinořez",
+          "motorová pila",
+          "oprava sekačky"
+        ],
+        "nahrazuje": [
+          "Oprava zahradní techniky"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "uklid",
+    "name": "Úklid",
+    "profese": [
+      {
+        "name": "Úklid domácností",
+        "syn": [
+          "uklízečka",
+          "úklid bytu",
+          "úklid domu",
+          "pravidelný úklid"
+        ],
+        "nahrazuje": [
+          "Úklid domácnosti"
+        ]
+      },
+      {
+        "name": "Generální úklid",
+        "syn": [
+          "úklid po rekonstrukci",
+          "úklid po malování",
+          "velký úklid",
+          "úklid po nájemníkovi"
+        ],
+        "nahrazuje": [
+          "Generální úklid",
+          "Úklid po rekonstrukci"
+        ]
+      },
+      {
+        "name": "Úklid firem a společných prostor",
+        "syn": [
+          "úklid kanceláří",
+          "úklid provozoven",
+          "úklid domu",
+          "úklid schodiště"
+        ],
+        "nahrazuje": [
+          "Úklid firem a provozoven",
+          "Úklid komerčních prostor",
+          "Úklid společných prostor"
+        ]
+      },
+      {
+        "name": "Mytí oken",
+        "syn": [
+          "okna",
+          "mytí výloh",
+          "mytí solárních panelů"
+        ],
+        "nahrazuje": [
+          "Mytí oken",
+          "Mytí solárních panelů"
+        ]
+      },
+      {
+        "name": "Čištění koberců a čalounění",
+        "syn": [
+          "tepování",
+          "čištění sedačky",
+          "čištění matrací"
+        ],
+        "nahrazuje": [
+          "Čištění koberců a čalounění"
+        ]
+      },
+      {
+        "name": "Žehlení a praní",
+        "syn": [
+          "žehlení",
+          "praní prádla",
+          "prádelna"
+        ],
+        "nahrazuje": [
+          "Žehlení a praní prádla"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "stehovani",
+    "name": "Stěhování a transport",
+    "profese": [
+      {
+        "name": "Stěhování",
+        "syn": [
+          "stěhovák",
+          "stěhovací firma",
+          "stěhování bytu",
+          "stěhování firmy"
+        ],
+        "nahrazuje": [
+          "Stěhování",
+          "Stěhování a vyklízení"
+        ]
+      },
+      {
+        "name": "Vyklízení a odvoz",
+        "syn": [
+          "vyklízení bytu",
+          "odvoz nábytku",
+          "odvoz odpadu",
+          "kontejner"
+        ],
+        "nahrazuje": [
+          "Vyklízení nemovitostí",
+          "Odvoz odpadu a nábytku"
+        ]
+      },
+      {
+        "name": "Autodoprava a kurýr",
+        "syn": [
+          "dovoz",
+          "přeprava",
+          "dodávka",
+          "kurýr",
+          "velké zásilky",
+          "nákladní doprava"
+        ],
+        "nahrazuje": [
+          "Autodoprava",
+          "Kurýr / velké zásilky",
+          "Nákladní doprava a dovoz"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "auto",
+    "name": "Auto",
+    "profese": [
+      {
+        "name": "Automechanik",
+        "syn": [
+          "autoservis",
+          "servis auta",
+          "oprava auta",
+          "výměna oleje",
+          "STK",
+          "brzdy"
+        ],
+        "nahrazuje": [
+          "Autoservis",
+          "Příprava na STK",
+          "Výměna oleje"
+        ]
+      },
+      {
+        "name": "Pneuservis",
+        "syn": [
+          "přezutí",
+          "pneumatiky",
+          "gumy",
+          "mobilní pneuservis"
+        ],
+        "nahrazuje": [
+          "Pneuservis",
+          "Pneuservis mobilní"
+        ]
+      },
+      {
+        "name": "Autoelektrikář",
+        "syn": [
+          "autoelektrika",
+          "diagnostika",
+          "baterie auta"
+        ],
+        "nahrazuje": [
+          "Autoelektrika",
+          "Autoelektrikář"
+        ]
+      },
+      {
+        "name": "Karosář a lakovna",
+        "syn": [
+          "autolakovna",
+          "autoklempíř",
+          "lakování auta",
+          "promáčkliny"
+        ],
+        "nahrazuje": [
+          "Autoklempířství a lakovna",
+          "Autolakovna"
+        ]
+      },
+      {
+        "name": "Autosklo",
+        "syn": [
+          "čelní sklo",
+          "výměna skla",
+          "oprava skla"
+        ],
+        "nahrazuje": [
+          "Autosklo",
+          "Výměna autoskel"
+        ]
+      },
+      {
+        "name": "Detailing a mytí aut",
+        "syn": [
+          "mytí auta",
+          "čištění interiéru",
+          "leštění",
+          "keramika",
+          "leštění světlometů"
+        ],
+        "nahrazuje": [
+          "Detailing auta",
+          "Mytí a čištění vozů",
+          "Mytí auta",
+          "Leštění světlometů"
+        ]
+      },
+      {
+        "name": "Motoservis",
+        "syn": [
+          "motorka",
+          "servis motorky",
+          "skútr"
+        ],
+        "nahrazuje": [
+          "Motoservis"
+        ]
+      },
+      {
+        "name": "Odtahová služba",
+        "syn": [
+          "odtah",
+          "odtahovka",
+          "asistence"
+        ],
+        "nahrazuje": [
+          "Odtahová služba"
+        ]
+      },
+      {
+        "name": "Autoškola",
+        "syn": [
+          "řidičák",
+          "kondiční jízdy",
+          "výuka řízení"
+        ],
+        "nahrazuje": [
+          "Autoškola"
+        ]
+      },
+      {
+        "name": "Řidič",
+        "syn": [
+          "odvoz osob",
+          "taxi",
+          "osobní řidič"
+        ],
+        "nahrazuje": [
+          "Řidič a odvoz osob"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "it",
+    "name": "IT, technika a opravy",
+    "profese": [
+      {
+        "name": "Servis počítačů",
+        "syn": [
+          "oprava počítače",
+          "notebook",
+          "IT podpora",
+          "záchrana dat",
+          "instalace Windows"
+        ],
+        "nahrazuje": [
+          "Oprava počítačů a notebooků",
+          "Servis počítačů a notebooků",
+          "Zálohování a záchrana dat",
+          "IT podpora a poradenství",
+          "IT poradenství"
+        ]
+      },
+      {
+        "name": "Servis mobilů",
+        "syn": [
+          "oprava telefonu",
+          "výměna displeje",
+          "tablet",
+          "baterie mobilu"
+        ],
+        "nahrazuje": [
+          "Oprava telefonů",
+          "Servis mobilů a tabletů"
+        ]
+      },
+      {
+        "name": "Sítě a Wi-Fi",
+        "syn": [
+          "wifi",
+          "router",
+          "internet",
+          "síťový administrátor"
+        ],
+        "nahrazuje": [
+          "Nastavení wifi a sítě",
+          "Počítačové sítě a Wi-Fi",
+          "Síťový administrátor"
+        ]
+      },
+      {
+        "name": "Antény, TV a audio",
+        "syn": [
+          "anténa",
+          "satelit",
+          "montáž televize",
+          "domácí kino"
+        ],
+        "nahrazuje": [
+          "Antény a satelity",
+          "Instalace TV a audio"
+        ]
+      },
+      {
+        "name": "Programátor",
+        "syn": [
+          "vývoj aplikací",
+          "webový vývojář",
+          "mobilní aplikace",
+          "databáze",
+          "PLC",
+          "automatizace",
+          "data analytik"
+        ],
+        "nahrazuje": [
+          "Vývoj aplikací",
+          "Webový vývojář",
+          "Mobile developer",
+          "Embedded / firmware vývojář",
+          "PLC programátor",
+          "Automatizační inženýr",
+          "Robotický inženýr",
+          "Elektronický konstruktér",
+          "Databáze a systémy",
+          "Databázový administrátor",
+          "Data analytik",
+          "Technický konzultant / PM"
+        ]
+      },
+      {
+        "name": "IT bezpečnost",
+        "syn": [
+          "kybernetická bezpečnost",
+          "zabezpečení sítě",
+          "penetrační test"
+        ],
+        "nahrazuje": [
+          "IT bezpečnost",
+          "Kybernetická bezpečnost"
+        ]
+      },
+      {
+        "name": "3D tisk",
+        "syn": [
+          "3D tiskárna",
+          "modelování",
+          "3D model"
+        ],
+        "nahrazuje": [
+          "3D tiskař a modelář"
+        ]
+      },
+      {
+        "name": "Pilot dronu",
+        "syn": [
+          "dron",
+          "letecké snímky",
+          "letecké video"
+        ],
+        "nahrazuje": [
+          "Drone pilot"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "online",
+    "name": "Digitální a odborné služby",
+    "profese": [
+      {
+        "name": "Tvorba webů a e-shopů",
+        "syn": [
+          "web",
+          "webové stránky",
+          "e-shop",
+          "webdesign",
+          "UX",
+          "správa webu"
+        ],
+        "nahrazuje": [
+          "Tvorba webových stránek",
+          "Správa a údržba webu",
+          "Tvorba a správa e-shopu",
+          "UI/UX designer"
+        ]
+      },
+      {
+        "name": "Grafik",
+        "syn": [
+          "grafický design",
+          "logo",
+          "firemní identita",
+          "vizitky",
+          "letáky"
+        ],
+        "nahrazuje": [
+          "Grafický designer",
+          "Grafický design",
+          "Logo a firemní identita"
+        ]
+      },
+      {
+        "name": "Copywriter",
+        "syn": [
+          "texty",
+          "textař",
+          "články",
+          "copywriting"
+        ],
+        "nahrazuje": [
+          "Copywriter a textař",
+          "Copywriting a texty"
+        ]
+      },
+      {
+        "name": "Online marketing",
+        "syn": [
+          "PPC",
+          "SEO",
+          "reklama",
+          "Google Ads",
+          "e-mailing",
+          "marketingové poradenství"
+        ],
+        "nahrazuje": [
+          "PPC a placená reklama",
+          "SEO a optimalizace pro vyhledávače",
+          "SEO specialista",
+          "E-mailový marketing",
+          "Marketingové poradenství"
+        ]
+      },
+      {
+        "name": "Správa sociálních sítí",
+        "syn": [
+          "sociální sítě",
+          "Instagram",
+          "Facebook",
+          "TikTok",
+          "social media"
+        ],
+        "nahrazuje": [
+          "Správa sociálních sítí",
+          "Správce sociálních sítí"
+        ]
+      },
+      {
+        "name": "Střih videa",
+        "syn": [
+          "video",
+          "editace videa",
+          "střihač"
+        ],
+        "nahrazuje": [
+          "Střih videa"
+        ]
+      },
+      {
+        "name": "Překladatel a tlumočník",
+        "syn": [
+          "překlady",
+          "tlumočení",
+          "soudní překlad"
+        ],
+        "nahrazuje": [
+          "Překlady a tlumočení",
+          "Překlady",
+          "Tlumočení"
+        ]
+      },
+      {
+        "name": "Virtuální asistentka",
+        "syn": [
+          "asistentka",
+          "administrativa",
+          "zadávání dat"
+        ],
+        "nahrazuje": [
+          "Virtuální asistence"
+        ]
+      },
+      {
+        "name": "AI a automatizace",
+        "syn": [
+          "umělá inteligence",
+          "chatbot",
+          "automatizace procesů"
+        ],
+        "nahrazuje": [
+          "Automatizace a AI nástroje"
+        ]
+      },
+      {
+        "name": "Tvorba online kurzů",
+        "syn": [
+          "e-learning",
+          "online kurz",
+          "videokurz"
+        ],
+        "nahrazuje": [
+          "Tvorba online kurzů"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "doucovani",
+    "name": "Výuka a doučování",
+    "profese": [
+      {
+        "name": "Doučování",
+        "syn": [
+          "doučování základní škola",
+          "doučování střední škola",
+          "příprava na přijímačky",
+          "příprava na maturitu",
+          "dospělí"
+        ],
+        "nahrazuje": [
+          "Doučování — základní škola",
+          "Doučování — střední škola",
+          "Doučování pro dospělé",
+          "Příprava na přijímačky",
+          "Příprava na maturitu"
+        ]
+      },
+      {
+        "name": "Matematika",
+        "syn": [
+          "doučování matematiky",
+          "matika"
+        ],
+        "nahrazuje": [
+          "Matematika"
+        ]
+      },
+      {
+        "name": "Čeština",
+        "syn": [
+          "český jazyk",
+          "literatura",
+          "doučování češtiny"
+        ],
+        "nahrazuje": [
+          "Český jazyk a literatura",
+          "Čeština"
+        ]
+      },
+      {
+        "name": "Angličtina",
+        "syn": [
+          "anglický jazyk",
+          "lektor angličtiny",
+          "konverzace"
+        ],
+        "nahrazuje": [
+          "Angličtina"
+        ]
+      },
+      {
+        "name": "Němčina",
+        "syn": [
+          "německý jazyk",
+          "lektor němčiny"
+        ],
+        "nahrazuje": [
+          "Němčina"
+        ]
+      },
+      {
+        "name": "Další cizí jazyky",
+        "syn": [
+          "francouzština",
+          "španělština",
+          "italština",
+          "ruština",
+          "jazyky"
+        ],
+        "nahrazuje": [
+          "Francouzština",
+          "Španělština",
+          "Italština",
+          "Ruština",
+          "Další cizí jazyky",
+          "Jiný jazyk"
+        ]
+      },
+      {
+        "name": "Přírodní vědy a zeměpis",
+        "syn": [
+          "chemie",
+          "fyzika",
+          "biologie",
+          "dějepis",
+          "zeměpis"
+        ],
+        "nahrazuje": [
+          "Chemie",
+          "Fyzika",
+          "Biologie",
+          "Chemie, fyzika a biologie",
+          "Dějepis a zeměpis"
+        ]
+      },
+      {
+        "name": "Výuka hudby",
+        "syn": [
+          "kytara",
+          "klavír",
+          "zpěv",
+          "hudební nástroj"
+        ],
+        "nahrazuje": [
+          "Hudba",
+          "Výuka hudby"
+        ]
+      },
+      {
+        "name": "Výuka tance",
+        "syn": [
+          "tanec",
+          "taneční",
+          "lekce tance"
+        ],
+        "nahrazuje": [
+          "Výuka tance"
+        ]
+      },
+      {
+        "name": "Výtvarné kurzy",
+        "syn": [
+          "malování",
+          "kreslení",
+          "keramika"
+        ],
+        "nahrazuje": [
+          "Výtvarné kurzy"
+        ]
+      },
+      {
+        "name": "Počítačové kurzy a programování",
+        "syn": [
+          "kurz Excel",
+          "práce s počítačem",
+          "programování pro děti"
+        ],
+        "nahrazuje": [
+          "Kurzy práce s počítačem",
+          "Programování a IT"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "pece-o-lidi",
+    "name": "Péče o lidi",
+    "profese": [
+      {
+        "name": "Chůva",
+        "syn": [
+          "hlídání dětí",
+          "babysitting",
+          "au-pair"
+        ],
+        "nahrazuje": [
+          "Hlídání dětí"
+        ]
+      },
+      {
+        "name": "Péče o seniory",
+        "syn": [
+          "pečovatelka",
+          "senior",
+          "domácí péče"
+        ],
+        "nahrazuje": [
+          "Péče o seniory"
+        ]
+      },
+      {
+        "name": "Osobní asistent",
+        "syn": [
+          "asistence",
+          "doprovod",
+          "pomoc s nákupem"
+        ],
+        "nahrazuje": [
+          "Osobní asistent"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "zvirata",
+    "name": "Zvířata",
+    "profese": [
+      {
+        "name": "Groomer",
+        "syn": [
+          "stříhání psů",
+          "psí salon",
+          "úprava srsti",
+          "koupání psa"
+        ],
+        "nahrazuje": [
+          "Grooming psů a koček",
+          "Stříhání psů"
+        ]
+      },
+      {
+        "name": "Hlídání a venčení",
+        "syn": [
+          "venčení psů",
+          "pet sitting",
+          "hlídání psa",
+          "hlídání kočky"
+        ],
+        "nahrazuje": [
+          "Hlídání zvířat (pet sitting)",
+          "Venčení psů"
+        ]
+      },
+      {
+        "name": "Výcvik psů",
+        "syn": [
+          "trenér psů",
+          "kynolog",
+          "poslušnost"
+        ],
+        "nahrazuje": [
+          "Výcvik psů"
+        ]
+      },
+      {
+        "name": "Veterinář",
+        "syn": [
+          "veterina",
+          "veterinární péče",
+          "očkování psa"
+        ],
+        "nahrazuje": [
+          "Veterinární péče"
+        ]
+      },
+      {
+        "name": "Přeprava zvířat",
+        "syn": [
+          "doprava zvířat",
+          "převoz psa",
+          "převoz koně"
+        ],
+        "nahrazuje": [
+          "Doprava zvířat",
+          "Přeprava zvířat"
+        ]
+      },
+      {
+        "name": "Podkovář",
+        "syn": [
+          "podkovářství",
+          "kopyta",
+          "kůň"
+        ],
+        "nahrazuje": [
+          "Podkovářství"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "pravo-finance",
+    "name": "Právo, finance a pojištění",
+    "profese": [
+      {
+        "name": "Advokát",
+        "syn": [
+          "právník",
+          "právní služby",
+          "smlouvy",
+          "převod nemovitosti",
+          "exekuce",
+          "insolvence"
+        ],
+        "nahrazuje": [
+          "Advokátní služby",
+          "Právní služby",
+          "Sepsání smluv",
+          "Právo nemovitostí a převody",
+          "Dluhy, exekuce a insolvence"
+        ]
+      },
+      {
+        "name": "Účetní",
+        "syn": [
+          "účetnictví",
+          "mzdy",
+          "daňové přiznání",
+          "personalistika"
+        ],
+        "nahrazuje": [
+          "Účetnictví",
+          "Mzdy a personalistika",
+          "Daňové přiznání"
+        ]
+      },
+      {
+        "name": "Daňový poradce",
+        "syn": [
+          "daně",
+          "daňové poradenství"
+        ],
+        "nahrazuje": [
+          "Daňový poradce"
+        ]
+      },
+      {
+        "name": "Finanční poradce",
+        "syn": [
+          "hypotéka",
+          "úvěr",
+          "pojištění",
+          "investice"
+        ],
+        "nahrazuje": [
+          "Finanční poradenství",
+          "Hypotéky a úvěry",
+          "Pojištění"
+        ]
+      },
+      {
+        "name": "Realitní makléř",
+        "syn": [
+          "reality",
+          "prodej bytu",
+          "pronájem",
+          "odhad nemovitosti"
+        ],
+        "nahrazuje": [
+          "Realitní makléř",
+          "Realitní služby",
+          "Odhad nemovitostí"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "firmy",
+    "name": "Služby pro firmy",
+    "profese": [
+      {
+        "name": "BOZP a požární ochrana",
+        "syn": [
+          "BOZP",
+          "PO",
+          "školení BOZP"
+        ],
+        "nahrazuje": [
+          "BOZP a požární ochrana"
+        ]
+      },
+      {
+        "name": "Firemní školení",
+        "syn": [
+          "školení",
+          "kurzy pro firmy",
+          "teambuilding"
+        ],
+        "nahrazuje": [
+          "Firemní školení"
+        ]
+      },
+      {
+        "name": "Tisk a reklamní předměty",
+        "syn": [
+          "tiskárna",
+          "polepy",
+          "reklamní předměty",
+          "potisk"
+        ],
+        "nahrazuje": [
+          "Tisk a reklamní předměty"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "udalosti",
+    "name": "Události a volný čas",
+    "profese": [
+      {
+        "name": "Fotograf",
+        "syn": [
+          "focení",
+          "svatební fotograf",
+          "fotky",
+          "portrét"
+        ],
+        "nahrazuje": [
+          "Fotograf"
+        ]
+      },
+      {
+        "name": "Kameraman",
+        "syn": [
+          "video",
+          "svatební video",
+          "natáčení"
+        ],
+        "nahrazuje": [
+          "Kameraman"
+        ]
+      },
+      {
+        "name": "DJ a hudba",
+        "syn": [
+          "DJ",
+          "kapela",
+          "živá hudba",
+          "ozvučení",
+          "osvětlení"
+        ],
+        "nahrazuje": [
+          "DJ a hudba",
+          "DJ a živá hudba",
+          "Živá hudba a kapely",
+          "Ozvučení a osvětlení"
+        ]
+      },
+      {
+        "name": "Cukrář",
+        "syn": [
+          "dorty",
+          "cukrářství",
+          "zákusky",
+          "svatební dort"
+        ],
+        "nahrazuje": [
+          "Cukrářství a dorty",
+          "Dorty a cukrářství"
+        ]
+      },
+      {
+        "name": "Catering a kuchař",
+        "syn": [
+          "catering",
+          "kuchař",
+          "raut",
+          "jídlo na akci"
+        ],
+        "nahrazuje": [
+          "Catering a kuchař"
+        ]
+      },
+      {
+        "name": "Dekorace a květiny",
+        "syn": [
+          "výzdoba",
+          "aranžmá",
+          "květinová výzdoba",
+          "floristka"
+        ],
+        "nahrazuje": [
+          "Dekorace a aranžmá",
+          "Dekorace a květiny",
+          "Květinová výzdoba"
+        ]
+      },
+      {
+        "name": "Animátor pro děti",
+        "syn": [
+          "dětská oslava",
+          "program pro děti",
+          "klaun",
+          "malování na obličej"
+        ],
+        "nahrazuje": [
+          "Animační programy pro děti",
+          "Program pro děti"
+        ]
+      },
+      {
+        "name": "Moderátor",
+        "syn": [
+          "moderování",
+          "konferenciér"
+        ],
+        "nahrazuje": [
+          "Moderování akcí"
+        ]
+      },
+      {
+        "name": "Svatební koordinátor",
+        "syn": [
+          "svatba",
+          "wedding planner",
+          "organizace svatby"
+        ],
+        "nahrazuje": [
+          "Svatební koordinace"
+        ]
+      },
+      {
+        "name": "Půjčovna vybavení",
+        "syn": [
+          "půjčovna",
+          "pronájem stanů",
+          "skákací hrad",
+          "vybavení na akce"
+        ],
+        "nahrazuje": [
+          "Pronájem vybavení na akce",
+          "Půjčovna vybavení"
+        ]
+      }
+    ]
+  }
+]

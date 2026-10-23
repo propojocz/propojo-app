@@ -6,6 +6,8 @@ import Link from 'next/link'
 import { CalendarDays, AlertCircle } from 'lucide-react'
 import { bookingStatusBadge } from '@/lib/booking/labels'
 import ProfileNameLink from '@/components/ui/ProfileNameLink'
+import { customerTodo, providerTodo } from '@/lib/order-todo'
+import { openReschedulesOf } from '@/lib/actions/order-alerts'
 
 export const metadata = { title: 'Objednávky | Dashboard' }
 
@@ -20,24 +22,6 @@ const STATUS_COLORS: Record<string, string> = {
   dokonceno: 'bg-emerald-100 text-emerald-700 border-emerald-200',
   zruseno: 'bg-red-100 text-red-700 border-red-200',
   spor: 'bg-orange-100 text-orange-700 border-orange-200',
-}
-
-// Co po zákazníkovi objednávka chce? Vrací text výzvy, nebo null když nic.
-// Díky tomu rezervace nezapadne — nedodělané jdou nahoru a je vidět proč.
-function customerTodo(o: any): string | null {
-  if (o.status === 'zruseno' || o.status === 'dokonceno') return null
-  // Model v2: jediný úkol zákazníka je dokončit platbu, dokud rezervace nečeká na poskytovatele.
-  if (o.booking_state || o.offer_kind) {
-    const ceka = o.booking_state === 'pending_payment' || (o.booking_state == null && o.status === 'prijato')
-    return ceka ? 'Dokončete rezervaci a zaplaťte' : null
-  }
-  if (o.deposit_status === 'pending') {
-    return o.location_address
-      ? 'Zaplaťte, aby termín platil'
-      : 'Doplňte adresu a zaplaťte'
-  }
-  if (o.status === 'ceka_potvrzeni') return 'Potvrďte dokončení a ohodnoťte'
-  return null
 }
 
 // Objednávky z poptávky, které ještě nejsou zaplacené – žijí jen v chatu jednání, v seznamu se neukazují
@@ -141,7 +125,14 @@ export default async function ObjednavkyPage() {
   const hidden = await unpaidRequestDrafts([...(asProvider ?? []), ...(asCustomer ?? [])])
   const provOrders = (asProvider ?? []).filter((o: any) => !hidden.has(o.id))
   const custOrdersRaw = (asCustomer ?? []).filter((o: any) => !hidden.has(o.id))
-  const todoOf = customerTodo
+  // Stejná pravidla jako číslo v menu (lib/order-todo.ts)
+  const resch = await openReschedulesOf(custOrdersRaw.filter((o: any) => o.booking_state === 'confirmed').map((o: any) => o.id))
+  const todoOf = (o: any) => customerTodo(o, { openReschedule: resch })
+  const now = Date.now()
+  const provTodoOf = (o: any) => providerTodo(o, now)
+  // U mě: co čeká na moji akci, jde nahoru
+  const provTodo = provOrders.filter((o: any) => provTodoOf(o) !== null)
+  const provOstatni = provOrders.filter((o: any) => provTodoOf(o) === null)
 
   // Rozdělíme: co po mně něco chce (platba, potvrzení) jde NAHORU. Bez toho
   // zákazník po rezervaci odejde a objednávku pak nenajde.
@@ -192,7 +183,17 @@ export default async function ObjednavkyPage() {
             <h2 className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700">
               Objednávky u mě ({provOrders.length})
             </h2>
-            {provOrders.map((o: any) => (
+            {provTodo.length > 0 && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2.5">
+                <p className="flex items-center gap-2 text-sm font-bold text-amber-900">
+                  <AlertCircle className="h-4 w-4" /> Čeká na vás ({provTodo.length})
+                </p>
+              </div>
+            )}
+            {provTodo.map((o: any) => (
+              <OrderCard key={o.id} o={o} role="provider" otherName={nameMap[o.customer_id] ?? 'Zákazník'} todo={provTodoOf(o)} />
+            ))}
+            {provOstatni.map((o: any) => (
               <OrderCard key={o.id} o={o} role="provider" otherName={nameMap[o.customer_id] ?? 'Zákazník'} />
             ))}
           </section>

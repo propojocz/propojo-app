@@ -77,14 +77,15 @@ async function getSubcategories(categorySlug?: string) {
   const supabase = createClient()
   const { data: cat } = await supabase.from('categories').select('id').eq('slug', categorySlug).single()
   if (!cat) return []
-  const { data } = await supabase.from('subcategories').select('id, name').eq('category_id', (cat as any).id).eq('is_approved', true).order('name')
+  // Profese kategorie (vyřazené obory ne) v pořadí z číselníku
+  const { data } = await supabase.from('subcategories').select('id, name').eq('category_id', (cat as any).id).eq('is_approved', true).eq('retired', false).order('sort_order', { nullsFirst: false }).order('name')
   return (data as { id: string; name: string }[]) ?? []
 }
 
 // Karty, jejichž podkategorie odpovídají textu (fulltext přes názvy podkategorií).
 async function serviceIdsBySubcatText(q: string): Promise<string[]> {
   const supabase = createClient()
-  const { data: subs } = await supabase.from('subcategories').select('id').eq('is_approved', true).ilike('name', `%${q}%`)
+  const { data: subs } = await supabase.from('subcategories').select('id').eq('is_approved', true).eq('retired', false).ilike('name', `%${q}%`)
   const subIds = (subs ?? []).map((s: any) => s.id)
   if (subIds.length === 0) return []
   const { data: links } = await supabase.from('service_subcategories').select('service_id').in('subcategory_id', subIds)
@@ -632,15 +633,7 @@ async function ServiceList({
     : { data: [] as any[] }
   const catName: Record<string, string> = Object.fromEntries((catRows ?? []).map((c: any) => [c.slug, c.name]))
 
-  const { data: subLinks } = serviceIds.length > 0
-    ? await supabase.from('service_subcategories').select('service_id, subcategories(name)').in('service_id', serviceIds)
-    : { data: [] as any[] }
-  const subsByService: Record<string, string[]> = {}
-  for (const l of (subLinks ?? []) as any[]) {
-    const nm = l.subcategories?.name
-    if (!nm) continue
-    ;(subsByService[l.service_id] ??= []).push(nm)
-  }
+  // Štítky na kartách = první služby z ceníku (profese je v řádku pod názvem, 23. 10. 2026)
 
   // Volné termíny karet (freeSlotServices, slotTimesOf) jsou načtené výš – před řazením.
 
@@ -745,7 +738,7 @@ async function ServiceList({
                   variant="large"
                   hideBadges
                   categoryName={catName[service.category]}
-                  subcatNames={subsByService[service.id] ?? []}
+                  subcatNames={(itemsByService[service.id] ?? []).slice(0, 3).map((it) => it.name)}
                   hasFreeSlot={freeSlotServices.has(service.id)}
                   freeSlots={slotTimesOf[service.id] ?? []}
                   isFavorited={favSet.has(pid)}
