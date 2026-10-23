@@ -330,7 +330,7 @@ export default function PriceList({
           úkony; co je hotové, zůstává, jak si to poskytovatel nastavil. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
         <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-bold text-slate-800">Rezervační záloha od zákazníka</p>
+          <p className="text-[13px] font-bold text-slate-800">Rezervační poplatek od zákazníka</p>
           <p className="text-[11.5px] leading-relaxed text-slate-500">
             Předvyplní se u každého nového úkonu. U konkrétní služby ji pak můžete změnit nebo vypnout.
           </p>
@@ -409,14 +409,14 @@ export default function PriceList({
             {empty && !editorOpenFor(sub.id) && (
               <button
                 type="button"
-                onClick={() => setEditor({ kind: 'new', subcategoryId: sub.id, subcategoryName: sub.name, prefillName: '' })}   /* název oboru NENÍ název úkonu — necháme prázdné, ať se ukáže našeptávač */
+                onClick={() => setEditor({ kind: 'new', subcategoryId: sub.id, subcategoryName: sub.name, prefillName: sub.name })}   /* první úkon = název oboru (Matej 22. 10. 2026: nepsat znovu); jde přepsat */
                 className="flex w-full items-center gap-2.5 px-4 py-3.5 text-left transition hover:bg-emerald-50/50"
               >
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
                   <Plus className="h-4 w-4" />
                 </span>
                 <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-slate-700">Doplňte cenu</span>
+                  <span className="block text-sm font-semibold text-slate-700">Doplňte cenu za „{sub.name}“</span>
                   <span className="block text-xs text-slate-400">
                     Zákazník si tuhle službu objedná, až bude mít cenu a délku.
                   </span>

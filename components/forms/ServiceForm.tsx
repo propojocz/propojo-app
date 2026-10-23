@@ -1,8 +1,10 @@
 'use client'
 // components/forms/ServiceForm.tsx — model „karta + ceník"
 //
-// PRVNÍ KROK JE ZÁMĚRNĚ HOLÝ. Poskytovatel vyplní tři věci — jak se má
-// zobrazovat, co dělá a kde působí — a jde dál. Popis, podtitul, telefon
+// PRVNÍ KROK JE ZÁMĚRNĚ HOLÝ (zjednodušeno 22. 10. 2026, Matej: „nic dvakrát“).
+// Poskytovatel napíše, co dělá (jedno pole najde obor i kategorii), vybere jednu
+// adresu (předvyplněná z profilu) a jde dál. Název karty se předvyplní jménem
+// z profilu – obor se tak nepíše do názvu, oboru i ceníku znovu. Popis, podtitul, telefon
 // a fotky jsou schované pod „Doplnit teď", protože nic z toho není potřeba
 // k tomu, aby nabídka fungovala. Zbytek si Propojo poskládá samo: tagy
 // z podkategorií, cenu z ceníku, nejbližší termín z kalendáře.
@@ -21,8 +23,9 @@ import { z } from 'zod'
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle2, AlertCircle, Loader2, ChevronRight, ChevronDown, Store, Home, Lightbulb, Eye, ListChecks, CalendarDays, Plus, Sparkles } from 'lucide-react'
+import { CheckCircle2, AlertCircle, Loader2, ChevronRight, ChevronDown, Store, Home, Eye, ListChecks, CalendarDays, Plus, Sparkles, Search } from 'lucide-react'
 import { createService, updateService } from '@/lib/actions/services'
+import { expandSearch, normalizeText } from '@/lib/search'
 import { createOwnSubcategory } from '@/lib/actions/subcategories'
 import type { Service, ServiceItem } from '@/types/database'
 import { createClient, getBrowserUser } from '@/lib/supabase/client'
@@ -48,7 +51,7 @@ const schema = z.object({
   subcategory_ids: z.array(z.string()).optional(),
   service_type: z.string().optional(),
   phone: z.string().max(30).nullable().optional(),
-  city: z.string().min(2, 'Zadejte město').max(100),
+  city: z.string().min(2, 'Vyberte adresu ze seznamu (nebo aspoň obec)').max(100),
   city_lat: z.number().nullable().optional(),
   city_lng: z.number().nullable().optional(),
   image_url: z.string().optional(),
@@ -89,6 +92,14 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
   // Karta bez adresy dědí adresu z profilu. Tenhle přepínač otevře pole,
   // když má nabídka adresu vlastní (druhá pobočka).
   const [vlastniAdresa, setVlastniAdresa] = useState(false)
+  // Bez přesné adresy (nový dům, nechci ji zadávat) → jen obec
+  const [jenObec, setJenObec] = useState(false)
+  // Hledání oboru jedním polem („stavba pergol“ → obor i kategorie)
+  const [oborQ, setOborQ] = useState('')
+  // Celá mřížka kategorií (volná ruka) – po výběru oboru se sbalí
+  const [vsechnyKategorie, setVsechnyKategorie] = useState(false)
+  // Název karty se předvyplní z profilu; pole se otevře na „Změnit“
+  const [upravaNazvu, setUpravaNazvu] = useState(mode === 'edit')
   // Vlastní podkategorie („Nevidím svou službu")
   const [ownSubOpen, setOwnSubOpen] = useState(false)
   const [ownSubName, setOwnSubName] = useState('')
@@ -180,6 +191,18 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
       const mesto = (data as any)?.city
       if (mode === 'create' && mesto && !watch('city')) {
         setValue('city', mesto, { shouldValidate: true })
+        // Souřadnice z adresy profilu (vzdálenost a dojezd i bez další adresy na kartě)
+        if ((data as any)?.address_lat != null && (data as any)?.address_lng != null) {
+          setValue('city_lat', Number((data as any).address_lat))
+          setValue('city_lng', Number((data as any).address_lng))
+        }
+      }
+      // Název karty = jméno firmy / vaše jméno z profilu (obor se ukáže pod ním)
+      const jmeno = (data as any)?.company_name || (data as any)?.display_name || (data as any)?.full_name || ''
+      if (mode === 'create' && jmeno && !(watch('title') ?? '').trim()) {
+        setValue('title', String(jmeno).slice(0, 100), { shouldValidate: true })
+      } else if (mode === 'create' && !jmeno) {
+        setUpravaNazvu(true)
       }
     }
     load()
@@ -202,6 +225,40 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
   useEffect(() => { loadItems() }, [loadItems])
 
   const activeCat = categories.find(c => c.slug === selectedCategory)
+
+  // „Co nabízíte?“ – obory ze všech kategorií podle textu (bez diakritiky)
+  const oborHits = (() => {
+    const q = normalizeText(oborQ.trim())
+    if (q.length < 2) return []
+    // Každé slovo zkrácené o koncovku („pergola“ najde „pergoly“, „kadernik“ „kadeřnictví“)
+    const stems = q.split(/\s+/).filter(Boolean).map(w => (w.length >= 5 ? w.slice(0, w.length - 2) : w))
+    const hit = (name: string) => { const n = normalizeText(name); return stems.every(st => n.includes(st)) }
+    const all = categories.flatMap(c => c.subcategories.map(s => ({ cat: c, sub: s })))
+    let found = all.filter(x => hit(x.sub.name) || hit(x.cat.name))
+    // Nic přesně? Příbuzná slova z chytrého hledání („elektrikář“ → elektroinstalace, zásuvky…)
+    if (found.length === 0) {
+      const pats = expandSearch(oborQ).map(normalizeText)
+      found = all.filter(x => pats.some(pt => normalizeText(x.sub.name).includes(pt)))
+    }
+    return found
+      .sort((a, b) => Number(normalizeText(b.sub.name).startsWith(q)) - Number(normalizeText(a.sub.name).startsWith(q)))
+      .slice(0, 8)
+  })()
+  const pickObor = (catSlug: string, subId: string) => {
+    if (selectedCategory !== catSlug) {
+      // Karta = jedna kategorie; jiná kategorie začíná s novým výběrem oborů
+      setValue('category', catSlug, { shouldValidate: true })
+      setValue('subcategory_ids', [subId])
+      setValue('subcategory_id', subId)
+      setValue('service_type', '')
+    } else if (!selectedSubIds.includes(subId)) {
+      const next = [...selectedSubIds, subId]
+      setValue('subcategory_ids', next)
+      setValue('subcategory_id', next[0] ?? '')
+    }
+    setOborQ('')
+    setVsechnyKategorie(false)
+  }
   const toggleSub = (id: string) => {
     const exists = selectedSubIds.includes(id)
     const next = exists ? selectedSubIds.filter(x => x !== id) : [...selectedSubIds, id]
@@ -239,7 +296,6 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
   const podtitulZOboru = previewSubNames.slice(0, 3).join(' · ')
   // Přepsal si ho ručně? Pak platí jeho verze.
   const vlastniPodtitul = (watch('subtitle') ?? '').trim()
-  const [upravaPodtitulu, setUpravaPodtitulu] = useState(false)
 
   // ── Vlastní podkategorie („Nevidím svou službu") ──
   // Vytvoří se jako NESCHVÁLENÁ: na kartě funguje hned, do zákaznického
@@ -278,7 +334,11 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
     // nevyplňuje. Kdo si ho přepsal ručně, má přednost.
     const podtitul = (data.subtitle ?? '').trim() || podtitulZOboru || null
 
-    const payload = { ...data, description: popis, subtitle: podtitul }
+    // Výjezd: přesná adresa slouží jen k výpočtům, veřejně jen obec (Matej 22. 10. 2026)
+    const payload = {
+      ...data, description: popis, subtitle: podtitul,
+      ...(data.location_type === 'u_zakaznika' ? { address_public: false } : {}),
+    }
 
     const result = serviceId
       ? await updateService(serviceId, payload as any)
@@ -355,11 +415,11 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
   // takže neblokujeme — bez rozvrhu chodí jen poptávky, karta funguje dál.
   const [krok3Navstiven, setKrok3Navstiven] = useState(mode === 'edit')
 
+  // 3 kroky (22. 10. 2026): Co a kde → Ceny → Termíny a zveřejnění
   const KROKY = [
-    { c: 1, nadpis: 'Co nabízíte', hotovo: krok1Hotovy, pruchozi: krok1Hotovy },
-    { c: 2, nadpis: 'Služby a ceny', hotovo: krok2Hotovy, pruchozi: krok2Hotovy },
-    { c: 3, nadpis: 'Termíny', hotovo: krok3Navstiven, pruchozi: true },
-    { c: 4, nadpis: 'Zveřejnění', hotovo: false, pruchozi: false },
+    { c: 1, nadpis: 'Co a kde', hotovo: krok1Hotovy, pruchozi: krok1Hotovy },
+    { c: 2, nadpis: 'Ceny', hotovo: krok2Hotovy, pruchozi: krok2Hotovy },
+    { c: 3, nadpis: 'Termíny a zveřejnění', hotovo: krok3Navstiven, pruchozi: true },
   ]
   // Dopředu jen přes průchozí kroky; v režimu úprav je vše odemčené.
   const lzeNaKrok = (c: number) =>
@@ -412,42 +472,9 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
           preview
         />
       </div>
-      {/* Podtitul si appka skládá sama — kdo ho chce jiný, přepíše si ho tady.
-          Schválně nenápadné: 9 z 10 lidí nemá důvod o tom vůbec přemýšlet. */}
-      {podtitulZOboru && (
-        <div className="mt-2">
-          {upravaPodtitulu ? (
-            <div className="space-y-1.5">
-              <input
-                type="text" maxLength={80} autoFocus
-                placeholder={podtitulZOboru}
-                defaultValue={vlastniPodtitul}
-                onChange={e => setValue('subtitle', e.target.value || null)}
-                className="form-input text-sm"
-              />
-              <button
-                type="button"
-                onClick={() => setUpravaPodtitulu(false)}
-                className="text-xs font-semibold text-emerald-600 hover:text-emerald-700"
-              >
-                Hotovo
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setUpravaPodtitulu(true)}
-              className="text-xs text-slate-400 underline hover:text-slate-600"
-            >
-              Upravit řádek pod názvem
-            </button>
-          )}
-        </div>
-      )}
-
       {!wImage && (
         <p className="mt-2.5 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
-          Nabídky s fotkou dostávají výrazně víc kliknutí. Fotku přidáte v části „Doplnit teď" — nebo kdykoli později.
+          Nabídky s fotkou dostávají výrazně víc kliknutí. Fotku přidáte v části „Doplnit teď“ – nebo kdykoli později.
         </p>
       )}
       {serviceId && cheapest == null && activeItems.length === 0 && (
@@ -474,36 +501,44 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
         {/* ══ KROK 1 — CO NABÍZÍTE ══ */}
         <div className={krok === 1 ? 'space-y-6' : 'hidden'}>
 
-        {/* Tip */}
-        <div className="flex items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-          <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-          <p className="text-xs leading-relaxed text-slate-600">
-            <strong className="text-slate-800">Jedna nabídka = jeden hlavní obor.</strong>{' '}
-            Jednotlivé služby a jejich ceny přidáte v dalším kroku.
-            <span className="mt-0.5 block text-slate-400">Např. Kadeřnictví → pánský střih, barvení, foukaná…</span>
-          </p>
-        </div>
-
-        {/* 1. JAK SE CHCETE ZOBRAZOVAT */}
-        <div className="space-y-1.5">
-          <label className="form-label flex items-center justify-between">
-            <span>Jak se chcete zákazníkům zobrazovat? *</span>
-            <span className="text-xs font-normal text-slate-400">{wTitle.length} / 100</span>
-          </label>
-          <input {...f('title')} maxLength={100} placeholder="např. Salon Bella" className={`form-input ${errors.title ? 'form-input-error' : ''}`} />
-          <p className="text-xs text-slate-400">Může to být název firmy, salonu, nebo prostě vaše jméno.</p>
-          {errors.title && <p className="form-error">{errors.title.message}</p>}
-        </div>
-
-        {/* 2. CO NABÍZÍTE — kategorie a obory */}
+        {/* 1. CO NABÍZÍTE — jedno pole najde obor i kategorii; mřížka kategorií jako volná ruka */}
         <div className="space-y-3">
           <label className="form-label">Co nabízíte? *</label>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text" value={oborQ} onChange={e => setOborQ(e.target.value)}
+              placeholder={selectedSubIds.length > 0 ? 'Přidat další obor – např. zámková dlažba…' : 'Napište, co děláte – např. stavba pergol, střih, malování…'}
+              className="form-input pl-9"
+              autoComplete="off"
+            />
+            {oborQ.trim().length >= 2 && (
+              <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+                {oborHits.length > 0 ? oborHits.map(({ cat, sub }) => (
+                  <button key={sub.id} type="button" onClick={() => pickObor(cat.slug, sub.id)}
+                    className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm hover:bg-emerald-50">
+                    <CategoryIcon slug={cat.slug} boxed className="h-3.5 w-3.5" boxClassName="h-7 w-7 shrink-0 rounded-lg" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-semibold text-slate-800">{sub.name}</span>
+                      <span className="block truncate text-xs text-slate-400">{cat.name}</span>
+                    </span>
+                    {selectedSubIds.includes(sub.id) && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />}
+                  </button>
+                )) : (
+                  <p className="px-3 py-2.5 text-xs leading-relaxed text-slate-500">
+                    Nic takového v seznamu nemáme. Vyberte níže kategorii a přidejte vlastní obor („Nevidím svou službu“).
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
           {loadingCats ? (
             <div className="flex items-center gap-2 text-sm text-slate-400">
               <Loader2 className="h-4 w-4 animate-spin" /> Načítám kategorie…
             </div>
           ) : (
             <>
+              {(!selectedCategory || vsechnyKategorie) ? (
               <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2">
                 {categories.map(cat => {
                   const isSelected = selectedCategory === cat.slug
@@ -530,12 +565,24 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
                   )
                 })}
               </div>
+              ) : activeCat ? (
+                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                  <CategoryIcon slug={activeCat.slug} boxed className="h-3.5 w-3.5" boxClassName="h-7 w-7 shrink-0 rounded-lg" />
+                  <span className="min-w-0 flex-1 text-sm font-semibold text-slate-700">{activeCat.name}</span>
+                  <button type="button" onClick={() => setVsechnyKategorie(true)} className="text-xs font-bold text-emerald-600 underline hover:text-emerald-700">
+                    Jiná kategorie
+                  </button>
+                </div>
+              ) : null}
+              {!selectedCategory && (
+                <p className="text-xs text-slate-400">Nebo vyberte kategorii a v ní obory – zakliknout jde i víc.</p>
+              )}
 
               <AnimatePresence>
                 {activeCat && (
                   <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
                     <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-                      <ChevronRight className="h-3 w-3" /> Obor — vyberte i více
+                      <ChevronRight className="h-3 w-3" /> Obory – zaškrtnuté uvidí zákazník na kartě, přidat jde i další
                       <InfoTip align="left">
                         Podle vybraných oborů se vám <strong>v ceníku nabídnou konkrétní
                         úkony</strong> z našeho katalogu — nemusíte je vypisovat ručně.
@@ -680,120 +727,111 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
             })}
           </div>
 
-          {/* Město */}
-          <div className="space-y-1.5">
-            <SearchAutocomplete
-              mode="obce"
-              defaultValue={watch('city')}
-              placeholder="Město nebo obec — začněte psát a vyberte ze seznamu…"
-              onPickObec={(item) => {
-                setValue('city', item.obec, { shouldValidate: true })
-                setValue('city_lat', item.latitude)
-                setValue('city_lng', item.longitude)
-              }}
-              onFreeText={(text) => {
-                setValue('city', text, { shouldValidate: true })
-                setValue('city_lat', null)
-                setValue('city_lng', null)
-              }}
-            />
-            {errors.city && <p className="form-error">{errors.city.message}</p>}
-            <p className="text-xs text-slate-400">
-              Podle města vás zákazníci najdou ve vyhledávání.
-              {locationType === 'u_zakaznika'
-                ? ' Vyberte obec ze seznamu (ne jen napište) — jinak nepůjde spočítat dojezdovou vzdálenost.'
-                : ' Máte-li provozovnu, doplní se samo z adresy níže.'}
-            </p>
-          </div>
+          {/* Adresa – jedno pole (Matej 22. 10. 2026): obec se doplní z adresy, z adresy se počítá
+              vzdálenost, dojezd i doprava. Předvyplní se z profilu, dokud ji poskytovatel nezmění. */}
+          <div className="space-y-2">
+            <label className="form-label">
+              {locationType === 'u_poskytovatele' ? 'Adresa provozovny *' : 'Adresa, odkud vyjíždíte *'}
+            </label>
 
-          {/* Adresa provozovny */}
-          <AnimatePresence>
-            {/* Adresa se nabízí u OBOU možností. Kdo má provozovnu, ji zadá
-                skoro určitě. Kdo jezdí za zákazníky, ji mít může taky — dílna
-                nebo kancelář je důkaz, že za nabídkou někdo stojí. Rozdíl je
-                jen v tom, jak moc ji doporučujeme. */}
-            {true && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-2 overflow-hidden">
-                <label className="form-label">
-                  Přesná adresa provozovny
-                  {locationType === 'u_zakaznika' && <span className="font-normal text-slate-400"> (volitelné)</span>}
-                </label>
-
-                {/* Zděděná adresa z profilu. Kdo má jednu provozovnu, nevyplňuje
-                    nic — adresa se bere z profilu a při stěhování ji mění na
-                    jednom místě. Vlastní adresu potřebuje jen druhá pobočka. */}
-                {!vlastniAdresa && !watch('address') && profile?.address ? (
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Z vašeho profilu</p>
-                      <p className="truncate text-sm font-semibold text-slate-800">{profile.address}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setVlastniAdresa(true)}
-                      className="shrink-0 text-xs font-bold text-emerald-600 underline hover:text-emerald-700"
-                    >
-                      Tahle nabídka má jinou adresu
-                    </button>
-                  </div>
-                ) : (
-                <AddressInput
-                  defaultValue={watch('address')}
-                  onPick={(a: { address: string; lat: number; lng: number; municipality: string }) => {
-                    setValue('address', a.address, { shouldValidate: true })
-                    setValue('address_lat', a.lat)
-                    setValue('address_lng', a.lng)
-                    if (!watch('city') && a.municipality) {
-                      setValue('city', a.municipality, { shouldValidate: true })
-                    }
-                  }}
-                  onFreeText={(text: string) => {
-                    setValue('address', text || null)
-                    setValue('address_lat', null)
-                    setValue('address_lng', null)
-                  }}
-                />
-                )}
-
-                {vlastniAdresa && profile?.address && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setVlastniAdresa(false)
-                      setValue('address', null)
-                      setValue('address_lat', null)
-                      setValue('address_lng', null)
-                    }}
-                    className="text-xs text-slate-400 underline hover:text-slate-600"
-                  >
-                    Zpět na adresu z profilu
-                  </button>
-                )}
-                <p className="text-xs leading-relaxed text-slate-400">
-                  {locationType === 'u_zakaznika'
-                    ? 'Máte dílnu nebo kancelář? Zadejte adresu a zákazníkům se ukáže i s mapou. Nemáte-li kam pozvat, nechte prázdné.'
-                    : 'Vyberte adresu ze seznamu — zákazník pak uvidí špendlík na mapě a trefí k vám napoprvé.'}
-                </p>
-
-                <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <input
-                    type="checkbox"
-                    checked={watch('address_public') ?? true}
-                    onChange={(e) => setValue('address_public', e.target.checked)}
-                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                  />
-                  <span>
-                    <span className="block text-sm font-semibold text-slate-800">Zobrazit adresu veřejně</span>
-                    <span className="block text-xs leading-relaxed text-slate-500">
-                      {locationType === 'u_zakaznika'
-                        ? 'Adresu uvidí kdokoli na vaší nabídce. Pracujete-li z domova, nechte vypnuté — ukáže se jen město.'
-                        : 'Když vypnete, zákazníci uvidí jen město — přesnou adresu dostanou až po objednání. Hodí se, když pracujete z domova.'}
-                    </span>
-                  </span>
-                </label>
-              </motion.div>
+            {!vlastniAdresa && !jenObec && !watch('address') && profile?.address ? (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Z vašeho profilu</p>
+                  <p className="truncate text-sm font-semibold text-slate-800">{profile.address}</p>
+                </div>
+                <button type="button" onClick={() => setVlastniAdresa(true)}
+                  className="shrink-0 text-xs font-bold text-emerald-600 underline hover:text-emerald-700">
+                  Změnit
+                </button>
+              </div>
+            ) : jenObec ? (
+              <SearchAutocomplete
+                mode="obce"
+                defaultValue={watch('city')}
+                placeholder="Obec – začněte psát a vyberte ze seznamu…"
+                onPickObec={(item) => {
+                  setValue('city', item.obec, { shouldValidate: true })
+                  setValue('city_lat', item.latitude)
+                  setValue('city_lng', item.longitude)
+                }}
+                onFreeText={(text) => {
+                  setValue('city', text, { shouldValidate: true })
+                  setValue('city_lat', null)
+                  setValue('city_lng', null)
+                }}
+              />
+            ) : (
+              <AddressInput
+                defaultValue={watch('address')}
+                onPick={(a: { address: string; lat: number; lng: number; municipality: string }) => {
+                  setValue('address', a.address, { shouldValidate: true })
+                  setValue('address_lat', a.lat)
+                  setValue('address_lng', a.lng)
+                  // Obec karty = obec adresy (podle ní vás najdou ve vyhledávání)
+                  if (a.municipality) setValue('city', a.municipality, { shouldValidate: true })
+                  setValue('city_lat', a.lat)
+                  setValue('city_lng', a.lng)
+                }}
+                onFreeText={(text: string) => {
+                  setValue('address', text || null)
+                  setValue('address_lat', null)
+                  setValue('address_lng', null)
+                }}
+              />
             )}
-          </AnimatePresence>
+            {errors.city && <p className="form-error">{errors.city.message}</p>}
+
+            <p className="text-xs leading-relaxed text-slate-400">
+              {locationType === 'u_zakaznika'
+                ? <>Zákazníci uvidí jen obec{watch('city') ? <> (<strong className="text-slate-600">{watch('city')}</strong>)</> : null}. Z adresy počítáme vzdálenost k zákazníkům a dopravu.</>
+                : <>Zákazník uvidí adresu i s mapou a trefí k vám napoprvé{watch('city') ? <> · obec <strong className="text-slate-600">{watch('city')}</strong></> : null}.</>}
+            </p>
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              {(vlastniAdresa || jenObec) && profile?.address && (
+                <button type="button"
+                  onClick={() => {
+                    setVlastniAdresa(false); setJenObec(false)
+                    setValue('address', null); setValue('address_lat', null); setValue('address_lng', null)
+                    if (profile?.city) setValue('city', profile.city, { shouldValidate: true })
+                    setValue('city_lat', profile?.address_lat != null ? Number(profile.address_lat) : null)
+                    setValue('city_lng', profile?.address_lng != null ? Number(profile.address_lng) : null)
+                  }}
+                  className="text-xs text-slate-400 underline hover:text-slate-600">
+                  Zpět na adresu z profilu
+                </button>
+              )}
+              {!jenObec && (vlastniAdresa || !profile?.address || !!watch('address')) && (
+                <button type="button"
+                  onClick={() => { setJenObec(true); setValue('address', null); setValue('address_lat', null); setValue('address_lng', null) }}
+                  className="text-xs text-slate-400 underline hover:text-slate-600">
+                  Nemám přesnou adresu – zadám jen obec
+                </button>
+              )}
+              {jenObec && (
+                <button type="button" onClick={() => setJenObec(false)} className="text-xs text-slate-400 underline hover:text-slate-600">
+                  Zadat přesnou adresu
+                </button>
+              )}
+            </div>
+
+            {locationType === 'u_poskytovatele' && (watch('address') || (!vlastniAdresa && profile?.address)) && !jenObec && (
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <input
+                  type="checkbox"
+                  checked={watch('address_public') ?? true}
+                  onChange={(e) => setValue('address_public', e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-slate-800">Zobrazit adresu veřejně</span>
+                  <span className="block text-xs leading-relaxed text-slate-500">
+                    Když vypnete, zákazníci uvidí jen obec – přesnou adresu dostanou až po potvrzení rezervace.
+                  </span>
+                </span>
+              </label>
+            )}
+          </div>
 
           {/* Dojezd */}
           <AnimatePresence>
@@ -825,6 +863,31 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
           </AnimatePresence>
         </div>
 
+        {/* Název karty – předvyplněný jménem z profilu, obor se ukáže pod ním (nepíše se znovu) */}
+        <div className="space-y-1.5">
+          {!upravaNazvu && (watch('title') ?? '').trim().length >= 3 ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Název na kartě</p>
+                <p className="truncate text-sm font-semibold text-slate-800">{watch('title')}</p>
+              </div>
+              <button type="button" onClick={() => setUpravaNazvu(true)} className="shrink-0 text-xs font-bold text-emerald-600 underline hover:text-emerald-700">
+                Změnit
+              </button>
+            </div>
+          ) : (
+            <>
+              <label className="form-label flex items-center justify-between">
+                <span>Název na kartě *</span>
+                <span className="text-xs font-normal text-slate-400">{wTitle.length} / 100</span>
+              </label>
+              <input {...f('title')} maxLength={100} placeholder="např. Truhlářství Novák, Salon Bella nebo vaše jméno" className={`form-input ${errors.title ? 'form-input-error' : ''}`} />
+              <p className="text-xs text-slate-400">Kdo jste – firma, salon nebo vaše jméno. Co děláte, se ukáže pod názvem z oborů.</p>
+            </>
+          )}
+          {errors.title && <p className="form-error">{errors.title.message}</p>}
+        </div>
+
         {/* ── NEPOVINNÉ: podtitul, popis, telefon, fotky ── */}
         <div className="rounded-2xl border border-slate-200">
           <button
@@ -833,9 +896,9 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
             className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left"
           >
             <span className="min-w-0">
-              <span className="block text-sm font-bold text-slate-800">Doplnit teď</span>
+              <span className="block text-sm font-bold text-slate-800">Doplnit teď (nepovinné)</span>
               <span className="block text-xs text-slate-500">
-                Popis, podtitul, telefon a fotky. Nic z toho není potřeba — dá se doplnit kdykoli později.
+                Fotky, popis, telefon a řádek pod názvem. Nic z toho není potřeba – dá se doplnit kdykoli později.
               </span>
             </span>
             <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${detailyOtevrene ? 'rotate-180' : ''}`} />
@@ -850,6 +913,19 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
                 className="overflow-hidden"
               >
                 <div className="space-y-5 border-t border-slate-100 p-4">
+
+                  {/* Řádek pod názvem – appka ho skládá z oborů, přepsat jde tady */}
+                  <div className="space-y-1.5">
+                    <label className="form-label">Řádek pod názvem <span className="font-normal text-slate-400">(volitelné)</span></label>
+                    <input
+                      type="text" maxLength={80}
+                      placeholder={podtitulZOboru || 'Složí se z vybraných oborů'}
+                      defaultValue={vlastniPodtitul}
+                      onChange={e => setValue('subtitle', e.target.value || null)}
+                      className="form-input"
+                    />
+                    <p className="text-xs text-slate-400">Když necháte prázdné, ukáže se „{podtitulZOboru || 'obory'}“.</p>
+                  </div>
 
                   {/* Popis */}
                   <div className="space-y-1.5">
@@ -918,7 +994,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
               <span>
                 Nabídka byla uložena.{' '}
                 {hasActiveSub
-                  ? 'Teď doplňte služby a ceny.'
+                  ? 'Teď doplňte ceny.'
                   : <strong>Zveřejní se zákazníkům, jakmile aktivujete předplatné.</strong>}
               </span>
             </motion.div>
@@ -929,7 +1005,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
         <button type="submit" disabled={submitState === 'loading'} className="btn-primary w-full">
           {submitState === 'loading' ? <><Loader2 className="h-4 w-4 animate-spin" /> Ukládám…</>
            : serviceId ? 'Uložit změny'
-           : <>Pokračovat na služby a ceny <ChevronRight className="h-4 w-4" /></>}
+           : <>Pokračovat na ceny <ChevronRight className="h-4 w-4" /></>}
         </button>
 
         </div>{/* konec kroku 1 */}
@@ -978,10 +1054,10 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
         <div className={krok === 3 ? 'space-y-4' : 'hidden'}>
           <div>
             <label className="form-label flex items-center gap-1.5">
-              <CalendarDays className="h-4 w-4 text-emerald-600" /> Kdy máte otevřeno
+              <CalendarDays className="h-4 w-4 text-emerald-600" /> Kdy máte otevřeno <span className="font-normal text-slate-400">(nepovinné)</span>
             </label>
             <p className="text-xs text-slate-400">
-              Zákazník uvidí jen termíny, které vám sedí. Kdykoli to změníte — i zablokujete dovolenou.
+              Zákazník uvidí jen termíny, které vám sedí. Můžete nastavit hned, nebo kdykoli později – nabídku jde zveřejnit i bez toho.
             </p>
           </div>
 
@@ -1001,20 +1077,11 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
           </div>
         </div>
 
-        {/* ══ KROK 4 — ZVEŘEJNĚNÍ ══ */}
-        <div className={krok === 4 ? 'space-y-4' : 'hidden'}>
+        {/* ══ ZVEŘEJNĚNÍ – součást kroku 3 (dřív samostatný krok 4) ══ */}
+        <div className={krok === 3 ? 'space-y-4 border-t border-slate-100 pt-6' : 'hidden'}>
           <div>
             <label className="form-label">Zkontrolujte a zveřejněte</label>
-            <p className="text-xs text-slate-400">Takhle vás uvidí zákazník v seznamu nabídek.</p>
-          </div>
-
-          <div className="pointer-events-none max-w-sm select-none">
-            <ServiceCard
-              service={previewService}
-              categoryName={activeCat?.name}
-              subcatNames={previewSubNames}
-              preview
-            />
+            <p className="text-xs text-slate-400">Náhled karty vidíte vpravo (na mobilu nahoře). Všechno jde později upravit.</p>
           </div>
 
           {/* Značka (salon, firma) se tady dřív připínala — vyhozeno.
@@ -1027,7 +1094,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
               ['Název', wTitle.trim() || '—'],
               ['Co děláte', previewSubNames.join(', ') || 'nevybráno'],
               ['Kde', locationType === 'u_poskytovatele'
-                ? `U vás — ${wCity || '—'}`
+                ? `U vás – ${watch('address') || (!vlastniAdresa && profile?.address) || wCity || '—'}`
                 : `Výjezd do ${watch('radius_km') ?? '—'} km od ${wCity || '—'}`],
               ['Ceník', activeItems.length > 0
                 ? `${activeItems.length} ${activeItems.length === 1 ? 'úkon' : activeItems.length < 5 ? 'úkony' : 'úkonů'}`
@@ -1056,7 +1123,7 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
             className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
           >
             <CheckCircle2 className="h-4 w-4" />
-            {hasActiveSub ? 'Hotovo — přejít na Moje nabídky' : 'Uložit a přejít k předplatnému'}
+            {hasActiveSub ? 'Hotovo – přejít na Moje nabídky' : 'Uložit a přejít k předplatnému'}
           </button>
         </div>
 
@@ -1073,16 +1140,15 @@ export default function ServiceForm({ mode, initialData, onSuccess, hasActiveSub
               <p className="text-sm font-bold text-slate-900">
                 {krok === 1 ? (krok1Hotovy ? 'Základ je hotový' : 'Rozpracováno')
                   : krok === 2 ? (krok2Hotovy ? 'Ceník hotový' : 'Chybí ceny')
-                  : krok === 3 ? 'Rozvrh' : 'Připraveno'}
+                  : 'Připraveno'}
               </p>
               <p className="text-xs text-slate-500">
-                {krok === 1 ? (krok1Hotovy ? 'Teď služby a ceny — u každé cena a délka.' : 'Doplňte název, obor a město.')
-                  : krok === 2 ? (krok2Hotovy ? 'Zbývá říct, kdy máte čas.' : 'Bez ceny si u vás zákazník nemůže objednat.')
-                  : krok === 3 ? 'Pak už jen zkontrolovat a zveřejnit.'
+                {krok === 1 ? (krok1Hotovy ? 'Teď ceny – u každého oboru jedna.' : 'Vyberte obor a adresu.')
+                  : krok === 2 ? (krok2Hotovy ? 'Zbývá zveřejnit (otevírací doba je nepovinná).' : 'Bez ceny si u vás zákazník nemůže objednat.')
                   : 'Zkontrolujte souhrn a nabídku zveřejněte.'}
               </p>
             </div>
-            {krok < 4 && (
+            {krok < 3 && (
               <button type="button" onClick={() => naKrok(krok + 1)}
                 disabled={!lzeNaKrok(krok + 1)}
                 className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40">

@@ -208,7 +208,8 @@ export default async function ServiceDetailPage({ params }: Props) {
   // Adresu ukazujeme i u karet s výjezdem — dílna nebo kancelář je důkaz,
   // že za nabídkou někdo stojí. Dřív se schovávala všem, kdo jezdí za zákazníkem.
   const hasEstablishment = s.location_type === 'u_poskytovatele' || s.location_type === 'oboji'
-  const showAddress = addressPublic && !!adresa
+  // Výjezd: přesná adresa jen pro výpočty, veřejně jen obec (Matej 22. 10. 2026)
+  const showAddress = addressPublic && !!adresa && s.location_type !== 'u_zakaznika'
   const showMap = showAddress && adresaLat != null && adresaLng != null
 
   // JSON-LD
