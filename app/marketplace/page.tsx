@@ -718,7 +718,7 @@ async function ServiceList({
         <div className="flex flex-col gap-6 lg:flex-row">
           <aside className="lg:w-64 lg:shrink-0">{sidebar}</aside>
           {/* Velké karty: mobil 1, tablet 2, počítač 3 vedle sebe */}
-          <div className="grid min-w-0 flex-1 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid min-w-0 flex-1 grid-cols-1 content-start gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {sorted.map((service, i) => {
               const pid = (service.profiles as any)?.id ?? service.provider_id
               // Kartě předáváme profil s ŽIVÝM hodnocením — uložené profiles.rating
