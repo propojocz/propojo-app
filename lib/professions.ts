@@ -12,7 +12,8 @@ function stemsOf(q: string): string[] {
   return normalizeText(q.trim())
     .split(/\s+/)
     .filter(Boolean)
-    .map((w) => (w.length >= 5 ? w.slice(0, w.length - 2) : w))
+    // 6+ znaků bez 2 posledních, 5 znaků bez posledního („holic“ → „holi“, ne „hol“ – jinak by našel „psycHOLog“)
+    .map((w) => (w.length >= 6 ? w.slice(0, w.length - 2) : w.length === 5 ? w.slice(0, 4) : w))
 }
 
 /**
